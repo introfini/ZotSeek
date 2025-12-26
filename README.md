@@ -1,6 +1,6 @@
-# ZotSeek - Semantic Search for Zotero
+# ZotSeek: AI-Powered Semantic Search for Zotero
 
-A Zotero plugin that adds **AI-powered semantic search** to your library. Find similar papers based on meaning, not just keywords.
+Find similar papers by **meaning**, not just keywords. 100% local, no data leaves your machine.
 
 > **Status:** ✅ Stable release with Transformers.js running locally in Zotero 8
 
@@ -456,4 +456,4 @@ MIT License - see [LICENSE](LICENSE)
 
 ---
 
-*ZotSeek is built by José Fernandes for semantic search in academic research.*
+*ZotSeek: AI-Powered Semantic Search for Zotero — Built by José Fernandes*
