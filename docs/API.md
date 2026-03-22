@@ -132,6 +132,21 @@ interface VectorStoreStats {
 }
 ```
 
+### `compactDatabase()`
+
+Compact the database file to reclaim unused space. Useful after large deletions or schema migrations. Cannot be called while indexing is in progress.
+
+```js
+const result = await Zotero.ZotSeek.compactDatabase();
+// result: "Compacted: 1701.8 MB -> 850.9 MB (saved 850.9 MB)"
+```
+
+**Returns:** `Promise<string>` - Human-readable summary of before/after sizes.
+
+**Throws:** If called during active indexing or if the store is not ready.
+
+> **Note:** This method is on `Zotero.ZotSeek` (not `Zotero.ZotSeek.api`).
+
 ### `isReady()`
 
 Check if the embedding pipeline is loaded and ready. Useful to show loading state in your UI, but not required before calling `search()`.
