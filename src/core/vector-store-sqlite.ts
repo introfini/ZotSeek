@@ -69,7 +69,7 @@ export interface VectorStoreStats {
 // Database configuration
 const DB_NAME = 'zotseek';           // Schema name when attached
 const DB_FILE = 'zotseek.sqlite';    // Database filename
-const SCHEMA_VERSION = 4;            // Bumped for passage-level location support
+const SCHEMA_VERSION = 5;            // Bumped for base64 embedding storage
 
 // Legacy table prefix (for migration from old schema)
 const LEGACY_TABLE_PREFIX = 'zs_';
@@ -173,6 +173,9 @@ export class VectorStoreSQLite {
 
       // Migrate to v4 (add location columns) if needed
       await this.migrateToV4();
+
+      // Migrate to v5 (base64 embedding storage) if needed
+      await this.migrateToV5();
 
       this.initialized = true;
       this.logger.info('SQLite store initialized successfully');
@@ -416,6 +419,44 @@ export class VectorStoreSQLite {
     }
   }
 
+  private async migrateToV5(): Promise<void> {
+    let currentVersion = 0;
+    try {
+      const versionResult = await Zotero.DB.valueQueryAsync(
+        `SELECT value FROM ${DB_NAME}.metadata WHERE key = 'schema_version'`
+      );
+      currentVersion = parseInt(versionResult, 10) || 0;
+    } catch (e) {
+      this.logger.debug(`Could not read schema version: ${e}`);
+    }
+
+    if (currentVersion >= 5) {
+      this.logger.debug('Schema already at v5 or higher, skipping migration');
+      return;
+    }
+
+    this.logger.info(`Migrating schema from v${currentVersion} to v5 (base64 embeddings)...`);
+
+    try {
+      // No schema change needed - column stays TEXT
+      // New writes use base64, reads handle both formats
+      // Existing JSON data will be converted to base64 on next re-index
+
+      await Zotero.DB.queryAsync(`
+        INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value)
+        VALUES ('schema_version', '5')
+      `);
+
+      const rowCount = await Zotero.DB.valueQueryAsync(
+        `SELECT COUNT(*) FROM ${DB_NAME}.embeddings`
+      );
+      this.logger.info(`Schema migration to v5 completed. ${rowCount} existing chunks use JSON format.`);
+      this.logger.info('Re-index your library to convert to base64 format (~73% embedding size reduction).');
+    } catch (error: any) {
+      this.logger.error(`Migration to v5 failed: ${error?.message || error}`);
+    }
+  }
+
   /**
    * Create database schema in the attached database
    */
@@ -498,29 +539,47 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Convert embedding array to JSON string for storage
+   * Convert embedding array to base64 string for storage
+   * Stores raw Float32Array bytes as base64 (4096 bytes for 768 dims vs ~15000 JSON)
    */
-  private embeddingToString(embedding: number[]): string {
-    return JSON.stringify(embedding);
+  private embeddingToBase64(embedding: number[]): string {
+    const float32 = new Float32Array(embedding);
+    const bytes = new Uint8Array(float32.buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
   }
 
   /**
    * Convert stored string back to embedding array
+   * Handles both base64 (v5+) and legacy JSON TEXT (v4 and earlier)
    */
-  private stringToEmbedding(str: string): number[] {
-    if (!str) {
-      this.logger.error('stringToEmbedding received null/undefined string');
+  private base64ToEmbedding(data: string): number[] {
+    if (!data) {
+      this.logger.error('base64ToEmbedding received null/undefined data');
       return [];
     }
+
     try {
-      const parsed = JSON.parse(str);
-      if (!Array.isArray(parsed)) {
-        this.logger.error(`stringToEmbedding: parsed value is not an array: ${typeof parsed}`);
-        return [];
+      // Detect format: JSON starts with '[', base64 does not
+      if (data.startsWith('[')) {
+        // Legacy JSON format
+        const parsed = JSON.parse(data);
+        if (!Array.isArray(parsed)) {
+          this.logger.error('base64ToEmbedding: JSON parsed to non-array');
+          return [];
+        }
+        return parsed;
       }
-      return parsed;
+
+      // Base64 format
+      const binary = atob(data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const float32 = new Float32Array(bytes.buffer);
+      return Array.from(float32);
     } catch (e) {
-      this.logger.error(`stringToEmbedding failed to parse: ${e}`);
+      this.logger.error(`base64ToEmbedding failed: ${e}`);
       return [];
     }
   }
@@ -531,7 +590,7 @@ export class VectorStoreSQLite {
   async put(embedding: PaperEmbedding): Promise<void> {
     await this.ensureInit();
 
-    const embeddingStr = this.embeddingToString(embedding.embedding);
+    const embeddingStr = this.embeddingToBase64(embedding.embedding);
     const chunkIndex = embedding.chunkIndex ?? 0;
 
     await Zotero.DB.queryAsync(`
@@ -582,7 +641,7 @@ export class VectorStoreSQLite {
     // Use Zotero's transaction for better performance
     await Zotero.DB.executeTransaction(async () => {
       for (const embedding of embeddings) {
-        const embeddingStr = this.embeddingToString(embedding.embedding);
+        const embeddingStr = this.embeddingToBase64(embedding.embedding);
         const chunkIndex = embedding.chunkIndex ?? 0;
 
         await Zotero.DB.queryAsync(`
@@ -734,7 +793,7 @@ export class VectorStoreSQLite {
         abstract: abstract || undefined,
         chunkText: chunk_text || undefined,
         textSource: (text_source as TextSourceType) || 'abstract',
-        embedding: this.stringToEmbedding(embedding),
+        embedding: this.base64ToEmbedding(embedding),
         modelId: model_id || '',
         indexedAt: indexed_at || '',
         contentHash: content_hash || '',
@@ -915,7 +974,7 @@ export class VectorStoreSQLite {
         abstract: abstracts?.[i] || undefined,
         chunkText: chunkTexts?.[i] || undefined,
         textSource: (textSources?.[i] as TextSourceType) || 'abstract',
-        embedding: this.stringToEmbedding(embeddings[i]),
+        embedding: this.base64ToEmbedding(embeddings[i]),
         modelId: modelIds?.[i] || '',
         indexedAt: indexedAts?.[i] || '',
         contentHash: contentHashes?.[i] || '',
@@ -1257,7 +1316,7 @@ export class VectorStoreSQLite {
 
         results.push({
           itemId: id,
-          embedding: this.stringToEmbedding(embeddingStr),
+          embedding: this.base64ToEmbedding(embeddingStr),
         });
       }
       return results;
@@ -1265,7 +1324,7 @@ export class VectorStoreSQLite {
 
     return ids.map((id: number, i: number) => ({
       itemId: id,
-      embedding: this.stringToEmbedding(embeddingStrs[i]),
+      embedding: this.base64ToEmbedding(embeddingStrs[i]),
     }));
   }
 
@@ -1282,7 +1341,7 @@ export class VectorStoreSQLite {
       abstract: row.abstract || undefined,
       chunkText: row.chunk_text || undefined,
       textSource: row.text_source as TextSourceType,
-      embedding: this.stringToEmbedding(row.embedding),
+      embedding: this.base64ToEmbedding(row.embedding),
       modelId: row.model_id,
       indexedAt: row.indexed_at,
       contentHash: row.content_hash,
