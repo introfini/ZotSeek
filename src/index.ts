@@ -678,8 +678,10 @@ class ZotSeekPlugin {
         storageSize = `${stats.storageUsedBytes} B`;
       } else if (stats.storageUsedBytes < 1024 * 1024) {
         storageSize = `${(stats.storageUsedBytes / 1024).toFixed(1)} KB`;
-      } else {
+      } else if (stats.storageUsedBytes < 1024 * 1024 * 1024) {
         storageSize = `${(stats.storageUsedBytes / (1024 * 1024)).toFixed(1)} MB`;
+      } else {
+        storageSize = `${(stats.storageUsedBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
       }
 
       // Format last indexed date

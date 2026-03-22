@@ -1470,9 +1470,17 @@ export class VectorStoreSQLite {
       this.logger.error(`getStats(): Failed to get last indexed: ${e}`);
     }
 
-    // Estimate storage (based on chunk count)
-    const bytesPerEmbedding = 768 * 4 + 200;  // 768 floats (nomic-embed) + metadata
-    const storageUsedBytes = chunkCount * bytesPerEmbedding;
+    // Get actual storage size from file
+    let storageUsedBytes = 0;
+    try {
+      const dbPath = this.getDbPath();
+      const fileInfo = await IOUtils.stat(dbPath);
+      storageUsedBytes = fileInfo.size;
+    } catch (e) {
+      // Fallback to estimation if file stat fails
+      this.logger.warn(`getStats(): Could not stat database file: ${e}`);
+      storageUsedBytes = chunkCount * (768 * 4 + 200);
+    }
     const avgChunksPerPaper = itemCount > 0 ? chunkCount / itemCount : 0;
 
     // Count chunks with location data (v4 feature)
