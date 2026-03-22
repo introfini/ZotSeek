@@ -596,6 +596,21 @@ class ZotSeekPlugin {
   }
 
   /**
+   * Compact the database to reclaim space after migrations or deletions.
+   */
+  public async compactDatabase(): Promise<string> {
+    await this.ensureStoreReady();
+    if (!this.vectorStore) throw new Error('Store not ready');
+    if (this.indexing) throw new Error('Cannot compact while indexing is in progress');
+
+    const result = await (this.vectorStore as any).compactDatabase();
+    const beforeMB = (result.beforeBytes / (1024 * 1024)).toFixed(1);
+    const afterMB = (result.afterBytes / (1024 * 1024)).toFixed(1);
+    const savedMB = ((result.beforeBytes - result.afterBytes) / (1024 * 1024)).toFixed(1);
+    return `Compacted: ${beforeMB} MB -> ${afterMB} MB (saved ${savedMB} MB)`;
+  }
+
+  /**
    * Public method to get index statistics (called from preferences pane)
    */
   public async getStats(): Promise<{
@@ -1510,6 +1525,7 @@ class ZotSeekPlugin {
     findSimilar: (itemId: number, options?: any) => searchEngine.findSimilar(itemId, options),
     indexItems: (items: any[]) => this.indexItems(items),
     getStats: () => this.vectorStore?.getStats() ?? Promise.resolve({ totalPapers: 0, indexedPapers: 0, modelId: 'none', lastIndexed: null, storageUsedBytes: 0 }),
+    compactDatabase: () => this.compactDatabase(),
     isReady: () => this.initialized && embeddingPipeline.isReady(),
   };
 }

@@ -1855,6 +1855,58 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Compact the database to reclaim unused space.
+   * Uses VACUUM INTO to create a compacted copy, then replaces the original.
+   * This is necessary because SQLite VACUUM doesn't work on ATTACHed databases.
+   */
+  async compactDatabase(): Promise<{ beforeBytes: number; afterBytes: number }> {
+    await this.ensureInit();
+
+    const dbPath = this.getDbPath();
+    const tempPath = dbPath + '.compact';
+
+    // Get size before
+    const beforeInfo = await IOUtils.stat(dbPath);
+    const beforeBytes = beforeInfo.size;
+
+    this.logger.info(`Compacting database (current size: ${beforeBytes} bytes)...`);
+
+    try {
+      // VACUUM INTO creates a fresh, compacted copy
+      // Note: VACUUM INTO does not support parameter binding in SQLite's grammar
+      const safePath = tempPath.replace(/'/g, "''");
+      await Zotero.DB.queryAsync(`VACUUM ${DB_NAME} INTO '${safePath}'`);
+
+      // Detach current database
+      await Zotero.DB.queryAsync(`DETACH DATABASE ${DB_NAME}`);
+      this.attached = false;
+
+      // Replace original with compacted copy
+      await IOUtils.move(tempPath, dbPath);
+
+      // Re-attach
+      await this.attachDatabase();
+
+      // Get size after
+      const afterInfo = await IOUtils.stat(dbPath);
+      const afterBytes = afterInfo.size;
+
+      this.logger.info(
+        `Database compacted: ${beforeBytes} -> ${afterBytes} bytes ` +
+        `(saved ${beforeBytes - afterBytes} bytes, ${Math.round((1 - afterBytes / beforeBytes) * 100)}%)`
+      );
+
+      this.invalidateCache();
+      return { beforeBytes, afterBytes };
+    } catch (error: any) {
+      // Clean up temp file if it exists
+      try { await IOUtils.remove(tempPath); } catch (e) { /* ignore */ }
+      this.logger.error(`Compaction failed: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
    * Delete the database file (for uninstall cleanup)
    * Should be called after detaching the database
    */

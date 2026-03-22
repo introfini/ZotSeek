@@ -285,6 +285,11 @@ class PreferencesManager {
     if (updateBtn) {
       updateBtn.addEventListener('command', () => this.updateIndex());
     }
+
+    const compactBtn = doc.getElementById('zotseek-compact-db');
+    if (compactBtn) {
+      compactBtn.addEventListener('command', () => this.compactDatabase());
+    }
   }
 
   /**
@@ -402,6 +407,33 @@ class PreferencesManager {
     if (Z?.ZotSeek) {
       Z.ZotSeek.indexLibrary();
       // Stats will be refreshed after indexing completes
+    }
+  }
+
+  /**
+   * Compact the database to reclaim space
+   */
+  async compactDatabase(): Promise<void> {
+    if (!this.window) return;
+    const Z = (this.window as any).Zotero;
+    if (!Z?.ZotSeek?.compactDatabase) return;
+
+    try {
+      const result = await Z.ZotSeek.compactDatabase();
+      // Show success as a brief progress window
+      const pw = new Z.ProgressWindow({ closeOnClick: true });
+      pw.changeHeadline('Database Compacted');
+      pw.addDescription(result);
+      pw.show();
+      pw.startCloseTimer(4000);
+      // Refresh stats to show new size
+      await this.loadStatsAndCheckMismatch();
+    } catch (e: any) {
+      const pw = new Z.ProgressWindow({ closeOnClick: true });
+      pw.changeHeadline('Compaction Failed');
+      pw.addDescription(e?.message || String(e));
+      pw.show();
+      pw.startCloseTimer(4000);
     }
   }
 
