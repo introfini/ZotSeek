@@ -4,6 +4,14 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 
 ## [Unreleased]
 
+---
+
+## [1.11.0] - 2026-03-23
+
+### Added
+- **Database Compaction** - New "Compact Database" button in Settings to reclaim unused space after migrations or deletions
+  - Uses SQLite `VACUUM INTO` for safe compaction of the ATTACHed database
+
 ### Improved
 - **Identify Failed Items During Indexing** - When chunks fail to embed, the progress window and debug log now show the titles of affected items instead of just a count (addresses feedback in #19)
 
@@ -17,11 +25,10 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 ### Technical
 - **Base64 Embedding Storage** - Embeddings now stored as base64 instead of JSON, reducing per-embedding size by ~73% (4 KB vs 16 KB per 768-dim vector)
   - Existing JSON embeddings are read transparently and converted to base64 on next re-index
-- **Normalized Database Schema** - Split single `embeddings` table into `items` (one row per paper) and `chunks` (one row per embedding)
+  - Re-index your library after updating to get the full size reduction
+- **Normalized Database Schema** - Split single `embeddings` table into `items` (one row per paper) and `chunks` (one row per embedding chunk)
   - Eliminates duplication of title, abstract, and metadata across all chunks for the same paper
   - Schema v6 migration runs automatically on startup
-- **Database Compaction** - New "Compact Database" button in Settings to reclaim unused space after migrations or deletions
-  - Uses SQLite `VACUUM INTO` for safe compaction of the ATTACHed database
 
 ---
 
