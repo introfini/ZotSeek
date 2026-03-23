@@ -4,6 +4,10 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 
 ## [Unreleased]
 
+### Added
+- **Chinese (zh-CN) Localization** - ZotSeek menus and dialogs now appear in Chinese for Chinese system users (may fix #16)
+  - May also resolve locale interference with Better Notes and Translate for Zotero plugins
+
 ---
 
 ## [1.11.0] - 2026-03-23
