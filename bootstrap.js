@@ -21,6 +21,7 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
   chromeHandle = aomStartup.registerChrome(manifestURI, [
     ["content", "zotseek", rootURI + "content/"],
     ["locale", "zotseek", "en-US", rootURI + "locale/en-US/"],
+    ["locale", "zotseek", "zh-CN", rootURI + "locale/zh-CN/"],
   ]);
   Zotero.debug("[ZotSeek Bootstrap] Chrome content and locale registered");
 
