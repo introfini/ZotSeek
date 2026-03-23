@@ -803,32 +803,61 @@ export function chunkDocumentWithPages(
         continue;
       }
 
-      // Truncate very long paragraphs to maxTokens
-      let chunkText = para;
+      // Split oversized paragraphs into multiple chunks by sentences (fixes #20)
+      // Instead of truncating and losing content, we split at sentence boundaries
       if (paraTokens > opts.maxTokens - titleTokens) {
-        // Truncate at sentence boundary
-        const targetLength = Math.floor(para.length * (opts.maxTokens - titleTokens) / paraTokens * 0.9);
-        const truncated = para.substring(0, targetLength);
-        const lastSentence = Math.max(
-          truncated.lastIndexOf('. '),
-          truncated.lastIndexOf('.\n'),
-          truncated.lastIndexOf('? '),
-          truncated.lastIndexOf('! ')
-        );
-        chunkText = lastSentence > targetLength * 0.5
-          ? truncated.substring(0, lastSentence + 1).trim()
-          : truncated.trim() + '...';
-      }
+        const availableTokens = opts.maxTokens - titleTokens;
+        const sentences = para.match(/[^.!?]+[.!?]+/g) || [para];
+        let currentText = '';
+        let currentTokens = 0;
 
-      const sectionType = classifySection(chunkText);
-      chunks.push({
-        index: chunks.length,
-        text: `${titlePrefix}\n\n${chunkText}`,
-        type: sectionType,
-        tokenCount: estimateTokens(chunkText) + titleTokens,
-        pageNumber: page.pageNumber,  // Exact page number!
-        paragraphIndex: paragraphIdx,
-      });
+        for (const sentence of sentences) {
+          const sentTokens = estimateTokens(sentence);
+
+          if (currentTokens + sentTokens > availableTokens && currentText.trim()) {
+            // Flush current chunk
+            if (chunks.length >= opts.maxChunks) break;
+            const sectionType = classifySection(currentText);
+            chunks.push({
+              index: chunks.length,
+              text: `${titlePrefix}\n\n${currentText.trim()}`,
+              type: sectionType,
+              tokenCount: currentTokens + titleTokens,
+              pageNumber: page.pageNumber,
+              paragraphIndex: paragraphIdx,
+            });
+            currentText = sentence;
+            currentTokens = sentTokens;
+          } else {
+            currentText += sentence;
+            currentTokens += sentTokens;
+          }
+        }
+
+        // Flush remaining text
+        if (currentText.trim() && chunks.length < opts.maxChunks) {
+          const sectionType = classifySection(currentText);
+          chunks.push({
+            index: chunks.length,
+            text: `${titlePrefix}\n\n${currentText.trim()}`,
+            type: sectionType,
+            tokenCount: currentTokens + titleTokens,
+            pageNumber: page.pageNumber,
+            paragraphIndex: paragraphIdx,
+          });
+        }
+      } else {
+        // Normal-sized paragraph: one chunk
+        const sectionType = classifySection(para);
+        chunks.push({
+          index: chunks.length,
+          text: `${titlePrefix}\n\n${para}`,
+          type: sectionType,
+          tokenCount: paraTokens + titleTokens,
+          pageNumber: page.pageNumber,
+          paragraphIndex: paragraphIdx,
+        });
+      }
 
       paragraphIdx++;
     }
