@@ -10,6 +10,9 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 ### Fixed
 - **Storage Size Reporting** - Stats panel now shows actual database file size instead of a rough estimation that could be ~10x too low (fixes #25)
   - Added GB formatting for large databases
+- **Oversized Paragraph Handling** - Documents with very long paragraphs (no line breaks) are now split at sentence boundaries instead of truncated (fixes #20)
+  - Previously, a 33K-char paragraph produced 1 truncated chunk, losing ~70% of content
+  - Now splits into multiple properly-sized chunks, preserving all content with page location data
 
 ### Technical
 - **Base64 Embedding Storage** - Embeddings now stored as base64 instead of JSON, reducing per-embedding size by ~73% (4 KB vs 16 KB per 768-dim vector)

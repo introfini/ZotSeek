@@ -563,7 +563,7 @@ Paragraph 4: 900 tokens  ─┐
                          ─┘
 ```
 
-A chunk might be 400 tokens if that's where the paragraph ends naturally. Paragraphs larger than `maxTokens` are kept whole (not split mid-sentence).
+A chunk might be 400 tokens if that's where the paragraph ends naturally. Paragraphs larger than `maxTokens` are split at sentence boundaries into multiple chunks, preserving all content with correct page location data.
 
 ### Token Estimation
 
