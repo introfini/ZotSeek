@@ -5,6 +5,7 @@
  */
 
 import { Logger } from '../utils/logger';
+import { getString } from '../utils/locale';
 import { searchDialogWithVTable } from './search-dialog-with-vtable';
 import { similarDocumentsWrapper } from './similar-documents-wrapper';
 
@@ -65,7 +66,7 @@ export class ToolbarButton {
       // Update the cloned button's attributes
       button.setAttribute('id', this.buttonId);
       button.setAttribute('label', 'SS');
-      button.setAttribute('tooltiptext', 'Open ZotSeek');
+      button.setAttribute('tooltiptext', getString('toolbar.openZotSeek'));
       button.setAttribute('command', '');
       button.setAttribute('oncommand', '');
       button.setAttribute('mousedown', '');
@@ -96,7 +97,7 @@ export class ToolbarButton {
 
     button.id = this.buttonId;
     button.setAttribute('label', 'SS');
-    button.setAttribute('tooltiptext', 'Open ZotSeek');
+    button.setAttribute('tooltiptext', getString('toolbar.openZotSeek'));
     button.setAttribute('class', 'zotero-tb-button');
 
     // Set icon (20x20 toolbar version)
@@ -321,7 +322,7 @@ export class ToolbarButton {
 
     // Add the context menu item
     append({
-      label: 'Find Related Documents',
+      label: getString('menu.findRelated'),
       onCommand: () => {
         this.logger.info(`Context menu: searching for "${selectedText.substring(0, 50)}..." (excluding item ${currentItemId})`);
         searchDialogWithVTable.open(selectedText.trim(), currentItemId);
@@ -380,7 +381,7 @@ export class ToolbarButton {
     const button = doc.createElement('button');
     button.className = `toolbar-button ${this.readerButtonClass}`;
     button.tabIndex = -1;
-    button.title = 'Find Similar Documents';
+    button.title = getString('toolbar.findSimilar');
 
     // Set the icon as innerHTML (inline SVG)
     const iconSvg = this.iconCache['chrome://zotseek/content/icons/icon-toolbar.svg'];
@@ -463,7 +464,7 @@ export class ToolbarButton {
       const button = doc.createElement('button');
       button.className = `toolbar-button ${this.readerButtonClass}`;
       button.tabIndex = -1;
-      button.title = 'Find Similar Documents';
+      button.title = getString('toolbar.findSimilar');
 
       // Set the icon as innerHTML (inline SVG)
       const iconSvg = this.iconCache['chrome://zotseek/content/icons/icon-toolbar.svg'];

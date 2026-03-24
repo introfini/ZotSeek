@@ -20,6 +20,7 @@ import { ZoteroAPI } from './utils/zotero-api';
 import { getIndexingMode } from './utils/chunker';
 import { getZotero } from './utils/zotero-helper';
 import { autoIndexManager } from './core/auto-index-manager';
+import { getString } from './utils/locale';
 // Use stable progress window from toolkit to avoid crashes
 import { StableProgressWindow, showQuickNotification } from './utils/stable-progress';
 // UI components
@@ -406,37 +407,37 @@ class ZotSeekPlugin {
     // Create "Find Similar Documents" menu item
     const findSimilarItem = doc.createXULElement('menuitem');
     findSimilarItem.id = 'zotseek-find-similar';
-    findSimilarItem.setAttribute('label', 'Find Similar Documents');
+    findSimilarItem.setAttribute('label', getString('menu.findSimilar'));
     findSimilarItem.addEventListener('command', () => this.onFindSimilar());
 
     // Create "Open ZotSeek" menu item for general search
     const openSearchItem = doc.createXULElement('menuitem');
     openSearchItem.id = 'zotseek-open-dialog';
-    openSearchItem.setAttribute('label', 'Open ZotSeek...');
+    openSearchItem.setAttribute('label', getString('menu.openZotSeek'));
     openSearchItem.addEventListener('command', () => searchDialogWithVTable.open());
 
     // Create "Index Selected" menu item
     const indexSelectedItem = doc.createXULElement('menuitem');
     indexSelectedItem.id = 'zotseek-index-selected';
-    indexSelectedItem.setAttribute('label', 'Index Selected for ZotSeek');
+    indexSelectedItem.setAttribute('label', getString('menu.indexSelected'));
     indexSelectedItem.addEventListener('command', () => this.onIndexSelected());
 
     // Create "Index Collection" menu item
     const indexCollectionItem = doc.createXULElement('menuitem');
     indexCollectionItem.id = 'zotseek-index-collection';
-    indexCollectionItem.setAttribute('label', 'Index Current Collection');
+    indexCollectionItem.setAttribute('label', getString('menu.indexCollection'));
     indexCollectionItem.addEventListener('command', () => this.onIndexCollection());
 
     // Create "Index Library" menu item
     const indexLibraryItem = doc.createXULElement('menuitem');
     indexLibraryItem.id = 'zotseek-index-library';
-    indexLibraryItem.setAttribute('label', 'Update Library Index');
+    indexLibraryItem.setAttribute('label', getString('menu.updateLibrary'));
     indexLibraryItem.addEventListener('command', () => this.onIndexLibrary());
 
     // Create "Remove from Index" menu item
     const removeFromIndexItem = doc.createXULElement('menuitem');
     removeFromIndexItem.id = 'zotseek-remove-from-index';
-    removeFromIndexItem.setAttribute('label', 'Remove from ZotSeek Index');
+    removeFromIndexItem.setAttribute('label', getString('menu.removeFromIndex'));
     removeFromIndexItem.addEventListener('command', () => this.onRemoveFromIndex());
 
     itemMenu.appendChild(separator);
@@ -465,7 +466,7 @@ class ZotSeekPlugin {
       Z.PreferencePanes.register({
         pluginID: this.info?.id || 'zotseek@zotero.org',
         src: `${this.info?.rootURI || 'chrome://zotseek/'}content/preferences.xhtml`,
-        label: 'ZotSeek',
+        label: getString('pref.title'),
         image: `${this.info?.rootURI || 'chrome://zotseek/'}content/icons/favicon.png`,
       });
       this.logger.info('Preference pane registered successfully');
@@ -482,31 +483,31 @@ class ZotSeekPlugin {
 
     const confirmed = Services.prompt.confirm(
       Z?.getMainWindow(),
-      'Clear ZotSeek Index',
-      'This will delete all stored embeddings. You will need to re-index your library.\n\nContinue?'
+      getString('indexing.clearConfirmTitle'),
+      getString('indexing.clearConfirmMsg')
     );
 
     if (!confirmed) return;
 
     // Create stable progress window for clearing
     const progressWindow = new StableProgressWindow({
-      title: 'Clearing ZotSeek Index',
+      title: getString('indexing.clearTitle'),
     });
 
     try {
-      progressWindow.updateProgress('Initializing storage...', null);
+      progressWindow.updateProgress(getString('indexing.initStorage'), null);
       await this.ensureStoreReady();
 
       if (this.vectorStore) {
-        progressWindow.updateProgress('Deleting all embeddings...', 50);
+        progressWindow.updateProgress(getString('indexing.deletingAll'), 50);
         await this.vectorStore.clear();
 
-        progressWindow.complete('Index cleared successfully!');
+        progressWindow.complete(getString('indexing.clearedSuccess'));
         this.logger.info('Index cleared via preferences');
 
         // Show additional alert for confirmation
         setTimeout(() => {
-          this.showAlert('Index cleared successfully.\n\nYou can now re-index your library.');
+          this.showAlert(getString('indexing.clearedMsg'));
         }, 500);
       }
     } catch (error: any) {
@@ -532,26 +533,25 @@ class ZotSeekPlugin {
 
     const confirmed = Services.prompt.confirm(
       Z?.getMainWindow(),
-      'Rebuild ZotSeek Index',
-      'This will delete all stored embeddings and rebuild the index with your current settings.\n\n' +
-      'This may take several minutes depending on library size.\n\nContinue?'
+      getString('indexing.rebuildConfirmTitle'),
+      getString('indexing.rebuildConfirmMsg')
     );
 
     if (!confirmed) return;
 
     // First clear the index
     const progressWindow = new StableProgressWindow({
-      title: 'Rebuilding ZotSeek Index',
+      title: getString('indexing.rebuildingTitle'),
     });
 
     try {
-      progressWindow.updateProgress('Clearing existing index...', null);
+      progressWindow.updateProgress(getString('indexing.clearingExisting'), null);
       await this.ensureStoreReady();
 
       if (this.vectorStore) {
         await this.vectorStore.clear();
         this.logger.info('Index cleared for rebuild');
-        progressWindow.addLine('✓ Existing index cleared', 'chrome://zotero/skin/tick.png');
+        progressWindow.addLine(getString('indexing.existingCleared'), 'chrome://zotero/skin/tick.png');
 
         // Close the progress window briefly
         progressWindow.close();
@@ -578,7 +578,7 @@ class ZotSeekPlugin {
       if (el) el.textContent = value;
     };
 
-      setText('zotseek-stat-papers', 'Loading...');
+      setText('zotseek-stat-papers', getString('indexing.loading'));
 
     try {
       const stats = await this.getStats();
@@ -762,7 +762,7 @@ class ZotSeekPlugin {
    */
   private async onIndexSelected(): Promise<void> {
     if (this.indexing) {
-      this.showAlert('Indexing already in progress...');
+      this.showAlert(getString('indexing.alreadyInProgress'));
       return;
     }
 
@@ -771,7 +771,7 @@ class ZotSeekPlugin {
 
     const selectedItems = this.zoteroAPI.getSelectedItems();
     if (selectedItems.length === 0) {
-      this.showAlert('Please select items to index.');
+      this.showAlert(getString('indexing.selectItems'));
       return;
     }
 
@@ -785,7 +785,7 @@ class ZotSeekPlugin {
    */
   private async onIndexCollection(): Promise<void> {
     if (this.indexing) {
-      this.showAlert('Indexing already in progress...');
+      this.showAlert(getString('indexing.alreadyInProgress'));
       return;
     }
 
@@ -797,7 +797,7 @@ class ZotSeekPlugin {
     const collection = ZoteroPane?.getSelectedCollection();
 
     if (!collection) {
-      this.showAlert('Please select a collection first.\n\n(Click on a collection in the left sidebar)');
+      this.showAlert(getString('indexing.selectCollection'));
       return;
     }
 
@@ -805,7 +805,7 @@ class ZotSeekPlugin {
     const items = collection.getChildItems().filter((item: any) => item.isRegularItem());
 
     if (items.length === 0) {
-      this.showAlert(`Collection "${collectionName}" has no items to index.`);
+      this.showAlert(getString('indexing.emptyCollection', { name: collectionName }));
       return;
     }
 
@@ -818,7 +818,7 @@ class ZotSeekPlugin {
    */
   private async onIndexLibrary(): Promise<void> {
     if (this.indexing) {
-      this.showAlert('Indexing already in progress...');
+      this.showAlert(getString('indexing.alreadyInProgress'));
       return;
     }
 
@@ -828,11 +828,8 @@ class ZotSeekPlugin {
     // Use Services.prompt for Zotero 8 compatibility
     const confirmed = Services.prompt.confirm(
       Z.getMainWindow(),
-      'ZotSeek - Update Library Index',
-      'This will index all unindexed items in your library for semantic search.\n\n' +
-      'Items that are already indexed will be skipped.\n\n' +
-      'This may take several minutes depending on the number of new items.\n\n' +
-      'Continue?'
+      getString('indexing.updateTitle'),
+      getString('indexing.updateConfirmMsg')
     );
 
     if (!confirmed) return;
@@ -855,7 +852,7 @@ class ZotSeekPlugin {
     const selectedItems = ZoteroPane?.getSelectedItems() || [];
 
     if (selectedItems.length === 0) {
-      showQuickNotification('No items selected', 'default');
+      showQuickNotification(getString('indexing.noItemsSelected'), 'default');
       return;
     }
 
@@ -872,13 +869,13 @@ class ZotSeekPlugin {
       }
 
       const msg = removed > 0
-        ? `Removed ${removed} item${removed !== 1 ? 's' : ''} from index`
-        : 'Selected items were not in the index';
+        ? getString('indexing.removedItems', { count: removed })
+        : getString('indexing.notInIndex');
       showQuickNotification(msg, removed > 0 ? 'success' : 'default');
       this.logger.info(msg);
     } catch (error: any) {
       this.logger.error(`Failed to remove from index: ${error?.message || error}`);
-      showQuickNotification('Failed to remove from index', 'fail');
+      showQuickNotification(getString('indexing.removeFailed'), 'fail');
     }
   }
 
@@ -901,7 +898,7 @@ class ZotSeekPlugin {
 
     // Create stable progress window using toolkit
     const progressWindow = new StableProgressWindow({
-      title: 'ZotSeek Indexing',
+      title: getString('indexing.title'),
       cancelCallback: () => {
         this.indexing = false;
         this.logger.info('Indexing cancelled by user');
@@ -910,16 +907,16 @@ class ZotSeekPlugin {
 
     try {
       // Ensure vector store is ready
-      progressWindow.updateProgress('Initializing storage...', null);
+      progressWindow.updateProgress(getString('indexing.initStorage'), null);
       await this.ensureStoreReady();
 
       // Get indexing mode
       const indexingMode = getIndexingMode(Z);
       this.logger.info(`Indexing mode: ${indexingMode}`);
-      progressWindow.addLine(`Indexing mode: ${indexingMode}`);
+      progressWindow.addLine(getString('indexing.mode', { mode: indexingMode }));
 
       // === PHASE 1: Filter out excluded and already-indexed items ===
-      progressWindow.setHeadline('Checking for already-indexed items...');
+      progressWindow.setHeadline(getString('indexing.checking'));
       const itemsToIndex: any[] = [];
       let skippedExcluded = 0;
       for (const item of items) {
@@ -934,29 +931,29 @@ class ZotSeekPlugin {
       }
       if (skippedExcluded > 0) {
         this.logger.info(`Skipped ${skippedExcluded} items with exclusion tag`);
-        progressWindow.addLine(`✓ Skipped ${skippedExcluded} excluded items (tag)`, 'chrome://zotero/skin/tick.png');
+        progressWindow.addLine(getString('indexing.skippedExcluded', { count: skippedExcluded }), 'chrome://zotero/skin/tick.png');
       }
       const skippedAlreadyIndexed = items.length - itemsToIndex.length - skippedExcluded;
       if (skippedAlreadyIndexed > 0) {
         this.logger.info(`Skipped ${skippedAlreadyIndexed} already-indexed items`);
-        progressWindow.addLine(`✓ Skipped ${skippedAlreadyIndexed} already-indexed items`, 'chrome://zotero/skin/tick.png');
+        progressWindow.addLine(getString('indexing.skippedIndexed', { count: skippedAlreadyIndexed }), 'chrome://zotero/skin/tick.png');
       }
 
       // If all items are already indexed, we're done
       if (itemsToIndex.length === 0) {
-        progressWindow.setHeadline('All items already indexed!');
-        progressWindow.addLine(`✓ ${items.length} items already in index`, 'chrome://zotero/skin/tick.png');
-        progressWindow.complete('Nothing to index - all items are up to date!', true);
+        progressWindow.setHeadline(getString('indexing.allIndexed'));
+        progressWindow.addLine(getString('indexing.allInIndex', { count: items.length }), 'chrome://zotero/skin/tick.png');
+        progressWindow.complete(getString('indexing.nothingToIndex'), true);
         return;
       }
 
       // Reset pipeline to ensure fresh initialization
       embeddingPipeline.reset();
 
-      progressWindow.updateProgress('Loading AI model (Transformers.js)...', null);
+      progressWindow.updateProgress(getString('indexing.loadingModel'), null);
       await embeddingPipeline.init();
       this.logger.info('Embedding pipeline initialized (Transformers.js)')
-      progressWindow.addLine('✓ AI model loaded', 'chrome://zotero/skin/tick.png');
+      progressWindow.addLine(getString('indexing.modelLoaded'), 'chrome://zotero/skin/tick.png');
 
       // === PHASE 2: Process items in batches with checkpoints ===
       const totalBatches = Math.ceil(itemsToIndex.length / CHECKPOINT_BATCH_SIZE);
@@ -977,7 +974,7 @@ class ZotSeekPlugin {
         const batchNumber = Math.floor(batchStart / CHECKPOINT_BATCH_SIZE) + 1;
 
         // === STEP 1: Extract chunks for this batch ===
-        progressWindow.setHeadline(`Batch ${batchNumber}/${totalBatches}: Extracting text...`);
+        progressWindow.setHeadline(getString('indexing.batchExtracting', { current: batchNumber, total: totalBatches }));
         this.logger.info(`Batch ${batchNumber}/${totalBatches}: Extracting ${batchItems.length} items`);
 
         const extractedBatch = await textExtractor.extractChunksFromItems(
@@ -1011,7 +1008,7 @@ class ZotSeekPlugin {
           }
         }
 
-        progressWindow.setHeadline(`Batch ${batchNumber}/${totalBatches}: Generating embeddings...`);
+        progressWindow.setHeadline(getString('indexing.batchEmbedding', { current: batchNumber, total: totalBatches }));
         this.logger.info(`Batch ${batchNumber}/${totalBatches}: Embedding ${batchChunks.length} chunks`);
 
         const embeddingMap = new Map<string, { embedding: number[]; modelId: string }>();
@@ -1027,7 +1024,7 @@ class ZotSeekPlugin {
 
           chunkProcessed++;
           progressWindow.updateProgressWithETA(
-            `Batch ${batchNumber}/${totalBatches}: Embedding chunks`,
+            getString('indexing.batchEmbeddingChunks', { current: batchNumber, total: totalBatches }),
             batchStart + Math.floor((chunkProcessed / batchChunks.length) * batchItems.length),
             itemsToIndex.length
           );
@@ -1062,11 +1059,11 @@ class ZotSeekPlugin {
         if (failedChunks > 0) {
           const itemList = Array.from(failedItems).join(', ');
           this.logger.warn(`Batch ${batchNumber}: ${failedChunks} chunks failed embedding and were skipped in: ${itemList}`);
-          progressWindow.addLine(`⚠ ${failedChunks} chunks skipped in: ${itemList}`);
+          progressWindow.addLine(getString('indexing.chunksFailed', { count: failedChunks, items: itemList }));
         }
 
         // === STEP 3: Save this batch (CHECKPOINT) ===
-        progressWindow.setHeadline(`Batch ${batchNumber}/${totalBatches}: Saving checkpoint...`);
+        progressWindow.setHeadline(getString('indexing.batchSaving', { current: batchNumber, total: totalBatches }));
 
         const batchEmbeddings: PaperEmbedding[] = [];
         for (const extracted of extractedBatch) {
@@ -1107,7 +1104,7 @@ class ZotSeekPlugin {
         totalChunksIndexed += batchEmbeddings.length;
 
         this.logger.info(`Checkpoint ${batchNumber}/${totalBatches}: Saved ${batchEmbeddings.length} chunks from ${extractedBatch.length} items`);
-        progressWindow.addCheckpointLine(`✓ Checkpoint ${batchNumber}/${totalBatches}: ${extractedBatch.length} items, ${batchEmbeddings.length} chunks saved`);
+        progressWindow.addCheckpointLine(getString('indexing.checkpoint', { current: batchNumber, total: totalBatches, items: extractedBatch.length, chunks: batchEmbeddings.length }));
       }
 
       // Store the indexing mode in metadata so we know what mode was used to build the index
@@ -1128,32 +1125,32 @@ class ZotSeekPlugin {
       const durationFormatted = this.formatDuration(indexDurationMs);
 
       // Show completion
-      progressWindow.setHeadline('Indexing Complete!');
-      progressWindow.addLine(`✓ Mode: ${indexingMode}`, 'chrome://zotero/skin/tick.png');
+      progressWindow.setHeadline(getString('indexing.complete'));
+      progressWindow.addLine(getString('indexing.completeMode', { mode: indexingMode }), 'chrome://zotero/skin/tick.png');
       if (skippedAlreadyIndexed > 0) {
-        progressWindow.addLine(`✓ Previously indexed: ${skippedAlreadyIndexed} items`, 'chrome://zotero/skin/tick.png');
+        progressWindow.addLine(getString('indexing.completePrevious', { count: skippedAlreadyIndexed }), 'chrome://zotero/skin/tick.png');
       }
-      progressWindow.addLine(`✓ Newly indexed: ${totalItemsIndexed} items`, 'chrome://zotero/skin/tick.png');
-      progressWindow.addLine(`✓ Total chunks: ${totalChunksIndexed}`, 'chrome://zotero/skin/tick.png');
-      progressWindow.addLine(`✓ Avg chunks/item: ${avgChunksPerItem}`, 'chrome://zotero/skin/tick.png');
-      progressWindow.addLine(`✓ Duration: ${durationFormatted}`, 'chrome://zotero/skin/tick.png');
+      progressWindow.addLine(getString('indexing.completeNew', { count: totalItemsIndexed }), 'chrome://zotero/skin/tick.png');
+      progressWindow.addLine(getString('indexing.completeChunks', { count: totalChunksIndexed }), 'chrome://zotero/skin/tick.png');
+      progressWindow.addLine(getString('indexing.completeAvg', { avg: avgChunksPerItem }), 'chrome://zotero/skin/tick.png');
+      progressWindow.addLine(getString('indexing.completeDuration', { duration: durationFormatted }), 'chrome://zotero/skin/tick.png');
 
       if (totalItemsSkipped > 0) {
-        progressWindow.addLine(`⚠ No content: ${totalItemsSkipped} items`);
+        progressWindow.addLine(getString('indexing.completeNoContent', { count: totalItemsSkipped }));
       }
 
-      progressWindow.complete('Indexing completed successfully!', true);
+      progressWindow.complete(getString('indexing.completeSuccess'), true);
 
     } catch (error: any) {
       if (progressWindow.isCancelled()) {
         this.logger.info('Indexing cancelled by user');
-        showQuickNotification('Indexing cancelled', 'default', 3000);
+        showQuickNotification(getString('indexing.cancelled'), 'default', 3000);
       } else {
         this.logger.error(`Indexing failed: ${error}`);
-        progressWindow.error(`Indexing failed: ${error.message || error}`, false);
+        progressWindow.error(getString('indexing.failed', { error: error.message || error }), false);
         // Keep window open for 10 seconds so user can see the error
         setTimeout(() => progressWindow.close(), 10000);
-        this.showAlert(`Indexing failed: ${error.message || error}`);
+        this.showAlert(getString('indexing.failed', { error: error.message || error }));
       }
     } finally {
       this.indexing = false;
@@ -1181,7 +1178,7 @@ class ZotSeekPlugin {
 
     // Show progress window immediately
     const progressWin = new (Z.ProgressWindow as any)({ closeOnClick: true });
-    progressWin.changeHeadline('ZotSeek');
+    progressWin.changeHeadline(getString('indexing.progressTitle'));
 
     // Get truncated title for display (max 35 chars)
     const firstTitle = items[0]?.getField?.('title') || 'item';
@@ -1190,7 +1187,7 @@ class ZotSeekPlugin {
 
     const itemRow = new progressWin.ItemProgress(
       'chrome://zotero/skin/spinner-16px.png',
-      `Indexing: ${displayText}`
+      getString('indexing.progressItem', { title: displayText })
     );
     progressWin.show();
 
@@ -1202,7 +1199,7 @@ class ZotSeekPlugin {
       const indexingMode = getIndexingMode(Z);
 
       // Reset pipeline to ensure fresh initialization
-      itemRow.setText('Loading model...');
+      itemRow.setText(getString('indexing.progressLoadingModel'));
       embeddingPipeline.reset();
       await embeddingPipeline.init();
 
@@ -1211,19 +1208,19 @@ class ZotSeekPlugin {
       if (filteredItems.length === 0) {
         this.logger.info('All items excluded by tag');
         try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
-        itemRow.setText('All items excluded by tag');
+        itemRow.setText(getString('indexing.allExcluded'));
         progressWin.startCloseTimer(3000);
         return;
       }
 
       // Extract chunks from items
-      itemRow.setText('Extracting...');
+      itemRow.setText(getString('indexing.extracting'));
       const extractedItems = await textExtractor.extractChunksFromItems(filteredItems, indexingMode);
 
       if (extractedItems.length === 0) {
         this.logger.info('No content extracted from items');
         try { itemRow.setIcon('chrome://zotero/skin/cross.png'); } catch { /* ignore */ }
-        itemRow.setText('✗ No content found');
+        itemRow.setText(getString('indexing.noContent'));
         progressWin.startCloseTimer(3000);
         return;
       }
@@ -1252,7 +1249,7 @@ class ZotSeekPlugin {
       const failedItems = new Set<string>();
       for (const item of textsForEmbedding) {
         processed++;
-        itemRow.setText(`Embedding ${processed}/${textsForEmbedding.length}...`);
+        itemRow.setText(getString('indexing.embedding', { current: processed, total: textsForEmbedding.length }));
         try {
           const result = await embeddingPipeline.embed(item.text);
           if (result) {
@@ -1276,7 +1273,7 @@ class ZotSeekPlugin {
       }
 
       // Store embeddings with chunk metadata
-      itemRow.setText('Saving...');
+      itemRow.setText(getString('indexing.saving'));
       const paperEmbeddings: PaperEmbedding[] = [];
 
       for (const extracted of extractedItems) {
@@ -1317,8 +1314,9 @@ class ZotSeekPlugin {
 
       // Show success - use try-catch for setIcon as it may not exist in all Zotero versions
       try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
-      const failedNote = failedChunks > 0 ? ` (${failedChunks} chunks skipped)` : '';
-      itemRow.setText(`✓ ${paperEmbeddings.length} chunks indexed${failedNote}`);
+      itemRow.setText(failedChunks > 0
+        ? getString('indexing.chunksIndexedWithFailed', { count: paperEmbeddings.length, failed: failedChunks })
+        : getString('indexing.chunksIndexed', { count: paperEmbeddings.length }));
       progressWin.startCloseTimer(3000);
 
     } catch (error: any) {

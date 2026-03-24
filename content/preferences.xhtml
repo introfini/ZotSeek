@@ -102,24 +102,24 @@
 
 <!-- Index Statistics - Visual Cards -->
 <groupbox>
-  <label><html:h2>Index Statistics</html:h2></label>
+  <label><html:h2 data-l10n-key="pref.indexStatistics">Index Statistics</html:h2></label>
 
   <!-- Stats Cards Row -->
   <html:div style="display: flex; gap: 12px; margin: 8px 0 12px 0;">
     <!-- Papers Card -->
     <html:div class="zotseek-stat-card-papers" style="flex: 1; border-radius: 8px; padding: 12px; text-align: center;">
       <html:div id="zotseek-stat-papers" style="font-size: 24px; font-weight: 600; color: var(--zotseek-blue);">-</html:div>
-      <html:div style="font-size: 11px; color: var(--zotseek-blue); margin-top: 2px;">Papers Indexed</html:div>
+      <html:div data-l10n-key="pref.papersIndexed" style="font-size: 11px; color: var(--zotseek-blue); margin-top: 2px;">Papers Indexed</html:div>
     </html:div>
     <!-- Chunks Card -->
     <html:div class="zotseek-stat-card-chunks" style="flex: 1; border-radius: 8px; padding: 12px; text-align: center;">
       <html:div id="zotseek-stat-chunks" style="font-size: 24px; font-weight: 600; color: var(--zotseek-green);">-</html:div>
-      <html:div style="font-size: 11px; color: var(--zotseek-green); margin-top: 2px;">Total Chunks</html:div>
+      <html:div data-l10n-key="pref.totalChunks" style="font-size: 11px; color: var(--zotseek-green); margin-top: 2px;">Total Chunks</html:div>
     </html:div>
     <!-- Storage Card -->
     <html:div class="zotseek-stat-card-storage" style="flex: 1; border-radius: 8px; padding: 12px; text-align: center;">
       <html:div id="zotseek-stat-storage" style="font-size: 24px; font-weight: 600; color: var(--zotseek-orange);">-</html:div>
-      <html:div style="font-size: 11px; color: var(--zotseek-orange); margin-top: 2px;">Storage Used</html:div>
+      <html:div data-l10n-key="pref.storageUsed" style="font-size: 11px; color: var(--zotseek-orange); margin-top: 2px;">Storage Used</html:div>
     </html:div>
   </html:div>
 
@@ -138,32 +138,32 @@
   <html:span id="zotseek-stat-indexedmode" style="display: none;">-</html:span>
 
   <hbox>
-    <button id="zotseek-refresh-stats" label="Refresh Stats" />
-    <button id="zotseek-compact-db" label="Compact Database" style="margin-left: 8px;" />
+    <button id="zotseek-refresh-stats" label="Refresh Stats" data-l10n-key="pref.refreshStats" />
+    <button id="zotseek-compact-db" label="Compact Database" data-l10n-key="pref.compactDatabase" style="margin-left: 8px;" />
   </hbox>
 </groupbox>
 
 <!-- Indexing Mode Mismatch Warning -->
 <html:div id="zotseek-indexmode-warning" class="zotseek-warning-box" style="display: none; border-radius: 6px; padding: 12px; margin-bottom: 12px; border-width: 1px; border-style: solid;">
-  <html:strong style="color: var(--zotseek-amber);">⚠️ Index Mode Mismatch</html:strong>
+  <html:strong data-l10n-key="pref.indexModeMismatch" style="color: var(--zotseek-amber);">⚠️ Index Mode Mismatch</html:strong>
   <html:p style="color: var(--zotseek-text-primary); margin: 8px 0 4px 0;">
     Your index was built with <html:strong id="zotseek-warning-indexed-mode">Full Paper</html:strong> mode,
     but your current setting is <html:strong id="zotseek-warning-current-mode">Abstract Only</html:strong>.
   </html:p>
-  <html:p style="color: var(--zotseek-text-secondary); margin: 4px 0;">
+  <html:p data-l10n-key="pref.indexModeMismatchAction" style="color: var(--zotseek-text-secondary); margin: 4px 0;">
     Click "Rebuild Index" below to apply your new indexing mode setting.
   </html:p>
 </html:div>
 
 <!-- Indexing Mode - Radio Style Cards -->
 <groupbox>
-  <label><html:h2>Indexing Mode</html:h2></label>
+  <label><html:h2 data-l10n-key="pref.indexingMode">Indexing Mode</html:h2></label>
 
   <!-- Hidden menulist for compatibility with existing JS -->
   <menulist id="zotseek-pref-indexingMode" native="true" style="display: none;">
     <menupopup>
-      <menuitem label="Abstract only (faster)" value="abstract" />
-      <menuitem label="Full paper (more thorough)" value="full" />
+      <menuitem label="Abstract only (faster)" value="abstract" data-l10n-key="pref.abstractOnlyMenu" />
+      <menuitem label="Full paper (more thorough)" value="full" data-l10n-key="pref.fullPaperMenu" />
     </menupopup>
   </menulist>
 
@@ -176,11 +176,11 @@
       <html:div style="display: flex; align-items: center; margin-bottom: 6px;">
         <html:span id="zotseek-mode-abstract-radio" style="width: 16px; height: 16px; border: 2px solid var(--zotseek-text-tertiary); border-radius: 50%; margin-right: 8px; display: flex; align-items: center; justify-content: center;">
         </html:span>
-        <html:strong style="font-size: 13px; color: var(--zotseek-text-primary);">Abstract only</html:strong>
+        <html:strong data-l10n-key="pref.abstractOnly" style="font-size: 13px; color: var(--zotseek-text-primary);">Abstract only</html:strong>
       </html:div>
       <html:div style="font-size: 11px; color: var(--zotseek-text-secondary); line-height: 1.4;">
-        <html:div style="color: var(--zotseek-green); font-weight: 500; margin-bottom: 2px;">Fast • ~1 chunk per paper</html:div>
-        Indexes title + abstract. Good for finding papers by topic.
+        <html:div data-l10n-key="pref.abstractSpeed" style="color: var(--zotseek-green); font-weight: 500; margin-bottom: 2px;">Fast • ~1 chunk per paper</html:div>
+        <html:span data-l10n-key="pref.abstractDesc">Indexes title + abstract. Good for finding papers by topic.</html:span>
       </html:div>
     </html:div>
 
@@ -193,11 +193,11 @@
         <html:span id="zotseek-mode-full-radio" style="width: 16px; height: 16px; border: 2px solid var(--zotseek-blue); border-radius: 50%; margin-right: 8px; display: flex; align-items: center; justify-content: center;">
           <html:span style="width: 8px; height: 8px; background: var(--zotseek-blue); border-radius: 50%;"></html:span>
         </html:span>
-        <html:strong style="font-size: 13px; color: var(--zotseek-text-primary);">Full paper</html:strong>
+        <html:strong data-l10n-key="pref.fullPaper" style="font-size: 13px; color: var(--zotseek-text-primary);">Full paper</html:strong>
       </html:div>
       <html:div style="font-size: 11px; color: var(--zotseek-text-secondary); line-height: 1.4;">
-        <html:div style="color: var(--zotseek-blue); font-weight: 500; margin-bottom: 2px;">Thorough • ~1-2 chunks per page</html:div>
-        Indexes full PDF content with page numbers. Finds specific passages.
+        <html:div data-l10n-key="pref.fullSpeed" style="color: var(--zotseek-blue); font-weight: 500; margin-bottom: 2px;">Thorough • ~1-2 chunks per page</html:div>
+        <html:span data-l10n-key="pref.fullDesc">Indexes full PDF content with page numbers. Finds specific passages.</html:span>
       </html:div>
     </html:div>
   </html:div>
@@ -205,7 +205,7 @@
   <!-- Zotero 7 Performance Warning -->
   <vbox id="zotseek-perf-warning" class="zotseek-warning-box" style="display: none; margin-top: 8px; padding: 10px; border-radius: 6px; border-width: 1px; border-style: solid;">
     <html:p style="margin: 0; font-size: 11px; color: var(--zotseek-orange);">
-      <html:b>⚠️ Zotero 7 Note:</html:b> Full paper indexing is slower on Zotero 7 due to WASM differences.
+      <html:b data-l10n-key="pref.zotero7Note">⚠️ Zotero 7 Note:</html:b> Full paper indexing is slower on Zotero 7 due to WASM differences.
       Consider using Abstract mode for large libraries.
     </html:p>
   </vbox>
@@ -213,96 +213,98 @@
 
 <!-- Auto-Indexing -->
 <groupbox>
-  <label><html:h2>Auto-Indexing</html:h2></label>
+  <label><html:h2 data-l10n-key="pref.autoIndexing">Auto-Indexing</html:h2></label>
 
   <checkbox id="zotseek-pref-autoIndex"
             label="Automatically index new items"
+            data-l10n-key="pref.autoIndexLabel"
             native="true"
             checked="false" />
   <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
-    New papers with PDFs are indexed in the background when added to your library.
+    <html:span data-l10n-key="pref.autoIndexDesc">New papers with PDFs are indexed in the background when added to your library.</html:span>
   </html:p>
 
   <html:div id="zotseek-autoindex-delay-row" style="margin: 8px 0 0 24px; display: flex; align-items: center; gap: 8px;">
-    <html:label for="zotseek-pref-autoIndexDelay" style="color: var(--zotseek-text-primary); font-size: 12px;">Delay before indexing:</html:label>
+    <html:label data-l10n-key="pref.delayLabel" for="zotseek-pref-autoIndexDelay" style="color: var(--zotseek-text-primary); font-size: 12px;">Delay before indexing:</html:label>
     <html:input type="number"
                 id="zotseek-pref-autoIndexDelay"
                 class="zotseek-input"
                 min="1" max="300" step="5"
                 value="10"
                 style="width: 60px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
-    <html:span style="color: var(--zotseek-text-secondary); font-size: 12px;">seconds</html:span>
+    <html:span data-l10n-key="pref.seconds" style="color: var(--zotseek-text-secondary); font-size: 12px;">seconds</html:span>
   </html:div>
   <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
-    Wait this long after the last item is added before starting auto-indexing.
+    <html:span data-l10n-key="pref.delayDesc">Wait this long after the last item is added before starting auto-indexing.</html:span>
   </html:p>
 </groupbox>
 
 <!-- Search Settings -->
 <groupbox>
-  <label><html:h2>Search Settings</html:h2></label>
+  <label><html:h2 data-l10n-key="pref.searchSettings">Search Settings</html:h2></label>
 
   <html:div class="zotseek-settings-box" style="border-radius: 6px; padding: 12px; border-width: 1px; border-style: solid;">
     <html:div style="display: grid; grid-template-columns: 150px 70px 1fr; gap: 10px 12px; align-items: center;">
-      <html:label for="zotseek-pref-topK" style="color: var(--zotseek-text-primary);">Results to show</html:label>
+      <html:label data-l10n-key="pref.resultsToShow" for="zotseek-pref-topK" style="color: var(--zotseek-text-primary);">Results to show</html:label>
       <html:input type="number"
                   id="zotseek-pref-topK"
                   class="zotseek-input"
                   min="5" max="100" step="5"
                   value="20"
                   style="width: 70px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
-      <html:span style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">How many matches to display (5-100)</html:span>
+      <html:span data-l10n-key="pref.resultsToShowDesc" style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">How many matches to display (5-100)</html:span>
 
-      <html:label for="zotseek-pref-minSimilarity" style="color: var(--zotseek-text-primary);">Min similarity</html:label>
+      <html:label data-l10n-key="pref.minSimilarity" for="zotseek-pref-minSimilarity" style="color: var(--zotseek-text-primary);">Min similarity</html:label>
       <html:input type="number"
                   id="zotseek-pref-minSimilarity"
                   class="zotseek-input"
                   min="0" max="100" step="5"
                   value="30"
                   style="width: 70px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
-      <html:span style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">% — Filter out low-quality matches (0-100)</html:span>
+      <html:span data-l10n-key="pref.minSimilarityDesc" style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">% — Filter out low-quality matches (0-100)</html:span>
     </html:div>
   </html:div>
 </groupbox>
 
 <!-- Advanced Settings (Collapsible) -->
 <groupbox>
-  <label><html:h2>Advanced Settings</html:h2></label>
+  <label><html:h2 data-l10n-key="pref.advancedSettings">Advanced Settings</html:h2></label>
 
   <html:div class="zotseek-settings-box" style="border-radius: 6px; padding: 12px; border-width: 1px; border-style: solid;">
     <html:div style="display: grid; grid-template-columns: 150px 70px 1fr; gap: 10px 12px; align-items: center;">
-      <html:label for="zotseek-pref-maxTokens" style="color: var(--zotseek-text-primary);">Max tokens per chunk</html:label>
+      <html:label data-l10n-key="pref.maxTokens" for="zotseek-pref-maxTokens" style="color: var(--zotseek-text-primary);">Max tokens per chunk</html:label>
       <html:input type="number"
                   id="zotseek-pref-maxTokens"
                   class="zotseek-input"
                   min="200" max="8000" step="100"
                   value="800"
                   style="width: 70px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
-      <html:span style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">Chunk size ceiling (200-8000)</html:span>
+      <html:span data-l10n-key="pref.maxTokensDesc" style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">Chunk size ceiling (200-8000)</html:span>
 
-      <html:label for="zotseek-pref-maxChunksPerPaper" style="color: var(--zotseek-text-primary);">Max chunks per paper</html:label>
+      <html:label data-l10n-key="pref.maxChunks" for="zotseek-pref-maxChunksPerPaper" style="color: var(--zotseek-text-primary);">Max chunks per paper</html:label>
       <html:input type="number"
                   id="zotseek-pref-maxChunksPerPaper"
                   class="zotseek-input"
                   min="1" max="200" step="10"
                   value="100"
                   style="width: 70px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
-      <html:span style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">Limit for long documents (1-200)</html:span>
+      <html:span data-l10n-key="pref.maxChunksDesc" style="font-size: 11px; color: var(--zotseek-text-secondary); margin-left: 12px;">Limit for long documents (1-200)</html:span>
     </html:div>
 
   </html:div>
 
   <checkbox id="zotseek-pref-excludeBooks"
             label="Exclude books from indexing"
+            data-l10n-key="pref.excludeBooks"
             native="true"
             checked="true"
             style="margin-top: 12px;" />
-  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+  <html:p data-l10n-key="pref.excludeBooksDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
     Books lack paper sections and are too long to index well.
   </html:p>
 
   <html:div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
-    <html:label for="zotseek-pref-excludeTag" style="color: var(--zotseek-text-primary);">Exclude tag</html:label>
+    <html:label data-l10n-key="pref.excludeTag" for="zotseek-pref-excludeTag" style="color: var(--zotseek-text-primary);">Exclude tag</html:label>
     <html:input type="text"
                 id="zotseek-pref-excludeTag"
                 class="zotseek-input"
@@ -310,24 +312,25 @@
                 placeholder="Enter tag name"
                 style="width: 160px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
   </html:div>
-  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+  <html:p data-l10n-key="pref.excludeTagDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
     Items with this tag will be skipped during indexing. Leave empty to disable.
   </html:p>
 </groupbox>
 
 <!-- Actions -->
 <groupbox>
-  <label><html:h2>Actions</html:h2></label>
+  <label><html:h2 data-l10n-key="pref.actions">Actions</html:h2></label>
 
   <!-- Update Index - Primary action -->
   <vbox class="zotseek-action-primary" style="border-radius: 6px; padding: 12px; margin-bottom: 8px; border-width: 1px; border-style: solid;">
     <hbox align="center">
       <button id="zotseek-update-index"
               label="Update Index"
+              data-l10n-key="pref.updateIndex"
               style="font-weight: 600;" />
-      <html:span style="margin-left: 8px; color: var(--zotseek-green); font-size: 11px; font-weight: 500;">✓ Recommended</html:span>
+      <html:span data-l10n-key="pref.recommended" style="margin-left: 8px; color: var(--zotseek-green); font-size: 11px; font-weight: 500;">✓ Recommended</html:span>
     </hbox>
-    <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
+    <html:p data-l10n-key="pref.updateIndexDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
       Index all unindexed items in your library. Resumes safely from where you left off.
     </html:p>
   </vbox>
@@ -336,9 +339,10 @@
   <vbox class="zotseek-action-secondary" style="border-radius: 6px; padding: 12px; margin-bottom: 8px; border-width: 1px; border-style: solid;">
     <hbox align="center">
       <button id="zotseek-rebuild-index"
-              label="Rebuild Index" />
+              label="Rebuild Index"
+              data-l10n-key="pref.rebuildIndex" />
     </hbox>
-    <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
+    <html:p data-l10n-key="pref.rebuildIndexDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
       Clear and re-index all items with current settings. Use after changing indexing mode.
     </html:p>
   </vbox>
@@ -347,10 +351,11 @@
   <vbox class="zotseek-action-danger" style="border-radius: 6px; padding: 12px; border-width: 1px; border-style: solid;">
     <hbox align="center">
       <button id="zotseek-clear-index"
-              label="Clear Index" />
-      <html:span style="margin-left: 8px; color: var(--zotseek-orange); font-size: 11px;">⚠ Destructive</html:span>
+              label="Clear Index"
+              data-l10n-key="pref.clearIndex" />
+      <html:span data-l10n-key="pref.destructive" style="margin-left: 8px; color: var(--zotseek-orange); font-size: 11px;">⚠ Destructive</html:span>
     </hbox>
-    <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
+    <html:p data-l10n-key="pref.clearIndexDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
       Remove all embeddings from the database. You will need to re-index afterwards.
     </html:p>
   </vbox>
@@ -358,13 +363,14 @@
 
 <!-- About -->
 <groupbox>
-  <label><html:h2>About</html:h2></label>
+  <label><html:h2 data-l10n-key="pref.about">About</html:h2></label>
   <hbox>
     <label class="zotero-text-link"
            is="zotero-text-link"
            role="link"
            href="https://github.com/introfini/zotseek"
-           value="GitHub Repository" />
+           value="GitHub Repository"
+           data-l10n-key="pref.githubRepo" />
   </hbox>
 </groupbox>
 
