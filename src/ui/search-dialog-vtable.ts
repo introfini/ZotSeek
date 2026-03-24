@@ -99,6 +99,9 @@ export class ZotSeekDialogVTable {
     this.window = win;
     const doc = win.document;
 
+    // Register FTL for localization
+    (win as any).MozXULElement?.insertFTLIfNeeded('zotseek.ftl');
+
     // Reload preferences each time dialog opens (in case they changed)
     this.loadPreferences();
 

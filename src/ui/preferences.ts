@@ -28,6 +28,9 @@ class PreferencesManager {
     this.logger.info('Initializing preference pane');
 
     try {
+      // Register FTL for localization (linkset in sub-pane XHTML isn't processed)
+      (window as any).MozXULElement?.insertFTLIfNeeded('zotseek.ftl');
+
       // Initialize preferences
       this.initPreferences();
 

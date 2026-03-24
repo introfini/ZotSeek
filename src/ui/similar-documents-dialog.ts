@@ -28,6 +28,9 @@ class SimilarDocumentsDialog {
   async init(win: Window): Promise<void> {
     this.logger.info('Initializing similar documents dialog');
 
+    // Register FTL for localization
+    (win as any).MozXULElement?.insertFTLIfNeeded('zotseek.ftl');
+
     try {
       // Get the source item from window arguments
       const windowArgs = (win as any).arguments?.[0];
