@@ -335,7 +335,7 @@ export class ZotSeekDialogVTable {
     const searchBtn = doc.getElementById('zotseek-btn') as HTMLButtonElement;
     if (searchBtn) {
       searchBtn.disabled = true;
-      searchBtn.textContent = 'Searching...';
+      searchBtn.textContent = getString('search-searching');
     }
 
     try {
@@ -396,13 +396,13 @@ export class ZotSeekDialogVTable {
 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.setStatus(`Search failed: ${message}`);
+      this.setStatus(getString('search-failed', { error: message }));
       this.logger.error('Search failed:', error);
     } finally {
       this.isSearching = false;
       if (searchBtn) {
         searchBtn.disabled = false;
-        searchBtn.textContent = 'Search';
+        searchBtn.textContent = getString('search-searchLabel');
       }
     }
   }
@@ -652,7 +652,7 @@ export class ZotSeekDialogVTable {
     }
 
     // Set status to indicate we're waiting
-    this.setStatus('Searching in a moment...');
+    this.setStatus(getString('search-searchingMoment'));
 
     // Set new timeout for auto-search
     this.searchTimeout = win.setTimeout(() => {
