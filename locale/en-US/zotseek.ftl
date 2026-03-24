@@ -152,6 +152,31 @@ zotseek-search-showItemsInLibrary = Show { $count } Items in Library
 zotseek-search-addToCollection = Add to Collection
 zotseek-search-noCollections = No collections
 zotseek-search-moreCollections = ... and { $count } more
+zotseek-search-foundItems = Found { $count } items
+zotseek-search-foundItemsFromMatches = Found { $count } items (from { $matches } matches)
+zotseek-search-foundItemsQuery = Found { $count } items ({ $query })
+zotseek-search-noItemsMatchingAll = No items found matching all queries
+zotseek-search-matchBoth = — results must match both queries
+zotseek-search-matchAll = — results must match all queries
+zotseek-search-matchAny = — results can match any query
+
+## Results table columns
+
+zotseek-column-match = Match
+zotseek-column-title = Title
+zotseek-column-authors = Authors
+zotseek-column-year = Year
+zotseek-column-location = Location
+zotseek-column-section = Section
+
+## Source labels
+
+zotseek-source-abstract = Abstract
+zotseek-source-fulltext = Full Text
+zotseek-source-title = Title
+zotseek-source-methods = Methods
+zotseek-source-results = Results
+zotseek-source-content = Content
 zotseek-search-hybrid-menuitem =
     .label = 🔗 Hybrid (Recommended)
 zotseek-search-semantic-menuitem =

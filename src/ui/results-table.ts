@@ -8,6 +8,7 @@
 import { VirtualizedTableHelper } from 'zotero-plugin-toolkit';
 import { SearchResult } from '../core/search-engine';
 import { HybridSearchResult, HybridSearchEngine } from '../core/hybrid-search';
+import { getString } from '../utils/locale';
 import { Logger } from '../utils/logger';
 
 declare const Zotero: any;
@@ -43,41 +44,41 @@ const DEFAULT_COLUMNS: ResultsTableColumn[] = [
   },
   {
     dataKey: 'similarity',
-    label: 'Match',
+    label: getString('column-match'),
     staticWidth: true,
     width: 110,  // Wider to fit per-query scores like "73% (77|77)"
     hidden: false,
   },
   {
     dataKey: 'title',
-    label: 'Title',
+    label: getString('column-title'),
     fixedWidth: false,  // This column will flex
     hidden: false,
   },
   {
     dataKey: 'authors',
-    label: 'Authors',
+    label: getString('column-authors'),
     staticWidth: true,
     width: 180,
     hidden: false,
   },
   {
     dataKey: 'year',
-    label: 'Year',
+    label: getString('column-year'),
     staticWidth: true,
     width: 50,
     hidden: false,
   },
   {
     dataKey: 'page',
-    label: 'Location',
+    label: getString('column-location'),
     staticWidth: true,
     width: 90,
     hidden: false,
   },
   {
     dataKey: 'source',
-    label: 'Section',
+    label: getString('column-section'),
     staticWidth: true,
     width: 80,
     hidden: false,
@@ -329,14 +330,14 @@ export class SearchResultsTable {
   private formatSource(source?: string): string {
     switch (source) {
       // Legacy types
-      case 'abstract': return 'Abstract';
-      case 'fulltext': return 'Full Text';
-      case 'title_only': return 'Title';
+      case 'abstract': return getString('source-abstract');
+      case 'fulltext': return getString('source-fulltext');
+      case 'title_only': return getString('source-title');
       // Section-specific types (new)
-      case 'summary': return 'Abstract';
-      case 'methods': return 'Methods';
-      case 'findings': return 'Results';
-      case 'content': return 'Content';
+      case 'summary': return getString('source-abstract');
+      case 'methods': return getString('source-methods');
+      case 'findings': return getString('source-results');
+      case 'content': return getString('source-content');
       default: return '';
     }
   }

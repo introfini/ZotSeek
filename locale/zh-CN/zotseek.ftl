@@ -152,6 +152,31 @@ zotseek-search-showItemsInLibrary = 在文献库中显示 { $count } 个条目
 zotseek-search-addToCollection = 添加到合集
 zotseek-search-noCollections = 无合集
 zotseek-search-moreCollections = ... 及其他 { $count } 个
+zotseek-search-foundItems = 找到 { $count } 个条目
+zotseek-search-foundItemsFromMatches = 找到 { $count } 个条目（来自 { $matches } 个匹配）
+zotseek-search-foundItemsQuery = 找到 { $count } 个条目（{ $query }）
+zotseek-search-noItemsMatchingAll = 未找到匹配所有查询的条目
+zotseek-search-matchBoth = — 结果必须匹配两个查询
+zotseek-search-matchAll = — 结果必须匹配所有查询
+zotseek-search-matchAny = — 结果可匹配任一查询
+
+## Results table columns
+
+zotseek-column-match = 匹配
+zotseek-column-title = 标题
+zotseek-column-authors = 作者
+zotseek-column-year = 年份
+zotseek-column-location = 位置
+zotseek-column-section = 章节
+
+## Source labels
+
+zotseek-source-abstract = 摘要
+zotseek-source-fulltext = 全文
+zotseek-source-title = 标题
+zotseek-source-methods = 方法
+zotseek-source-results = 结果
+zotseek-source-content = 内容
 zotseek-search-hybrid-menuitem =
     .label = 🔗 混合（推荐）
 zotseek-search-semantic-menuitem =

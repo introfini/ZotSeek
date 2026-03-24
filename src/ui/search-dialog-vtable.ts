@@ -496,10 +496,9 @@ export class ZotSeekDialogVTable {
     let statusParts: string[] = [];
 
     if (this.granularity === 'section' && this.rawResults.length !== this.displayedResults.length) {
-      // Show aggregation info: "Found 15 items (from 42 matches)"
-      statusParts.push(`Found ${this.displayedResults.length} items (from ${this.rawResults.length} matches)`);
+      statusParts.push(getString('search-foundItemsFromMatches', { count: this.displayedResults.length, matches: this.rawResults.length }));
     } else {
-      statusParts.push(`Found ${this.displayedResults.length} items`);
+      statusParts.push(getString('search-foundItems', { count: this.displayedResults.length }));
     }
 
     if (this.searchMode === 'hybrid' && bothCount > 0) {
@@ -792,10 +791,9 @@ export class ZotSeekDialogVTable {
 
     const hintLabel = doc.getElementById('query-operator-hint');
     if (hintLabel) {
-      const queryWord = this.queryCount > 2 ? 'all queries' : 'both queries';
       const text = this.combineOperator === 'and'
-        ? `— results must match ${queryWord}`
-        : '— results can match any query';
+        ? getString(this.queryCount > 2 ? 'search-matchAll' : 'search-matchBoth')
+        : getString('search-matchAny');
       // XUL labels use 'value' attribute - clear both to ensure clean update
       hintLabel.textContent = '';
       hintLabel.setAttribute('value', text);
@@ -920,7 +918,7 @@ export class ZotSeekDialogVTable {
   private buildMultiQueryStatusMessage(queries: string[]): string {
     if (this.displayedResults.length === 0) {
       if (this.combineOperator === 'and') {
-        return 'No items found matching all queries';
+        return getString('search-noItemsMatchingAll');
       }
       return getString('search-noItemsFound');
     }
@@ -941,7 +939,7 @@ export class ZotSeekDialogVTable {
       queryExpr += ` [${formulaLabels[this.andFormula]}]`;
     }
 
-    let msg = `Found ${this.displayedResults.length} items (${queryExpr})`;
+    let msg = getString('search-foundItemsQuery', { count: this.displayedResults.length, query: queryExpr });
 
     // Add source breakdown for hybrid mode
     if (this.searchMode === 'hybrid') {
