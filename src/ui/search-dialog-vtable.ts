@@ -11,7 +11,7 @@ import { HybridSearchEngine, HybridSearchResult, SearchMode } from '../core/hybr
 import { ZoteroAPI } from '../utils/zotero-api';
 import { Logger } from '../utils/logger';
 import { getZotero } from '../utils/zotero-helper';
-import { getString, translateDOM } from '../utils/locale';
+import { getString } from '../utils/locale';
 
 declare const Zotero: any;
 
@@ -98,9 +98,6 @@ export class ZotSeekDialogVTable {
   async init(win: Window): Promise<void> {
     this.window = win;
     const doc = win.document;
-
-    // Translate UI strings
-    translateDOM(doc);
 
     // Reload preferences each time dialog opens (in case they changed)
     this.loadPreferences();
@@ -339,16 +336,16 @@ export class ZotSeekDialogVTable {
     }
 
     try {
-      this.setStatus(getString('search.initializing'));
+      this.setStatus(getString('search-initializing'));
       this.setOpenButtonEnabled(false);
 
       // Show search mode in status
-      const modeLabel = this.searchMode === 'hybrid' ? getString('search.hybrid') :
-                        this.searchMode === 'semantic' ? getString('search.semantic') : getString('search.keyword');
+      const modeLabel = this.searchMode === 'hybrid' ? getString('search-hybrid') :
+                        this.searchMode === 'semantic' ? getString('search-semantic') : getString('search-keyword');
 
       // Initialize search engine if needed (hybrid search will init as needed)
       if (this.searchMode !== 'keyword' && !searchEngine.isReady()) {
-        this.setStatus(getString('search.loadingModel'));
+        this.setStatus(getString('search-loadingModel'));
         await searchEngine.init();
       }
 
@@ -415,7 +412,7 @@ export class ZotSeekDialogVTable {
     modeLabel: string,
     returnAllChunks: boolean
   ): Promise<void> {
-    this.setStatus(getString('search.finding', { mode: modeLabel }));
+    this.setStatus(getString('search-finding', { mode: modeLabel }));
 
     // Use smart search (auto-adjusts weights) or regular search based on preference
     if (this.searchMode === 'hybrid' && this.autoAdjustWeights) {
@@ -444,7 +441,7 @@ export class ZotSeekDialogVTable {
     returnAllChunks: boolean
   ): Promise<void> {
     const opLabel = this.combineOperator.toUpperCase();
-    this.setStatus(getString('search.findingMulti', { mode: modeLabel, op: opLabel }));
+    this.setStatus(getString('search-findingMulti', { mode: modeLabel, op: opLabel }));
 
     // Run searches for each query in parallel
     const searchPromises = queries.map(query => {
@@ -478,7 +475,7 @@ export class ZotSeekDialogVTable {
    */
   private buildStatusMessage(): string {
     if (this.displayedResults.length === 0) {
-      return getString('search.noItemsFound');
+      return getString('search-noItemsFound');
     }
 
     // Count results by source
@@ -922,7 +919,7 @@ export class ZotSeekDialogVTable {
       if (this.combineOperator === 'and') {
         return 'No items found matching all queries';
       }
-      return getString('search.noItemsFound');
+      return getString('search-noItemsFound');
     }
 
     const opLabel = this.combineOperator.toUpperCase();
@@ -1063,7 +1060,7 @@ export class ZotSeekDialogVTable {
 
     // "Show in Library" option
     const showInLibrary = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuitem');
-    showInLibrary.setAttribute('label', itemCount === 1 ? getString('search.showInLibrary') : getString('search.showItemsInLibrary', { count: itemCount }));
+    showInLibrary.setAttribute('label', itemCount === 1 ? getString('search-showInLibrary') : getString('search-showItemsInLibrary', { count: itemCount }));
     showInLibrary.addEventListener('command', () => {
       if (itemCount === 1) {
         this.zoteroAPI.selectItem(itemIds[0]);
@@ -1080,7 +1077,7 @@ export class ZotSeekDialogVTable {
 
     // "Add to Collection" submenu
     const addToCollection = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menu');
-    addToCollection.setAttribute('label', getString('search.addToCollection'));
+    addToCollection.setAttribute('label', getString('search-addToCollection'));
     const collectionPopup = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menupopup');
 
     // Get collections for the submenu
@@ -1115,7 +1112,7 @@ export class ZotSeekDialogVTable {
 
       if (collections.length === 0) {
         const noCollections = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuitem');
-        noCollections.setAttribute('label', getString('search.noCollections'));
+        noCollections.setAttribute('label', getString('search-noCollections'));
         noCollections.setAttribute('disabled', 'true');
         popup.appendChild(noCollections);
         return;
@@ -1138,7 +1135,7 @@ export class ZotSeekDialogVTable {
 
       if (collections.length > maxCollections) {
         const more = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuitem');
-        more.setAttribute('label', getString('search.moreCollections', { count: collections.length - maxCollections }));
+        more.setAttribute('label', getString('search-moreCollections', { count: collections.length - maxCollections }));
         more.setAttribute('disabled', 'true');
         popup.appendChild(more);
       }

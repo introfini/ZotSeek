@@ -9,30 +9,34 @@
   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
   xmlns:html="http://www.w3.org/1999/xhtml"
   title="Find Similar Documents"
-  data-l10n-key="similar.title"
-  data-l10n-attr="title"
+  data-l10n-id="zotseek-similar-title"
+ 
   width="900"
   height="600"
   persist="width,height,screenX,screenY">
 
+  <linkset>
+    <html:link rel="localization" href="zotseek.ftl"/>
+  </linkset>
+
   <!-- Include Zotero's scripts first to make Zotero available -->
   <script src="chrome://zotero/content/include.js"></script>
   <script src="chrome://zotero/content/customElements.js"></script>
-  
+
   <!-- Load the dialog script bundle -->
   <script type="application/javascript" src="chrome://zotseek/content/scripts/similar-documents-dialog.js"/>
 
   <vbox flex="1" style="padding: 10px;">
     <!-- Source Document Info -->
     <hbox align="center" style="margin-bottom: 10px;">
-      <label id="similar-documents-source-text" value="Similar to: " style="font-weight: bold; color: #333;" data-l10n-key="similar.similarTo" data-l10n-attr="value"/>
+      <label id="similar-documents-source-text" value="Similar to: " style="font-weight: bold; color: #333;" data-l10n-id="zotseek-similar-similarTo"/>
     </hbox>
 
     <separator class="thin"/>
 
     <!-- Status -->
     <hbox id="similar-documents-status" align="center" style="min-height: 24px; margin: 5px 0;">
-      <label id="similar-documents-status-text" value="Loading..." style="color: #666;" data-l10n-key="similar.loading" data-l10n-attr="value"/>
+      <label id="similar-documents-status-text" value="Loading..." style="color: #666;" data-l10n-id="zotseek-similar-loading"/>
     </hbox>
 
     <separator class="thin"/>
@@ -46,8 +50,8 @@
 
     <!-- Footer Buttons -->
     <hbox pack="end" style="margin-top: 10px;">
-      <button id="similar-documents-open-btn" label="Open Selected" disabled="true" style="margin-right: 5px;" data-l10n-key="similar.openSelected"/>
-      <button id="similar-documents-close-btn" label="Close" data-l10n-key="similar.close"/>
+      <button id="similar-documents-open-btn" label="Open Selected" disabled="true" style="margin-right: 5px;" data-l10n-id="zotseek-similar-openSelected"/>
+      <button id="similar-documents-close-btn" label="Close" data-l10n-id="zotseek-similar-close"/>
     </hbox>
   </vbox>
 

@@ -9,7 +9,7 @@ import { searchEngine, SearchResult } from '../core/search-engine';
 import { ZoteroAPI } from '../utils/zotero-api';
 import { Logger } from '../utils/logger';
 import { getZotero } from '../utils/zotero-helper';
-import { getString, translateDOM } from '../utils/locale';
+import { getString } from '../utils/locale';
 
 class SimilarDocumentsDialog {
   private logger: Logger;
@@ -27,9 +27,6 @@ class SimilarDocumentsDialog {
    */
   async init(win: Window): Promise<void> {
     this.logger.info('Initializing similar documents dialog');
-
-    // Translate UI strings
-    translateDOM(win.document);
 
     try {
       // Get the source item from window arguments
@@ -60,7 +57,7 @@ class SimilarDocumentsDialog {
     } catch (error) {
       this.logger.error('Failed to initialize dialog:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.setStatus(getString('similar.initFailed', { error: errorMessage }), 'error');
+      this.setStatus(getString('similar-initFailed', { error: errorMessage }), 'error');
       // Log the full error for debugging
       if (error instanceof Error && error.stack) {
         this.logger.error('Error stack:', error.stack);
@@ -97,12 +94,12 @@ class SimilarDocumentsDialog {
    */
   private async findSimilarDocuments(): Promise<void> {
     if (!this.sourceItem) {
-      this.setStatus(getString('similar.noSource'), 'error');
+      this.setStatus(getString('similar-noSource'), 'error');
       return;
     }
 
     try {
-      this.setStatus(getString('similar.finding'), 'loading');
+      this.setStatus(getString('similar-finding'), 'loading');
 
       // Make sure we have Zotero available
       const Z = getZotero();
@@ -118,7 +115,7 @@ class SimilarDocumentsDialog {
         
         if (!isInitialized) {
           this.logger.debug('Search engine not initialized, initializing...');
-          this.setStatus(getString('similar.loadingModel'), 'loading');
+          this.setStatus(getString('similar-loadingModel'), 'loading');
           await searchEngine.init();
           this.logger.debug('Search engine initialized');
         } else {
@@ -138,7 +135,7 @@ class SimilarDocumentsDialog {
       this.setSourceInfo(sourceTitle);
 
       // Find similar documents
-      this.setStatus(getString('similar.searching'), 'loading');
+      this.setStatus(getString('similar-searching'), 'loading');
       
       // Get the numeric item ID
       const itemId = this.sourceItem.id;
@@ -156,7 +153,7 @@ class SimilarDocumentsDialog {
       });
 
       if (results.length === 0) {
-        this.setStatus(getString('similar.noResults'), 'info');
+        this.setStatus(getString('similar-noResults'), 'info');
         this.results = [];
         await this.resultsTable?.setResults([]);
         return;
@@ -172,7 +169,7 @@ class SimilarDocumentsDialog {
       await this.resultsTable?.setResults(this.results, this.enrichedData);
 
       // Update status
-      this.setStatus(getString('similar.found', { count: results.length }), 'success');
+      this.setStatus(getString('similar-found', { count: results.length }), 'success');
       
       // Enable open button if we have results
       this.setOpenButtonEnabled(true);
@@ -183,7 +180,7 @@ class SimilarDocumentsDialog {
     } catch (error) {
       this.logger.error('Search failed:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.setStatus(getString('similar.searchFailed', { error: errorMessage }), 'error');
+      this.setStatus(getString('similar-searchFailed', { error: errorMessage }), 'error');
       // Log the full error for debugging
       if (error instanceof Error && error.stack) {
         this.logger.error('Error stack:', error.stack);
@@ -328,7 +325,7 @@ class SimilarDocumentsDialog {
     const statusText = window.document.getElementById('similar-documents-source-text');
     if (statusText) {
       const truncatedTitle = title.length > 80 ? title.substring(0, 77) + '...' : title;
-      statusText.setAttribute('value', getString('similar.similarTo') + truncatedTitle);
+      statusText.setAttribute('value', getString('similar-similarTo') + truncatedTitle);
     }
   }
 

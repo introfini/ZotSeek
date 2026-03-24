@@ -13,10 +13,14 @@
   height="600"
   persist="width,height,screenX,screenY">
 
+  <linkset>
+    <html:link rel="localization" href="zotseek.ftl"/>
+  </linkset>
+
   <!-- Include Zotero's scripts first to make Zotero available -->
   <script src="chrome://zotero/content/include.js"></script>
   <script src="chrome://zotero/content/customElements.js"></script>
-  
+
   <!-- Load the dialog script bundle -->
   <script type="application/javascript" src="chrome://zotseek/content/scripts/search-dialog-vtable.js"/>
 
@@ -25,17 +29,17 @@
     <vbox id="search-queries-container">
       <!-- Query 1 (always visible) -->
       <hbox id="query-row-1" class="query-row" align="center" style="margin-bottom: 4px;">
-        <label value="Search:" class="query-label" data-l10n-key="search.search" data-l10n-attr="value"/>
+        <label value="Search:" class="query-label" data-l10n-id="zotseek-search-search"/>
         <html:input
           id="zotseek-query-1"
           class="zotseek-query-input"
           type="text"
           placeholder="Enter your search query (auto-searches as you type)..."
-          data-l10n-key="search.placeholder"
-          data-l10n-attr="placeholder"
+          data-l10n-id="zotseek-search-placeholder"
+         
         />
-        <button id="zotseek-add-query-btn" label="+" tooltiptext="Add another query for AND/OR combination" class="query-action-btn" data-l10n-key="search.addQuery" data-l10n-attr="tooltiptext"/>
-        <button id="zotseek-btn" label="Search" data-l10n-key="search.searchBtn" style="margin-left: 8px;"/>
+        <button id="zotseek-add-query-btn" label="+" tooltiptext="Add another query for AND/OR combination" class="query-action-btn" data-l10n-id="zotseek-search-addQuery"/>
+        <button id="zotseek-btn" label="Search" data-l10n-id="zotseek-search-searchBtn" style="margin-left: 8px;"/>
       </hbox>
 
       <!-- Operator row (hidden by default, shown when 2+ queries) -->
@@ -43,62 +47,62 @@
         <label value="" class="query-label"/>
         <menulist id="query-combine-operator" style="min-width: 70px;">
           <menupopup>
-            <menuitem value="and" label="AND" data-l10n-key="search.and"/>
-            <menuitem value="or" label="OR" data-l10n-key="search.or"/>
+            <menuitem value="and" label="AND" data-l10n-id="zotseek-search-and"/>
+            <menuitem value="or" label="OR" data-l10n-id="zotseek-search-or"/>
           </menupopup>
         </menulist>
         <!-- AND formula selector (only visible when AND is selected) -->
         <hbox id="query-formula-container" align="center" style="margin-left: 8px;">
-          <label value="using" style="color: #888; font-size: 11px; margin-right: 4px;" data-l10n-key="search.using" data-l10n-attr="value"/>
+          <label value="using" style="color: #888; font-size: 11px; margin-right: 4px;" data-l10n-id="zotseek-search-using"/>
           <menulist id="query-and-formula" style="min-width: 90px; font-size: 11px;">
             <menupopup>
-              <menuitem value="min" label="Minimum" data-l10n-key="search.minimum"/>
-              <menuitem value="product" label="Product" data-l10n-key="search.product"/>
-              <menuitem value="average" label="Average" data-l10n-key="search.average"/>
+              <menuitem value="min" label="Minimum" data-l10n-id="zotseek-search-minimum"/>
+              <menuitem value="product" label="Product" data-l10n-id="zotseek-search-product"/>
+              <menuitem value="average" label="Average" data-l10n-id="zotseek-search-average"/>
             </menupopup>
           </menulist>
         </hbox>
-        <label id="query-operator-hint" value="— results must match both queries" style="margin-left: 8px; color: #888; font-size: 11px;" data-l10n-key="search.andDesc" data-l10n-attr="value"/>
+        <label id="query-operator-hint" value="— results must match both queries" style="margin-left: 8px; color: #888; font-size: 11px;" data-l10n-id="zotseek-search-andDesc"/>
       </hbox>
 
       <!-- Query 2 (hidden by default) -->
       <hbox id="query-row-2" class="query-row" align="center" style="margin-bottom: 4px; display: none;">
-        <label value="Query 2:" class="query-label" style="color: #666;" data-l10n-key="search.query2" data-l10n-attr="value"/>
+        <label value="Query 2:" class="query-label" style="color: #666;" data-l10n-id="zotseek-search-query2"/>
         <html:input
           id="zotseek-query-2"
           class="zotseek-query-input"
           type="text"
           placeholder="Enter query 2..."
         />
-        <button id="zotseek-remove-query-2-btn" label="✕" tooltiptext="Remove this query" class="query-action-btn query-remove-btn" data-l10n-key="search.removeQuery" data-l10n-attr="tooltiptext"/>
+        <button id="zotseek-remove-query-2-btn" label="✕" tooltiptext="Remove this query" class="query-action-btn query-remove-btn" data-l10n-id="zotseek-search-removeQuery"/>
         <!-- Spacer to match Search button width -->
         <button label="Search" style="margin-left: 8px; visibility: hidden;"/>
       </hbox>
 
       <!-- Query 3 (hidden by default) -->
       <hbox id="query-row-3" class="query-row" align="center" style="margin-bottom: 4px; display: none;">
-        <label value="Query 3:" class="query-label" style="color: #666;" data-l10n-key="search.query3" data-l10n-attr="value"/>
+        <label value="Query 3:" class="query-label" style="color: #666;" data-l10n-id="zotseek-search-query3"/>
         <html:input
           id="zotseek-query-3"
           class="zotseek-query-input"
           type="text"
           placeholder="Enter query 3..."
         />
-        <button id="zotseek-remove-query-3-btn" label="✕" tooltiptext="Remove this query" class="query-action-btn query-remove-btn" data-l10n-key="search.removeQuery" data-l10n-attr="tooltiptext"/>
+        <button id="zotseek-remove-query-3-btn" label="✕" tooltiptext="Remove this query" class="query-action-btn query-remove-btn" data-l10n-id="zotseek-search-removeQuery"/>
         <!-- Spacer to match Search button width -->
         <button label="Search" style="margin-left: 8px; visibility: hidden;"/>
       </hbox>
 
       <!-- Query 4 (hidden by default) -->
       <hbox id="query-row-4" class="query-row" align="center" style="margin-bottom: 4px; display: none;">
-        <label value="Query 4:" class="query-label" style="color: #666;" data-l10n-key="search.query4" data-l10n-attr="value"/>
+        <label value="Query 4:" class="query-label" style="color: #666;" data-l10n-id="zotseek-search-query4"/>
         <html:input
           id="zotseek-query-4"
           class="zotseek-query-input"
           type="text"
           placeholder="Enter query 4..."
         />
-        <button id="zotseek-remove-query-4-btn" label="✕" tooltiptext="Remove this query" class="query-action-btn query-remove-btn" data-l10n-key="search.removeQuery" data-l10n-attr="tooltiptext"/>
+        <button id="zotseek-remove-query-4-btn" label="✕" tooltiptext="Remove this query" class="query-action-btn query-remove-btn" data-l10n-id="zotseek-search-removeQuery"/>
         <!-- Spacer to match Search button width -->
         <button label="Search" style="margin-left: 8px; visibility: hidden;"/>
       </hbox>
@@ -106,28 +110,28 @@
     
     <!-- Search Mode Toggle -->
     <hbox id="search-mode-row" align="center" style="margin-bottom: 8px;">
-      <label value="Mode:" class="query-label" style="color: #666;" data-l10n-key="search.mode" data-l10n-attr="value"/>
+      <label value="Mode:" class="query-label" style="color: #666;" data-l10n-id="zotseek-search-mode"/>
       <menulist id="search-mode-select" style="min-width: 180px;">
         <menupopup>
-          <menuitem value="hybrid" label="🔗 Hybrid (Recommended)" data-l10n-key="search.hybrid"/>
-          <menuitem value="semantic" label="🧠 Semantic Only" data-l10n-key="search.semantic"/>
-          <menuitem value="keyword" label="🔤 Keyword Only" data-l10n-key="search.keyword"/>
+          <menuitem value="hybrid" label="🔗 Hybrid (Recommended)" data-l10n-id="zotseek-search-hybrid"/>
+          <menuitem value="semantic" label="🧠 Semantic Only" data-l10n-id="zotseek-search-semantic"/>
+          <menuitem value="keyword" label="🔤 Keyword Only" data-l10n-id="zotseek-search-keyword"/>
         </menupopup>
       </menulist>
-      <label id="search-mode-hint" value="Match type: 🔗 both searches · 🧠 AI match · 🔤 keyword match" style="margin-left: 12px; color: #999; font-size: 11px;" data-l10n-key="search.modeDesc" data-l10n-attr="value"/>
+      <label id="search-mode-hint" value="Match type: 🔗 both searches · 🧠 AI match · 🔤 keyword match" style="margin-left: 12px; color: #999; font-size: 11px;" data-l10n-id="zotseek-search-modeDesc"/>
     </hbox>
 
     <!-- Results Granularity Toggle -->
     <hbox id="granularity-row" align="center" style="margin-bottom: 8px;">
-      <label value="Results:" class="query-label" style="color: #666;" data-l10n-key="search.results" data-l10n-attr="value"/>
+      <label value="Results:" class="query-label" style="color: #666;" data-l10n-id="zotseek-search-results"/>
       <hbox align="center" style="gap: 16px;">
         <html:label style="display: flex; align-items: center; cursor: pointer;">
           <html:input type="radio" name="granularity" id="granularity-section" value="section" checked="checked" style="margin-right: 4px;"/>
-          <html:span data-l10n-key="search.bySection">By Section</html:span>
+          <html:span data-l10n-id="zotseek-search-bySection">By Section</html:span>
         </html:label>
         <html:label style="display: flex; align-items: center; cursor: pointer;">
           <html:input type="radio" name="granularity" id="granularity-location" value="location" style="margin-right: 4px;"/>
-          <html:span data-l10n-key="search.byLocation">By Location (exact page &amp; paragraph)</html:span>
+          <html:span data-l10n-id="zotseek-search-byLocation">By Location (exact page &amp; paragraph)</html:span>
         </html:label>
       </hbox>
     </hbox>
@@ -147,11 +151,11 @@
     <!-- Footer Buttons -->
     <hbox style="margin-top: 10px;">
       <!-- Settings button on the left -->
-      <button id="zotseek-settings-btn" label="⚙ Settings" tooltiptext="Open ZotSeek preferences" data-l10n-key="search.settings"/>
+      <button id="zotseek-settings-btn" label="⚙ Settings" tooltiptext="Open ZotSeek preferences" data-l10n-id="zotseek-search-settings"/>
       <spacer flex="1"/>
       <!-- Action buttons on the right -->
-      <button id="zotseek-open-btn" label="Open Selected" disabled="true" style="margin-right: 5px;" data-l10n-key="search.openSelected"/>
-      <button id="zotseek-close-btn" label="Close" data-l10n-key="search.close"/>
+      <button id="zotseek-open-btn" label="Open Selected" disabled="true" style="margin-right: 5px;" data-l10n-id="zotseek-search-openSelected"/>
+      <button id="zotseek-close-btn" label="Close" data-l10n-id="zotseek-search-close"/>
     </hbox>
   </vbox>
 

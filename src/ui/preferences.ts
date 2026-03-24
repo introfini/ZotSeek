@@ -4,7 +4,7 @@
  */
 
 import { getZotero } from '../utils/zotero-helper';
-import { getString, translateDOM } from '../utils/locale';
+import { getString } from '../utils/locale';
 import { autoIndexManager } from '../core/auto-index-manager';
 
 class PreferencesManager {
@@ -28,9 +28,6 @@ class PreferencesManager {
     this.logger.info('Initializing preference pane');
 
     try {
-      // Translate UI strings
-      translateDOM(window.document);
-
       // Initialize preferences
       this.initPreferences();
 
@@ -349,8 +346,8 @@ class PreferencesManager {
         // Check for mismatch
         const currentMode = Z.Prefs.get('zotseek.indexingMode', true) || 'abstract';
         const currentModeLabel = {
-          'abstract': getString('pref.abstractOnly'),
-          'full': getString('pref.fullPaper')
+          'abstract': getString('pref-abstractOnly'),
+          'full': getString('pref-fullPaper')
         }[currentMode] || currentMode;
 
         if (warningBox) {
@@ -426,7 +423,7 @@ class PreferencesManager {
       const result = await Z.ZotSeek.compactDatabase();
       // Show success as a brief progress window
       const pw = new Z.ProgressWindow({ closeOnClick: true });
-      pw.changeHeadline(getString('pref.compacted'));
+      pw.changeHeadline(getString('pref-compacted'));
       pw.addDescription(result);
       pw.show();
       pw.startCloseTimer(4000);
@@ -434,7 +431,7 @@ class PreferencesManager {
       await this.loadStatsAndCheckMismatch();
     } catch (e: any) {
       const pw = new Z.ProgressWindow({ closeOnClick: true });
-      pw.changeHeadline(getString('pref.compactionFailed'));
+      pw.changeHeadline(getString('pref-compactionFailed'));
       pw.addDescription(e?.message || String(e));
       pw.show();
       pw.startCloseTimer(4000);
