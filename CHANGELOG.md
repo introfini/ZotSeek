@@ -4,9 +4,20 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 
 ## [Unreleased]
 
+---
+
+## [1.11.1] - 2026-03-25
+
 ### Added
-- **Chinese (zh-CN) Localization** - ZotSeek menus and dialogs now appear in Chinese for Chinese system users (may fix #16)
-  - May also resolve locale interference with Better Notes and Translate for Zotero plugins
+- **Chinese (zh-CN) Localization** - Complete Chinese translation for the entire UI (fixes #16)
+  - Preferences panel, search dialog, similar documents dialog, context menus, indexing progress, and status messages
+  - Uses Zotero's native Fluent (.ftl) localization system
+  - Resolves locale interference with Better Notes and Translate for Zotero plugins
+
+### Technical
+- **i18n Infrastructure** - Added Fluent-based localization with `getString()` API and `data-l10n-id` DOM translation
+  - 150+ translated strings across all user-facing surfaces
+  - Adding new languages requires only a new `.ftl` file in `locale/`
 
 ---
 
