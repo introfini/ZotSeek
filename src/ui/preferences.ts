@@ -318,11 +318,11 @@ class PreferencesManager {
       // Update all statistics
       setText('zotseek-stat-papers', stats.indexedPapers.toLocaleString());
       setText('zotseek-stat-chunks', stats.totalChunks.toLocaleString());
-      setText('zotseek-stat-avgchunks', stats.avgChunksPerPaper.toString());
       setText('zotseek-stat-storage', stats.storageSize);
       setText('zotseek-stat-dbpath', stats.databasePath || '-');
-      setText('zotseek-stat-model', stats.modelId);
-      setText('zotseek-stat-lastindexed', stats.lastIndexed);
+      setText('zotseek-stat-model-line', getString('pref-modelLine', { model: stats.modelId }));
+      setText('zotseek-stat-avg-line', getString('pref-avgLine', { avg: stats.avgChunksPerPaper }));
+      setText('zotseek-stat-lastindexed-line', getString('pref-lastIndexedLine', { date: stats.lastIndexed }));
 
       // Handle index duration display
       const durationLabel = doc.getElementById('zotseek-stat-duration-label');

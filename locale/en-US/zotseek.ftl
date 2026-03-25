@@ -85,6 +85,9 @@ zotseek-pref-clearIndexDesc = Remove all embeddings from the database. You will 
 zotseek-pref-about = About
 zotseek-pref-githubRepo =
     .value = GitHub Repository
+zotseek-pref-modelLine = Model: { $model }
+zotseek-pref-avgLine = Avg: { $avg } chunks/paper
+zotseek-pref-lastIndexedLine = Last indexed: { $date }
 zotseek-pref-compacted = Database Compacted
 zotseek-pref-compactionFailed = Compaction Failed
 

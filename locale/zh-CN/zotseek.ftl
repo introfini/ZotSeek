@@ -85,6 +85,9 @@ zotseek-pref-clearIndexDesc = 从数据库中删除所有嵌入向量。之后�
 zotseek-pref-about = 关于
 zotseek-pref-githubRepo =
     .value = GitHub 仓库
+zotseek-pref-modelLine = 模型：{ $model }
+zotseek-pref-avgLine = 平均：{ $avg } 分块/文献
+zotseek-pref-lastIndexedLine = 上次索引：{ $date }
 zotseek-pref-compacted = 数据库已压缩
 zotseek-pref-compactionFailed = 压缩失败
 
