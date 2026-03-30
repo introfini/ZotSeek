@@ -6,7 +6,6 @@
 
 import { SearchResultsTable } from './results-table';
 import { searchEngine, SearchResult } from '../core/search-engine';
-import { ZoteroAPI } from '../utils/zotero-api';
 import { Logger } from '../utils/logger';
 import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
@@ -16,7 +15,8 @@ class SimilarDocumentsDialog {
   private resultsTable: SearchResultsTable | null = null;
   private results: SearchResult[] = [];
   private enrichedData: Map<number, any> = new Map();
-  private sourceItem: any = null;
+  private sourceItemId: number | null = null;
+  private sourceTitle: string | null = null;
 
   constructor() {
     this.logger = new Logger('SimilarDocumentsDialog');
@@ -32,11 +32,18 @@ class SimilarDocumentsDialog {
     (win as any).MozXULElement?.insertFTLIfNeeded('zotseek.ftl');
 
     try {
-      // Get the source item from window arguments
-      const windowArgs = (win as any).arguments?.[0];
-      if (windowArgs?.sourceItem) {
-        this.sourceItem = windowArgs.sourceItem;
-        this.logger.debug('Source item:', this.sourceItem.id, this.sourceItem.getField('title'));
+      // Get the source item ID from window arguments (primitives only, no live objects)
+      let windowArgs = (win as any).arguments?.[0];
+      // Unwrap XPConnect compartment wrapper if needed (Better Notes pattern)
+      if (windowArgs && !windowArgs.sourceItemId && windowArgs.wrappedJSObject) {
+        windowArgs = windowArgs.wrappedJSObject;
+      }
+      if (windowArgs?.sourceItemId) {
+        this.sourceItemId = typeof windowArgs.sourceItemId === 'number'
+          ? windowArgs.sourceItemId
+          : parseInt(windowArgs.sourceItemId, 10);
+        this.sourceTitle = windowArgs.sourceTitle || null;
+        this.logger.debug('Source item ID:', this.sourceItemId, 'Title:', this.sourceTitle);
       }
 
       // Initialize the results table
@@ -53,7 +60,7 @@ class SimilarDocumentsDialog {
       this.setupEventHandlers(win);
 
       // Automatically search for similar documents
-      if (this.sourceItem) {
+      if (this.sourceItemId) {
         await this.findSimilarDocuments();
       }
 
@@ -96,7 +103,7 @@ class SimilarDocumentsDialog {
    * Find similar documents to the source item
    */
   private async findSimilarDocuments(): Promise<void> {
-    if (!this.sourceItem) {
+    if (!this.sourceItemId) {
       this.setStatus(getString('similar-noSource'), 'error');
       return;
     }
@@ -111,46 +118,34 @@ class SimilarDocumentsDialog {
       }
 
       // Initialize search engine if needed
-      this.logger.debug('Checking if search engine is initialized...');
-      try {
-        const isInitialized = searchEngine && searchEngine.isInitialized && searchEngine.isInitialized();
-        this.logger.debug('Search engine initialized status:', isInitialized);
-        
-        if (!isInitialized) {
-          this.logger.debug('Search engine not initialized, initializing...');
-          this.setStatus(getString('similar-loadingModel'), 'loading');
-          await searchEngine.init();
-          this.logger.debug('Search engine initialized');
-        } else {
-          this.logger.debug('Search engine already initialized');
-        }
-      } catch (initError) {
-        this.logger.error('Error checking/initializing search engine:', initError);
-        // Try to initialize anyway
-        this.logger.debug('Attempting to initialize search engine...');
-        this.setStatus('Loading AI model...', 'loading');
+      if (searchEngine && !searchEngine.isReady()) {
+        this.logger.debug('Search engine not ready, initializing...');
+        this.setStatus(getString('similar-loadingModel'), 'loading');
         await searchEngine.init();
-        this.logger.debug('Search engine initialized after error');
+        this.logger.debug('Search engine initialized');
       }
 
-      // Get source document title
-      const sourceTitle = this.sourceItem.getField('title');
-      this.setSourceInfo(sourceTitle);
+      // Set source document title (passed as primitive, no cross-window access needed)
+      if (this.sourceTitle) {
+        this.setSourceInfo(this.sourceTitle);
+      } else {
+        // Fallback: fetch title from Zotero if not passed
+        try {
+          const sourceItem = await Z.Items.getAsync(this.sourceItemId);
+          if (sourceItem) {
+            this.sourceTitle = sourceItem.getField('title');
+            this.setSourceInfo(this.sourceTitle);
+          }
+        } catch (e) {
+          this.logger.warn('Could not fetch source item title:', e);
+        }
+      }
 
       // Find similar documents
       this.setStatus(getString('similar-searching'), 'loading');
-      
-      // Get the numeric item ID
-      const itemId = this.sourceItem.id;
-      this.logger.debug('Source item ID:', itemId, 'Type:', typeof itemId);
-      
-      // Convert to number if needed
-      const numericId = typeof itemId === 'number' ? itemId : parseInt(itemId, 10);
-      if (isNaN(numericId)) {
-        throw new Error(`Invalid item ID: ${itemId}`);
-      }
-      
-      const results = await searchEngine.findSimilar(numericId, {
+      this.logger.debug('Source item ID:', this.sourceItemId);
+
+      const results = await searchEngine.findSimilar(this.sourceItemId, {
         topK: 20,
         excludeSelf: true,
       });
@@ -383,7 +378,8 @@ class SimilarDocumentsDialog {
     this.resultsTable = null;
     this.results = [];
     this.enrichedData.clear();
-    this.sourceItem = null;
+    this.sourceItemId = null;
+    this.sourceTitle = null;
     this.logger.debug('Dialog cleaned up');
   }
 }
@@ -402,11 +398,11 @@ document.addEventListener("DOMContentLoaded", () => {
 async function init() {
   try {
     await similarDocumentsDialog.init(window);
-  } catch (error) {
-    console.error('Failed to initialize similar documents dialog:', error);
-    if (error instanceof Error) {
-      console.error('Stack:', error.stack);
-    }
+  } catch (error: any) {
+    const message = error?.message || error?.toString() || 'Unknown error';
+    const stack = error?.stack || '';
+    Zotero.debug(`[ZotSeek] Failed to initialize similar documents dialog: ${message}`);
+    if (stack) Zotero.debug(`[ZotSeek] Stack: ${stack}`);
   }
 }
 

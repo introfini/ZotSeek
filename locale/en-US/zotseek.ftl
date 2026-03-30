@@ -198,7 +198,8 @@ zotseek-search-keyword-menuitem =
 
 ## Similar documents dialog
 
-zotseek-similar-title = Find Similar Documents
+zotseek-similar-title =
+    .title = Find Similar Documents
 zotseek-similar-similarTo = Similar to:{ " " }
 zotseek-similar-loading = Loading...
 zotseek-similar-openSelected =

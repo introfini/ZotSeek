@@ -198,7 +198,8 @@ zotseek-search-keyword-menuitem =
 
 ## Similar documents dialog
 
-zotseek-similar-title = 查找相似文献
+zotseek-similar-title =
+    .title = 查找相似文献
 zotseek-similar-similarTo = 相似于：{ " " }
 zotseek-similar-loading = 加载中...
 zotseek-similar-openSelected =

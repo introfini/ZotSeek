@@ -13,7 +13,9 @@ class SimilarDocumentsWrapper {
   }
 
   /**
-   * Open the similar documents dialog for a given item
+   * Open the similar documents dialog for a given item.
+   * Passes only the item ID (a primitive) to avoid cross-window
+   * XPCOM dead wrapper issues. The dialog re-fetches the item.
    */
   open(sourceItem: any): void {
     const Z = getZotero();
@@ -24,12 +26,13 @@ class SimilarDocumentsWrapper {
 
     try {
       const windowArgs = {
-        sourceItem: sourceItem
+        sourceItemId: sourceItem.id,
+        sourceTitle: sourceItem.getField('title'),
       };
 
       const win = Z.getMainWindow().openDialog(
         'chrome://zotseek/content/similarDocumentsDialog.xhtml',
-        'zotseek-similar-documents',
+        '',
         'chrome,centerscreen,resizable,dialog=no,width=900,height=600',
         windowArgs
       );
