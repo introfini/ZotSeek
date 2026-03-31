@@ -337,7 +337,7 @@ Transformers.js can't run directly in Zotero's main thread because:
 
 Embeddings are stored in a **separate SQLite database** (`zotseek.sqlite`) attached to Zotero's connection:
 
-- **Location:** `<Zotero Data Directory>/zotseek.sqlite` (shown in Settings → ZotSeek)
+- **Location:** `<Zotero Data Directory>/zotseek.sqlite`
 - **Size:** ~15KB per paper (abstract mode), ~150KB per paper (full document mode)
 - **Benefits:** O(1) indexed lookups, in-memory caching, atomic updates, clean uninstall
 
@@ -346,6 +346,16 @@ The SQLite backend uses the **ATTACH DATABASE** pattern (inspired by Better BibT
 - **Smart caching** - Pre-normalized Float32Arrays cached in memory after first search
 - **Reliable queries** - Uses `columnQueryAsync()` and `valueQueryAsync()` for robust data retrieval
 - **Clean uninstall** - Database file automatically removed when plugin is uninstalled
+
+### Using ZotSeek on Multiple Computers
+
+The ZotSeek database is local and not synced by Zotero's built-in sync. To use your index on another computer:
+
+1. Copy `zotseek.sqlite` from your Zotero data directory to the same location on the other machine
+2. The embeddings are deterministic - the same paper produces identical embeddings regardless of the computer
+3. With **Auto-index** enabled, new items added after the copy will be indexed automatically on each machine
+
+To find your data directory: **Zotero → Settings → Advanced → Files and Folders → Show Data Directory**.
 
 ---
 
