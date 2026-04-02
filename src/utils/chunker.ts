@@ -35,6 +35,7 @@ export interface ChunkWithLocation extends Chunk {
 export interface ChunkOptions {
   maxTokens?: number;      // Safety limit (default: 7000)
   maxChunks?: number;      // Max chunks per paper (default: 5)
+  maxChars?: number;       // Hard character limit per chunk (must match embedding worker MAX_CHARS)
   totalPages?: number;     // Total pages from Zotero.Fulltext.getPages() for calibrated estimation
 }
 
@@ -46,9 +47,10 @@ export type IndexingMode = 'abstract' | 'full';
 // - 7000 tokens: ~45 seconds per chunk (too slow!)
 // - 500 tokens: ~0.3-0.5 seconds per chunk (very fast!)
 // With paragraph-level chunking, we need many more chunks
-const DEFAULT_OPTIONS: Required<ChunkOptions> = {
+const DEFAULT_OPTIONS: Omit<Required<ChunkOptions>, 'totalPages'> = {
   maxTokens: 800,     // ~2400 chars - typical paragraph size, very fast embedding
   maxChunks: 100,     // Allow up to 100 paragraphs per paper (covers most papers)
+  maxChars: 8000,     // Must match embedding worker MAX_CHARS (hard character ceiling)
 };
 
 // Patterns to identify section boundaries
@@ -68,6 +70,92 @@ export function estimateTokens(text: string): number {
   if (!text) return 0;
   const words = text.split(/\s+/).filter(w => w.length > 0);
   return Math.ceil(words.length * 1.3);
+}
+
+/**
+ * Split a single oversized chunk into multiple chunks at sentence boundaries,
+ * respecting a hard character limit. Preserves metadata (page, paragraph, type).
+ */
+function splitChunkByCharLimit(chunk: Chunk, maxChars: number): Chunk[] {
+  if (chunk.text.length <= maxChars) return [chunk];
+
+  // Extract title prefix (everything before first \n\n) to prepend to each sub-chunk
+  const separatorIdx = chunk.text.indexOf('\n\n');
+  const titlePrefix = separatorIdx >= 0 ? chunk.text.substring(0, separatorIdx) : '';
+  const body = separatorIdx >= 0 ? chunk.text.substring(separatorIdx + 2) : chunk.text;
+  const prefixLen = titlePrefix.length + 2; // +2 for \n\n
+  const availableChars = maxChars - prefixLen;
+
+  if (availableChars <= 0) {
+    // Title alone exceeds limit; just truncate the whole chunk
+    return [{ ...chunk, text: chunk.text.substring(0, maxChars) }];
+  }
+
+  const sentences = body.match(/[^.!?]+[.!?]+/g) || [body];
+  const result: Chunk[] = [];
+  let currentText = '';
+
+  for (const sentence of sentences) {
+    // If a single sentence exceeds the limit, hard-truncate it
+    const cappedSentence = sentence.length > availableChars
+      ? sentence.substring(0, availableChars)
+      : sentence;
+
+    if (currentText.length + cappedSentence.length > availableChars && currentText.trim()) {
+      result.push({
+        ...chunk,
+        index: 0, // Re-indexed by caller
+        text: titlePrefix ? `${titlePrefix}\n\n${currentText.trim()}` : currentText.trim(),
+        tokenCount: estimateTokens(currentText),
+      });
+      currentText = cappedSentence;
+    } else {
+      currentText += cappedSentence;
+    }
+  }
+
+  // Flush remaining
+  if (currentText.trim()) {
+    result.push({
+      ...chunk,
+      index: 0,
+      text: titlePrefix ? `${titlePrefix}\n\n${currentText.trim()}` : currentText.trim(),
+      tokenCount: estimateTokens(currentText),
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Post-process chunks to enforce a hard character limit.
+ * Splits any chunk exceeding maxChars at sentence boundaries.
+ * This catches chunks that slip through the token-based limits due to
+ * the variable token-to-character ratio in academic text.
+ */
+function enforceCharLimit(chunks: Chunk[], maxChars: number, maxChunks: number): Chunk[] {
+  const result: Chunk[] = [];
+
+  for (const chunk of chunks) {
+    if (result.length >= maxChunks) break;
+
+    if (chunk.text.length <= maxChars) {
+      result.push(chunk);
+    } else {
+      const subChunks = splitChunkByCharLimit(chunk, maxChars);
+      for (const sub of subChunks) {
+        if (result.length >= maxChunks) break;
+        result.push(sub);
+      }
+    }
+  }
+
+  // Re-index
+  for (let i = 0; i < result.length; i++) {
+    result[i].index = i;
+  }
+
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -415,7 +503,7 @@ export function chunkDocument(
   
   // For abstract mode, we're done
   if (mode === 'abstract') {
-    return chunks;
+    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -423,7 +511,7 @@ export function chunkDocument(
   // ═══════════════════════════════════════════════════════════════════════
   if (!fulltext || fulltext.length < 500) {
     // No meaningful fulltext available
-    return chunks;
+    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
   }
 
   // Create page estimation context for calibrated page numbers
@@ -508,8 +596,8 @@ export function chunkDocument(
     }
   }
   
-  // Limit to maxChunks
-  return chunks.slice(0, opts.maxChunks);
+  // Enforce character limit as safety net (token estimates can undercount for dense text)
+  return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
 }
 
 /**
@@ -520,9 +608,14 @@ export function getChunkOptionsFromPrefs(Zotero: any): ChunkOptions {
   const maxTokens = Zotero?.Prefs?.get('zotseek.maxTokens', true);
   const maxChunks = Zotero?.Prefs?.get('zotseek.maxChunksPerPaper', true);
 
+  // Detect Zotero 7 (Firefox < 128) for matching the worker's smaller MAX_CHARS
+  const platformVersion = parseInt(Zotero?.platformVersion || '0', 10);
+  const isZotero7 = platformVersion > 0 && platformVersion < 128;
+
   return {
     maxTokens: typeof maxTokens === 'number' ? maxTokens : DEFAULT_OPTIONS.maxTokens,
     maxChunks: typeof maxChunks === 'number' ? maxChunks : DEFAULT_OPTIONS.maxChunks,
+    maxChars: isZotero7 ? 3000 : DEFAULT_OPTIONS.maxChars,
   };
 }
 
@@ -701,7 +794,7 @@ export function chunkDocumentWithPages(
 
   // For abstract mode, we're done
   if (mode === 'abstract') {
-    return chunks;
+    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -709,7 +802,7 @@ export function chunkDocumentWithPages(
   // Each meaningful paragraph gets its own embedding for precise retrieval
   // ═══════════════════════════════════════════════════════════════════════
   if (!pages || pages.length === 0) {
-    return chunks;
+    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
   }
 
   // Minimum text to be indexed (lowered to capture more content)
@@ -863,5 +956,6 @@ export function chunkDocumentWithPages(
     }
   }
 
-  return chunks.slice(0, opts.maxChunks);
+  // Enforce character limit as safety net (token estimates can undercount for dense text)
+  return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
 }
