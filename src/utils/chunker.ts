@@ -48,7 +48,7 @@ export type IndexingMode = 'abstract' | 'full';
 // - 500 tokens: ~0.3-0.5 seconds per chunk (very fast!)
 // With paragraph-level chunking, we need many more chunks
 const DEFAULT_OPTIONS: Omit<Required<ChunkOptions>, 'totalPages'> = {
-  maxTokens: 800,     // ~2400 chars - typical paragraph size, very fast embedding
+  maxTokens: 2000,    // ~6000 chars - larger chunks for better context capture on Firefox 140+
   maxChunks: 100,     // Allow up to 100 paragraphs per paper (covers most papers)
   maxChars: 8000,     // Must match embedding worker MAX_CHARS (hard character ceiling)
 };
@@ -602,20 +602,15 @@ export function chunkDocument(
 
 /**
  * Get chunk options from Zotero preferences
- * Note: Zotero 7 (Firefox < 128) has slower WASM performance - users are warned in preferences UI
  */
 export function getChunkOptionsFromPrefs(Zotero: any): ChunkOptions {
   const maxTokens = Zotero?.Prefs?.get('zotseek.maxTokens', true);
   const maxChunks = Zotero?.Prefs?.get('zotseek.maxChunksPerPaper', true);
 
-  // Detect Zotero 7 (Firefox < 128) for matching the worker's smaller MAX_CHARS
-  const platformVersion = parseInt(Zotero?.platformVersion || '0', 10);
-  const isZotero7 = platformVersion > 0 && platformVersion < 128;
-
   return {
     maxTokens: typeof maxTokens === 'number' ? maxTokens : DEFAULT_OPTIONS.maxTokens,
     maxChunks: typeof maxChunks === 'number' ? maxChunks : DEFAULT_OPTIONS.maxChunks,
-    maxChars: isZotero7 ? 3000 : DEFAULT_OPTIONS.maxChars,
+    maxChars: DEFAULT_OPTIONS.maxChars,
   };
 }
 

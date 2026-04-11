@@ -120,20 +120,10 @@ class ZotSeekPlugin {
   /**
    * Initialize default preferences if not already set
    * Note: Zotero prefs only support string, int, bool - not float
-   * Defaults are version-aware: Zotero 7 (Firefox < 128) uses smaller chunks
    */
   private initDefaultPreferences(): void {
     const Z = getZotero();
     if (!Z) return;
-
-    // Detect Firefox version for version-aware defaults
-    // Firefox 115 (Zotero 7) has ~8-10x slower WASM than Firefox 140 (Zotero 8)
-    const platformVersion = Z.platformMajorVersion || 0;
-    const isSlowFirefox = platformVersion > 0 && platformVersion < 128;
-
-    if (isSlowFirefox) {
-      this.logger.info(`Firefox ${platformVersion} detected - using optimized defaults for slower WASM`);
-    }
 
     // Store minSimilarity as int (30 = 0.3, divide by 100 when reading)
     // Using nomic-embed-text-v1.5 with 8192 token context window
@@ -143,11 +133,7 @@ class ZotSeekPlugin {
       'zotseek.autoIndex': false,
       'zotseek.autoIndexDelay': 10,   // Seconds to wait after last item before auto-indexing
       'zotseek.indexingMode': 'full',  // 'abstract' or 'full' - full paper mode is default for better search quality
-      // Version-aware chunking defaults:
-      // - Zotero 8 (FF 140): Larger chunks (2000 tokens), faster WASM
-      // - Zotero 7 (FF 115): Smaller chunks (800 tokens), slower WASM needs O(n²) mitigation
-      // Both use 100 max chunks for good coverage of full papers
-      'zotseek.maxTokens': isSlowFirefox ? 800 : 2000,
+      'zotseek.maxTokens': 2000,       // Firefox 140+ handles larger chunks efficiently
       'zotseek.maxChunksPerPaper': 100,
       'zotseek.excludeBooks': true,        // Exclude books from search/indexing by default
       'zotseek.excludeTag': 'zotseek-exclude', // Tag name to exclude items from indexing
@@ -375,7 +361,6 @@ class ZotSeekPlugin {
 
   /**
    * Register menus using XUL element injection
-   * Works on both Zotero 7 and 8
    */
   private registerWithXUL(Z: any): void {
     this.logger.info('Registering menus via XUL injection');

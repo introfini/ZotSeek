@@ -6,6 +6,20 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 
 ---
 
+## [1.12.0] - 2026-04-11
+
+### Changed
+- **Dropped Zotero 7 support** — ZotSeek now requires Zotero 8 or newer. Users on Zotero 7 should upgrade to Zotero 8+, or stay on ZotSeek v1.11.x. Zotero 7 (Firefox 115) was ~8-10x slower on WASM/SIMD, and removing the compatibility layer simplifies indexing and unlocks larger default chunks.
+- **Zotero 9 compatibility** — `strict_max_version` bumped to `9.*` so the plugin loads on Zotero 9.0 (released 2026-04-10). Verified end-to-end on Zotero 9.0 / Firefox 140.9.0esr: plugin load, preferences pane, embedding worker, semantic search (~150ms), and clean shutdown.
+- **Default `maxTokens` is now 2000** unconditionally (previously 800 on Zotero 7, 2000 on Zotero 8). Existing users keep their stored value; change it in Settings → ZotSeek if you want the new default.
+
+### Technical
+- Removed version-aware defaults in `src/index.ts`, `src/utils/chunker.ts`, `src/worker/embedding-worker.ts`, and `src/core/embedding-pipeline.ts`.
+- Removed Zotero 7 performance-warning banner from the preferences pane and its FTL strings (`zotseek-pref-zotero7Note`, `zotseek-pref-zotero7Desc`).
+- `scripts/release.js` now emits both `strict_min_version` and `strict_max_version` when regenerating `update.json`.
+
+---
+
 ## [1.11.1] - 2026-03-25
 
 ### Added

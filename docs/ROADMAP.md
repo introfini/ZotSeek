@@ -32,11 +32,6 @@ WebGPU detection and CPU fallback are already in place. Actual GPU acceleration 
 
 > GitHub: [#2](https://github.com/introfini/ZotSeek/issues/2)
 
-### Drop Zotero 7 support
-Remove Zotero 7 compatibility code and target Zotero 8+ only. This would eliminate version-aware code paths, remove WASM performance workarounds, and allow use of newer Firefox/SpiderMonkey APIs.
-
-> GitHub: [#10](https://github.com/introfini/ZotSeek/issues/10)
-
 ### Portable index database
 Make `zotseek.sqlite` portable between machines/profiles by using `item_key` (synced across libraries) instead of `item_id` (local numeric ID) as the primary lookup key. This would allow users to build the index on a fast machine and copy it elsewhere.
 

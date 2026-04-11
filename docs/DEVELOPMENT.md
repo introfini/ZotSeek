@@ -6,7 +6,7 @@
 
 ---
 
-A guide for building Zotero 7/8 plugins with TypeScript, featuring lessons learned from running **Transformers.js v3** with local AI embeddings.
+A guide for building Zotero 8+ plugins with TypeScript, featuring lessons learned from running **Transformers.js v3** with local AI embeddings.
 
 **Key Achievement:** This plugin runs **nomic-embed-text-v1.5** (8K tokens, 768 dims) in Zotero via ChromeWorker - see [ChromeWorker + Transformers.js Solution](#chromeworker--transformersjs-solution).
 
@@ -15,7 +15,7 @@ A guide for building Zotero 7/8 plugins with TypeScript, featuring lessons learn
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Understanding Zotero 7/8 Plugins](#understanding-zotero-78-plugins)
+2. [Understanding Zotero Plugins](#understanding-zotero-plugins)
 3. [Project Setup](#project-setup)
 4. [Plugin Architecture](#plugin-architecture)
 5. [Core Modules Explained](#core-modules-explained)
@@ -42,19 +42,19 @@ node --version  # Should output v18.x.x or higher
 # npm (comes with Node.js)
 npm --version
 
-# Zotero 7 installed
+# Zotero 8 or newer installed
 # Download from: https://www.zotero.org/download/
 ```
 
 ### Recommended Tools
 
 - **VS Code** or **Cursor** - IDE with TypeScript support
-- **Zotero 7** - The target platform (based on Firefox 115 ESR)
+- **Zotero 8+** - The target platform (based on Firefox 140 ESR)
 - **Git** - Version control
 
 ---
 
-## Understanding Zotero 7/8 Plugins
+## Understanding Zotero Plugins
 
 ### What is a Zotero Plugin?
 
@@ -74,31 +74,31 @@ Zotero plugins are **bootstrapped extensions** that run inside Zotero's JavaScri
 | **Root URI** | The base path to your plugin's files at runtime |
 | **Zotero Pane** | The main Zotero window where items are displayed |
 
-### Zotero 7 vs Zotero 8
+### Zotero 8+ Runtime
 
-| Feature | Zotero 7 | Zotero 8 |
-|---------|----------|----------|
-| Firefox Base | 115 ESR | 128+ ESR |
-| Modules | JSM (.jsm) | ESM (.mjs) |
-| Promises | Bluebird | Native JS |
-| manifest.json | ✅ | ✅ |
+| Feature | Zotero 8+ |
+|---------|-----------|
+| Firefox Base | 140 ESR |
+| Modules | ESM (.mjs) |
+| Promises | Native JS |
+| manifest.json | ✅ |
 
 ### Version Compatibility
 
-For plugins that work on both Zotero 7 and 8:
+ZotSeek targets Zotero 8 and newer:
 
 ```json
 {
   "applications": {
     "zotero": {
-      "strict_min_version": "6.999",
-      "strict_max_version": "8.*"
+      "strict_min_version": "7.999",
+      "strict_max_version": "9.*"
     }
   }
 }
 ```
 
-> ⚠️ This guide targets **Zotero 7 and 8**. Zotero 6 plugins use a different structure.
+> ⚠️ This guide targets **Zotero 8 and 9**. Earlier Zotero versions use a different structure and are no longer supported.
 
 ---
 
@@ -160,7 +160,7 @@ Create `tsconfig.json`:
 ```
 
 Key settings:
-- `target: ES2020` - Firefox 115 supports modern JS
+- `target: ES2020` - Firefox 140 supports modern JS
 - `module: ESNext` - Use ES modules (esbuild will bundle)
 - `noEmit: true` - TypeScript only type-checks; esbuild compiles
 
@@ -183,8 +183,8 @@ Create `manifest.json`:
     "zotero": {
       "id": "zotseek@zotero.org",
       "update_url": "https://example.com/update.json",
-      "strict_min_version": "6.999",
-      "strict_max_version": "8.*"
+      "strict_min_version": "7.999",
+      "strict_max_version": "9.*"
     }
   }
 }
@@ -609,7 +609,7 @@ async function build() {
     format: 'iife',                    // Immediately invoked function
     globalName: 'ZotSeek', // Global variable name
     platform: 'browser',
-    target: ['firefox115'],            // Zotero 7's Firefox version
+    target: ['firefox140'],            // Zotero 8's Firefox ESR
     minify: process.env.NODE_ENV === 'production',
   });
 

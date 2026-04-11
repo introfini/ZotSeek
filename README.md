@@ -2,7 +2,7 @@
 
 Find similar papers by **meaning**, not just keywords. 100% local, no data leaves your machine.
 
-> **Status:** ✅ Stable release with Transformers.js running locally in Zotero 7 & 8
+> **Status:** ✅ Stable release with Transformers.js running locally in Zotero 8 and 9
 
 ![ZotSeek Search Dialog](docs/images/search-dialog-by-section.png)
 
@@ -253,10 +253,10 @@ The `maxTokens` setting controls how text is split for embedding. It's a **ceili
 | Chunk Size | Speed | Search Behavior |
 |------------|-------|-----------------|
 | **500-800** | Fast (~0.5s/chunk) | Higher precision, finds specific passages |
-| **2000** | Moderate (~3s/chunk) | Balanced (default for Zotero 8) |
+| **2000** | Moderate (~3s/chunk) | Balanced (default) |
 | **4000+** | Slow | Higher recall, finds broad topics |
 
-**Version-aware defaults:** Zotero 7 uses 800 tokens (slower Firefox engine), Zotero 8 uses 2000 tokens.
+**Default:** 2000 tokens. Firefox 140+ handles larger chunks efficiently.
 
 **Recommendations:**
 - Large libraries with full-paper indexing: use defaults
@@ -382,7 +382,21 @@ Where:
 
 ## Installation
 
-### Development Setup
+### For Users
+
+**Requirements:** Zotero 8.0 or newer (Zotero 9.0 supported).
+
+1. Download the latest `zotseek-X.Y.Z.xpi` from the [Releases page](https://github.com/introfini/ZotSeek/releases/latest).
+2. In Zotero, open **Tools → Plugins**.
+3. Click the gear icon (⚙️) in the top-right and choose **Install Plugin From File…**
+4. Select the downloaded `.xpi` file.
+5. Restart Zotero when prompted.
+
+After installation, ZotSeek is ready to use — open **Zotero → Settings → ZotSeek** to configure it, then right-click a collection and choose **"Update Library Index"** to build your index.
+
+**Updating:** ZotSeek checks for updates automatically. New releases are delivered through Zotero's built-in plugin update mechanism, so you'll be notified when a new version is available.
+
+### For Developers
 
 ```bash
 # Clone the repository
@@ -402,14 +416,13 @@ echo "$(pwd)/build" > ~/Library/Application\ Support/Zotero/Profiles/*.default/e
 open -a Zotero --args -purgecaches -ZoteroDebugText -jsconsole
 ```
 
-### Building for Distribution
+### Building a Distributable XPI
 
 ```bash
-cd build
-zip -r ../zotseek.xpi *
+npm run release
 ```
 
-Install via: Zotero → Tools → Add-ons → Install Add-on From File
+The interactive release script bumps the version, syncs `manifest.json` and `update.json`, rebuilds, and packages `zotseek-X.Y.Z.xpi` at the project root.
 
 ---
 
@@ -563,7 +576,7 @@ Preferences are stored in Zotero's preferences system:
 | Preference | Default | Description |
 |------------|---------|-------------|
 | `zotseek.indexingMode` | `"full"` | `"abstract"` or `"full"` |
-| `zotseek.maxTokens` | 800 / 2000 | Max tokens per chunk (800 on Zotero 7, 2000 on Zotero 8) |
+| `zotseek.maxTokens` | `2000` | Max tokens per chunk |
 | `zotseek.maxChunksPerPaper` | `100` | Max chunks per paper |
 | `zotseek.excludeBooks` | `true` | Skip books during indexing |
 | `zotseek.excludeTag` | `"zotseek-exclude"` | Tag name to skip items during indexing (empty to disable) |
@@ -601,7 +614,7 @@ Tested on MacBook Pro M3:
 
 The plugin includes several performance optimizations:
 
-1. **Version-Aware Chunk Size** - 800 tokens on Zotero 7 (~0.5s), 2000 tokens on Zotero 8 (~3s) — avoids O(n²) attention bottleneck
+1. **Tuned Chunk Size** - 2000 tokens (~3s/chunk) balances recall and speed while avoiding the O(n²) attention bottleneck
 2. **In-Memory Caching** - Embeddings cached after first search
 3. **Pre-normalized Vectors** - Float32Arrays normalized on load for fast dot product
 4. **Parallel Searches** - Semantic and keyword searches run simultaneously
@@ -616,10 +629,10 @@ ZotSeek automatically detects and uses **WebGPU** for GPU-accelerated embeddings
 | **WebGPU (GPU)** | If browser/Zotero supports WebGPU | Up to 10-20x faster |
 | **WASM (CPU)** | Fallback when WebGPU unavailable | ~3 seconds per chunk |
 
-**Current status (January 2026):**
+**Current status (April 2026):**
 - Firefox 141 shipped WebGPU on **Windows only** (July 2025)
-- **macOS and Linux** WebGPU support coming in future Firefox versions
-- Zotero 8 is based on Firefox 140 ESR (one version before WebGPU)
+- **macOS and Linux** WebGPU support is still in progress at Mozilla
+- Both Zotero 8 and Zotero 9 ship Firefox 140 ESR — one version before the first WebGPU build, so GPU acceleration is still gated on an upstream Firefox ESR bump
 
 **When will GPU work?** Once Zotero upgrades to a Firefox ESR with WebGPU support for your platform, GPU acceleration will automatically activate — no plugin update needed.
 
@@ -634,7 +647,7 @@ Note: If WebGPU is unavailable or fails, the plugin automatically falls back to 
 - **English-optimized search** - The embedding model is trained primarily on English text (UI available in English and Chinese)
 - **Large plugin size** - ~131MB due to bundled AI model
 - **CPU only (for now)** - GPU acceleration ready but waiting for Zotero/Firefox WebGPU support
-- **Zotero 7 slower for Full Document mode** - Firefox 115 (Zotero 7) has slower WASM performance than Firefox 140 (Zotero 8). Full Document indexing is ~8-10x slower on Zotero 7. **Recommendation:** Use Abstract mode for faster indexing on Zotero 7, or upgrade to Zotero 8 for best performance.
+- **Zotero 8 or newer required** - As of v1.12.0, Zotero 7 is no longer supported. Users on Zotero 7 should upgrade to Zotero 8 or later, or stay on ZotSeek v1.11.x.
 
 ---
 

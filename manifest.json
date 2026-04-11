@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "ZotSeek | AI-Powered Semantic Search",
-  "version": "1.11.2",
+  "version": "1.12.0",
   "description": "AI-powered semantic search for your Zotero library. Find similar papers by meaning, not just keywords.",
   "author": "José Fernandes",
   "homepage_url": "https://github.com/introfini/zotseek",
@@ -13,8 +13,8 @@
     "zotero": {
       "id": "zotseek@zotero.org",
       "update_url": "https://raw.githubusercontent.com/introfini/zotseek/main/update.json",
-      "strict_min_version": "6.999",
-      "strict_max_version": "8.*"
+      "strict_min_version": "7.999",
+      "strict_max_version": "9.*"
     }
   }
 }

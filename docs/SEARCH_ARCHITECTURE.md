@@ -521,7 +521,7 @@ Embedding time scales **O(n²)** with sequence length due to transformer attenti
 | Chunk Size | Speed | Precision | Recall | Best For |
 |------------|-------|-----------|--------|----------|
 | **500-800 tokens** | Very fast (~0.3-0.5s/chunk) | High | Lower | Finding specific claims, methods, passages |
-| **2000 tokens** | Moderate (~3s/chunk) | Balanced | Balanced | General use (default for Zotero 8) |
+| **2000 tokens** | Moderate (~3s/chunk) | Balanced | Balanced | General use (default) |
 | **4000+ tokens** | Slow (~10s+/chunk) | Lower | Higher | Finding papers about broad topics |
 | **7000 tokens** | Very slow (~45s/chunk) | Low | High | Not recommended |
 
@@ -529,16 +529,9 @@ Embedding time scales **O(n²)** with sequence length due to transformer attenti
 - **Smaller chunks** = more precise matches to specific passages, but may miss broader context
 - **Larger chunks** = captures more context, but similarity scores get "diluted" by surrounding text
 
-### Version-Aware Defaults
+### Default maxTokens
 
-ZotSeek automatically adjusts chunk size based on your Zotero version:
-
-| Zotero Version | Firefox Engine | Default maxTokens | Reason |
-|----------------|----------------|-------------------|--------|
-| **Zotero 7** | Firefox 115 ESR | **800** | ~8-10x slower WASM/SIMD performance |
-| **Zotero 8** | Firefox 140 ESR | **2000** | Faster WASM, can handle larger chunks |
-
-This is set automatically on first run. You can override it in Settings > ZotSeek.
+The default is **2000 tokens** per chunk. Firefox 140+ (Zotero 8) handles this efficiently. You can override it in Settings > ZotSeek.
 
 ### Paragraph-Based Chunking
 
@@ -730,12 +723,12 @@ See [Chunking Strategy](#chunking-strategy) for detailed trade-offs. Summary:
 | Chunk Size | Time per Chunk | Notes |
 |------------|----------------|-------|
 | 7000 tokens | ~45 seconds | Too slow for practical use |
-| 2000 tokens | ~3 seconds | Default for Zotero 8 |
-| 800 tokens | ~0.5 seconds | Default for Zotero 7 |
+| 2000 tokens | ~3 seconds | **Default** |
+| 800 tokens | ~0.5 seconds | Higher precision, finds specific passages |
 | 500 tokens | ~0.3 seconds | Fastest, highest precision |
 
 **Default settings:**
-- `maxTokens`: 800 (Zotero 7) / 2000 (Zotero 8) — version-aware
+- `maxTokens`: 2000 — tuned for Firefox 140+ WASM
 - `maxChunksPerPaper`: 100 — covers most full papers
 - Paragraph-aware splitting (never splits mid-paragraph)
 
@@ -863,7 +856,7 @@ Maximum: 1.00 (100%)
 | Preference | Default | Description |
 |------------|---------|-------------|
 | `indexingMode` | `"full"` | `"abstract"` or `"full"` |
-| `maxTokens` | 800 / 2000 | Max tokens per chunk (version-aware: 800 on Zotero 7, 2000 on Zotero 8) |
+| `maxTokens` | `2000` | Max tokens per chunk |
 | `maxChunksPerPaper` | `100` | Max chunks per paper |
 
 ---

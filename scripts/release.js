@@ -26,7 +26,8 @@ function generateUpdateJson(version) {
             update_link: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v${version}/zotseek-${version}.xpi`,
             applications: {
               zotero: {
-                strict_min_version: '6.999'
+                strict_min_version: '7.999',
+                strict_max_version: '9.*'
               }
             }
           }

@@ -6,7 +6,6 @@
 
 import { Logger } from '../utils/logger';
 
-declare const Zotero: any;
 declare const ChromeWorker: any;
 
 export interface EmbeddingResult {
@@ -140,16 +139,7 @@ export class EmbeddingPipeline {
           reject(new Error(`Worker failed: ${errorInfo.message}`));
         };
 
-        // Initialize the worker with Zotero version info
-        // ChromeWorker doesn't have access to full userAgent, so pass version from main thread
-        // Zotero.platformMajorVersion = Firefox version (102 for Zotero 7, 128+ for Zotero 8)
-        const zoteroMajorVersion = typeof Zotero !== 'undefined' ? parseInt(Zotero.version?.split('.')[0], 10) || 0 : 0;
-        const platformMajorVersion = typeof Zotero !== 'undefined' ? Zotero.platformMajorVersion || 0 : 0;
-        this.logger.info(`Zotero version: ${zoteroMajorVersion}, Platform (Firefox): ${platformMajorVersion}`);
-        this.worker.postMessage({
-          type: 'init',
-          data: { zoteroMajorVersion, platformMajorVersion }
-        });
+        this.worker.postMessage({ type: 'init' });
 
       } catch (error) {
         this.logger.error('Failed to create ChromeWorker:', error);

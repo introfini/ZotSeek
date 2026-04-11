@@ -34,9 +34,6 @@ class PreferencesManager {
       // Initialize preferences
       this.initPreferences();
 
-      // Show Zotero 7 performance warning only on Zotero 7 (Firefox < 128)
-      this.initVersionWarning();
-
       // Set up event listeners
       this.initEventListeners();
 
@@ -46,25 +43,6 @@ class PreferencesManager {
       this.logger.info('Preference pane initialized successfully');
     } catch (error) {
       this.logger.error(`Failed to initialize preferences: ${error}`);
-    }
-  }
-
-  /**
-   * Show performance warning only on Zotero 7 (Firefox < 128)
-   */
-  private initVersionWarning(): void {
-    if (!this.window) return;
-    const doc = this.window.document;
-    const Z = getZotero();
-    if (!Z) return;
-
-    const perfWarning = doc.getElementById('zotseek-perf-warning');
-    if (perfWarning) {
-      // Show warning only on Firefox < 128 (Zotero 7)
-      const platformVersion = Z.platformMajorVersion || 0;
-      const isZotero7 = platformVersion > 0 && platformVersion < 128;
-      perfWarning.style.display = isZotero7 ? 'block' : 'none';
-      this.logger.debug(`Performance warning ${isZotero7 ? 'shown' : 'hidden'} (Firefox ${platformVersion})`);
     }
   }
 

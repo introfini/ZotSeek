@@ -25,27 +25,6 @@ if (typeof navigator === 'undefined') {
 const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
 let useWebGPU = false; // Will be set after actual GPU adapter check
 
-// Detect Zotero/Firefox version to determine threading support
-// Zotero 7 = Firefox 102 ESR (limited SharedArrayBuffer support in workers)
-// Zotero 8 = Firefox 128+ ESR (full support)
-function detectZoteroVersion(): { major: number; firefoxVersion: number } {
-  const ua = navigator.userAgent || '';
-  // Zotero UA format: "Mozilla/5.0 ... Firefox/102.0 Zotero/7.0.0"
-  const zoteroMatch = ua.match(/Zotero\/(\d+)/);
-  const firefoxMatch = ua.match(/Firefox\/(\d+)/);
-  return {
-    major: zoteroMatch ? parseInt(zoteroMatch[1], 10) : 0,
-    firefoxVersion: firefoxMatch ? parseInt(firefoxMatch[1], 10) : 0,
-  };
-}
-
-let zoteroInfo = detectZoteroVersion();
-// Only force single-thread for Firefox < 110 (very old versions with limited SharedArrayBuffer)
-let isZotero7 = zoteroInfo.firefoxVersion > 0 && zoteroInfo.firefoxVersion < 110;
-
-// Allow main thread to override version detection (ChromeWorker may have limited userAgent)
-let versionOverrideApplied = false;
-
 // Import Transformers.js v3
 import { pipeline, env } from '@huggingface/transformers';
 
@@ -61,20 +40,9 @@ env.localModelPath = 'chrome://zotseek/content/models/';
 env.useBrowserCache = false;
 (env as any).useCache = false;
 
-// Use multiple threads if available for faster embedding
-// ChromeWorker supports SharedArrayBuffer in Zotero 8's privileged context
-// Zotero 7 (Firefox 102) has limited SharedArrayBuffer support - use single thread
-if (isZotero7) {
-  env.backends.onnx.wasm.numThreads = 1;
-  postMessage({
-    type: 'log',
-    level: 'warn',
-    message: 'Zotero 7 detected - using single-threaded mode (slower indexing)',
-    data: { zoteroVersion: zoteroInfo.major, firefoxVersion: zoteroInfo.firefoxVersion }
-  });
-} else {
-  env.backends.onnx.wasm.numThreads = navigator.hardwareConcurrency || 4;
-}
+// Use multiple threads for faster embedding
+// ChromeWorker supports SharedArrayBuffer in Zotero 8+'s privileged context (Firefox 140+)
+env.backends.onnx.wasm.numThreads = navigator.hardwareConcurrency || 4;
 
 // Log configuration
 postMessage({
@@ -85,8 +53,6 @@ postMessage({
     wasmPaths: env.backends.onnx.wasm.wasmPaths,
     localModelPath: env.localModelPath,
     webGPUDetected: hasWebGPU,
-    zoteroVersion: zoteroInfo.major,
-    firefoxVersion: zoteroInfo.firefoxVersion,
     numThreads: env.backends.onnx.wasm.numThreads,
   }
 });
@@ -112,11 +78,8 @@ const MODEL_OPTIONS = {
 // Embedding time scales ~O(n²) with sequence length due to attention
 // - 24000 chars (~8000 tokens): ~45 seconds (too slow!)
 // - 8000 chars (~2000 tokens): ~3-5 seconds (acceptable)
-// The chunker now creates smaller chunks, this is a safety limit
-// Note: MAX_CHARS can be reduced dynamically for slower Firefox versions (see init handler)
-let MAX_CHARS = 8000;
-const MAX_CHARS_ZOTERO8 = 8000;  // Firefox 128+ has optimized WASM
-const MAX_CHARS_ZOTERO7 = 3000;  // Firefox 115 is ~8-10x slower, use smaller chunks
+// The chunker now creates smaller chunks, this is a safety limit.
+const MAX_CHARS = 8000;
 
 // Instruction prefixes for nomic-embed
 // These improve retrieval quality by signaling intent to the model
@@ -323,28 +286,6 @@ addEventListener('message', async (event: MessageEvent) => {
 
   switch (type) {
     case 'init':
-      // Receive version info from main thread (ChromeWorker has limited userAgent)
-      if (data?.zoteroMajorVersion || data?.platformMajorVersion) {
-        zoteroInfo = {
-          major: data.zoteroMajorVersion || 0,
-          firefoxVersion: data.platformMajorVersion || 0,
-        };
-        // Detect if this is a slower Firefox version (< 128)
-        // Firefox 115 (Zotero 7) has ~8-10x slower WASM than Firefox 140 (Zotero 8)
-        const isSlowFirefox = zoteroInfo.firefoxVersion > 0 && zoteroInfo.firefoxVersion < 128;
-
-        // Adjust MAX_CHARS for slower Firefox to mitigate O(n²) attention scaling
-        if (isSlowFirefox && !versionOverrideApplied) {
-          MAX_CHARS = MAX_CHARS_ZOTERO7;
-          versionOverrideApplied = true;
-          postMessage({
-            type: 'log',
-            level: 'warn',
-            message: `Firefox ${zoteroInfo.firefoxVersion} detected - using smaller chunk size (${MAX_CHARS} chars) for better performance`,
-            data: { zoteroVersion: zoteroInfo.major, firefoxVersion: zoteroInfo.firefoxVersion, maxChars: MAX_CHARS }
-          });
-        }
-      }
       await initPipeline();
       break;
 
