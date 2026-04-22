@@ -31,3 +31,6 @@ coverage/
 # Zotero specific
 *.xpi
 .mcp.json
+
+# Internal brainstorm specs and implementation plans (never committed)
+docs/superpowers/

@@ -213,6 +213,23 @@ const similarDocsBuildOptions = {
   logLevel: 'info',
 };
 
+// Collection export dialog build configuration
+const collectionExportDialogBuildOptions = {
+  entryPoints: [path.resolve(srcDir, 'ui/collection-export-dialog.ts')],
+  bundle: true,
+  outfile: path.resolve(buildDir, 'content/scripts/collection-export-dialog.js'),
+  format: 'iife',
+  platform: 'browser',
+  target: ['firefox128'],
+  minify: !isDev,
+  sourcemap: isDev ? 'inline' : false,
+  define: {
+    'process.env.NODE_ENV': isDev ? '"development"' : '"production"',
+  },
+  external: [],
+  logLevel: 'info',
+};
+
 
 async function build() {
   try {
@@ -240,7 +257,10 @@ async function build() {
       
       await esbuild.build(similarDocsBuildOptions);
       console.log('Similar documents dialog bundle complete!');
-      
+
+      await esbuild.build(collectionExportDialogBuildOptions);
+      console.log('Collection export dialog bundle complete!');
+
       console.log('Build complete!');
     }
   } catch (error) {

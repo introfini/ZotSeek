@@ -12,6 +12,11 @@ import { ZoteroAPI } from '../utils/zotero-api';
 import { Logger } from '../utils/logger';
 import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
+import {
+  addItemsToCollection as sharedAddItemsToCollection,
+  populateCollectionMenu as sharedPopulateCollectionMenu,
+  exportItemsToNewCollection,
+} from './collection-export';
 
 declare const Zotero: any;
 
@@ -187,6 +192,8 @@ export class ZotSeekDialogVTable {
       }
 
       openBtn?.addEventListener('click', () => this.openSelected());
+      const saveCollectionBtn = doc.getElementById('zotseek-save-collection-btn');
+      saveCollectionBtn?.addEventListener('command', () => this.saveAllResultsAsCollection());
       closeBtn?.addEventListener('click', () => this.close());
 
       // Settings button - opens ZotSeek preferences
@@ -341,6 +348,7 @@ export class ZotSeekDialogVTable {
     try {
       this.setStatus(getString('search-initializing'));
       this.setOpenButtonEnabled(false);
+      this.setSaveCollectionButtonEnabled(false);
 
       // Show search mode in status
       const modeLabel = this.searchMode === 'hybrid' ? getString('search-hybrid') :
@@ -374,6 +382,7 @@ export class ZotSeekDialogVTable {
 
       // Apply granularity filtering
       this.displayedResults = this.applyGranularity(this.rawResults);
+      this.setSaveCollectionButtonEnabled(this.displayedResults.length > 0);
 
       // Update table with results
       await this.resultsTable?.setHybridResults(this.displayedResults);
@@ -570,6 +579,7 @@ export class ZotSeekDialogVTable {
     this.lastQuery = '';
     this.rawResults = [];
     this.displayedResults = [];
+    this.setSaveCollectionButtonEnabled(false);
     this.resultsTable?.setHybridResults([]);
 
     // Trigger new search if there are any active queries
@@ -606,6 +616,7 @@ export class ZotSeekDialogVTable {
       this.lastQuery = '';
       this.rawResults = [];
       this.displayedResults = [];
+      this.setSaveCollectionButtonEnabled(false);
       await this.performSearch();
     }
   }
@@ -632,6 +643,7 @@ export class ZotSeekDialogVTable {
       this.setStatus('');
       this.rawResults = [];
       this.displayedResults = [];
+      this.setSaveCollectionButtonEnabled(false);
       this.enrichedData.clear();
       this.resultsTable?.setResults([]);
       this.lastQuery = '';
@@ -1081,7 +1093,19 @@ export class ZotSeekDialogVTable {
     addToCollection.setAttribute('label', getString('search-addToCollection'));
     const collectionPopup = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menupopup');
 
-    // Get collections for the submenu
+    // "New collection..." entry (opens the export dialog with the selected items)
+    const newCollectionItem = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuitem');
+    newCollectionItem.setAttribute('data-l10n-id', 'zotseek-export-addToCollectionNew');
+    newCollectionItem.addEventListener('command', async () => {
+      await this.saveItemsAsNewCollection(itemIds, this.suggestedNameForQuery());
+    });
+    collectionPopup.appendChild(newCollectionItem);
+
+    // Separator between "New collection..." and the existing-collections list.
+    const sep = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuseparator');
+    collectionPopup.appendChild(sep);
+
+    // Existing collections (fills the rest of the submenu)
     this.populateCollectionMenu(collectionPopup, itemIds);
     addToCollection.appendChild(collectionPopup);
     popup.appendChild(addToCollection);
@@ -1102,74 +1126,26 @@ export class ZotSeekDialogVTable {
   private populateCollectionMenu(popup: Element, itemIds: number[]): void {
     const doc = this.window?.document;
     if (!doc) return;
-
-    try {
-      // Get the library ID from the first item
-      const firstItem = Zotero.Items.get(itemIds[0]);
-      const libraryID = firstItem?.libraryID || Zotero.Libraries.userLibraryID;
-
-      // Get all collections in the library
-      const collections = Zotero.Collections.getByLibrary(libraryID);
-
-      if (collections.length === 0) {
-        const noCollections = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuitem');
-        noCollections.setAttribute('label', getString('search-noCollections'));
-        noCollections.setAttribute('disabled', 'true');
-        popup.appendChild(noCollections);
-        return;
-      }
-
-      // Sort collections by name
-      collections.sort((a: any, b: any) => a.name.localeCompare(b.name));
-
-      // Add each collection as a menu item (limit to top 20 to avoid huge menus)
-      const maxCollections = 20;
-      for (let i = 0; i < Math.min(collections.length, maxCollections); i++) {
-        const collection = collections[i];
-        const item = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuitem');
-        item.setAttribute('label', collection.name);
-        item.addEventListener('command', async () => {
-          await this.addItemsToCollection(itemIds, collection.id);
-        });
-        popup.appendChild(item);
-      }
-
-      if (collections.length > maxCollections) {
-        const more = doc.createElementNS('http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul', 'menuitem');
-        more.setAttribute('label', getString('search-moreCollections', { count: collections.length - maxCollections }));
-        more.setAttribute('disabled', 'true');
-        popup.appendChild(more);
-      }
-    } catch (error) {
-      this.logger.error('Failed to populate collection menu:', error);
-    }
+    sharedPopulateCollectionMenu({
+      popup,
+      items: itemIds,
+      doc,
+      logger: this.logger,
+      onPickCollection: (collectionID) => this.addItemsToCollection(itemIds, collectionID),
+    });
   }
 
   /**
    * Add items to a collection
-   * Must be wrapped in a transaction for Zotero's database operations
    */
   private async addItemsToCollection(itemIds: number[], collectionId: number): Promise<void> {
     try {
-      this.logger.info(`Adding items ${itemIds.join(', ')} to collection ${collectionId}`);
-
-      const collection = Zotero.Collections.get(collectionId);
-      if (!collection) {
-        this.setStatus('Collection not found');
-        this.logger.error(`Collection ${collectionId} not found`);
-        return;
-      }
-
-      const collectionName = collection.name;
-      this.logger.info(`Found collection: ${collectionName}`);
-
-      // Wrap in transaction - required for Zotero DB operations
-      await Zotero.DB.executeTransaction(async () => {
-        await collection.addItems(itemIds);
+      const { collectionName, addedCount } = await sharedAddItemsToCollection({
+        items: itemIds,
+        collectionID: collectionId,
+        logger: this.logger,
       });
-
-      this.setStatus(`Added ${itemIds.length} item${itemIds.length > 1 ? 's' : ''} to "${collectionName}"`);
-      this.logger.info(`Added ${itemIds.length} items to collection "${collectionName}"`);
+      this.setStatus(`Added ${addedCount} item${addedCount > 1 ? 's' : ''} to "${collectionName}"`);
     } catch (error: any) {
       const errorMsg = error?.message || error?.toString() || 'Unknown error';
       this.logger.error(`Failed to add items to collection: ${errorMsg}`);
@@ -1181,6 +1157,63 @@ export class ZotSeekDialogVTable {
   }
 
   /**
+   * Compose a suggested collection name based on the current query and date.
+   * Truncates long queries to 60 chars.
+   */
+  private suggestedNameForQuery(): string {
+    const date = new Date().toISOString().slice(0, 10);
+    const rawQuery = (this.lastQuery || '').trim();
+    const MAX = 60;
+    const truncQuery = rawQuery.length > MAX ? rawQuery.slice(0, MAX - 1) + '…' : rawQuery;
+    if (truncQuery.length === 0) {
+      return `ZotSeek results · ${date}`;
+    }
+    return `ZotSeek: “${truncQuery}” · ${date}`;
+  }
+
+  /**
+   * Invoke the export dialog for the given item IDs and show a status summary.
+   * Used by both the submenu "New collection..." entry and the footer button.
+   */
+  private async saveItemsAsNewCollection(itemIds: number[], suggestedName: string): Promise<void> {
+    if (!this.window || itemIds.length === 0) return;
+    try {
+      const summary = await exportItemsToNewCollection({
+        items: itemIds,
+        suggestedName,
+        window: this.window,
+        logger: this.logger,
+      });
+      if (summary === null) return; // user canceled
+      const base = getString('export-statusExported',
+        { count: summary.addedCount, name: summary.collectionName });
+      const full = summary.skippedCount > 0
+        ? getString('export-statusExportedSkipped',
+            { count: summary.addedCount, name: summary.collectionName, skipped: summary.skippedCount })
+        : base;
+      this.setStatus(full);
+    } catch (error: any) {
+      const msg = error?.message || error?.toString() || 'Unknown error';
+      this.logger.error(`Export to collection failed: ${msg}`);
+      if (error?.stack) Zotero.debug(`[ZotSeek] Stack: ${error.stack}`);
+      this.setStatus(getString('export-statusFailed'));
+    }
+  }
+
+  /**
+   * Footer button: export the full result set (deduped to unique items)
+   * to a new collection.
+   */
+  private async saveAllResultsAsCollection(): Promise<void> {
+    if (!this.resultsTable) return;
+    // resultsTable.getResultItemIds() does NOT dedupe; in location-granularity
+    // mode each row is a separate chunk with the same itemId. Dedupe here.
+    const itemIds = [...new Set(this.resultsTable.getResultItemIds())];
+    if (itemIds.length === 0) return;
+    await this.saveItemsAsNewCollection(itemIds, this.suggestedNameForQuery());
+  }
+
+  /**
    * Enable/disable open button
    */
   private setOpenButtonEnabled(enabled: boolean): void {
@@ -1188,6 +1221,14 @@ export class ZotSeekDialogVTable {
     if (btn) {
       btn.disabled = !enabled;
     }
+  }
+
+  /**
+   * Enable/disable the Save Results as Collection button.
+   */
+  private setSaveCollectionButtonEnabled(enabled: boolean): void {
+    const btn = this.window?.document.getElementById('zotseek-save-collection-btn') as HTMLButtonElement;
+    if (btn) btn.disabled = !enabled;
   }
 
   /**
@@ -1315,6 +1356,7 @@ export class ZotSeekDialogVTable {
     this.resultsTable = null;
     this.rawResults = [];
     this.displayedResults = [];
+    this.setSaveCollectionButtonEnabled(false);
     this.enrichedData.clear();
     this.window = null;
     this.lastQuery = '';

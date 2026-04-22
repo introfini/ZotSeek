@@ -292,3 +292,32 @@ zotseek-indexing-embedding = Embedding { $current }/{ $total }...
 zotseek-indexing-saving = Saving...
 zotseek-indexing-chunksIndexed = ✓ { $count } chunks indexed
 zotseek-indexing-chunksIndexedWithFailed = ✓ { $count } chunks indexed ({ $failed } failed)
+
+## Export to Collection (issue #28)
+
+# Keys referenced via data-l10n-id on XUL elements use the .attr = value form
+# so Fluent sets the named attribute instead of wiping the element's children.
+# Keys consumed via formatValueSync / getString() from JS stay as plain key = text.
+
+zotseek-export-saveAsCollection =
+    .label = Save Results as Collection
+zotseek-export-addToCollectionNew =
+    .label = New collection...
+zotseek-export-dialogTitle =
+    .title = Save Results as Collection
+zotseek-export-nameLabel =
+    .value = Collection name:
+zotseek-export-libraryLabel =
+    .value = Library:
+zotseek-export-ok =
+    .label = Save
+zotseek-export-cancel =
+    .label = Cancel
+zotseek-export-itemcountSimple = { $count } items → { $destination }
+zotseek-export-itemcountFiltered = { $kept } of { $total } items → { $destination } ({ $reasons })
+zotseek-export-reasonOtherLibrary = { $count } in other libraries
+zotseek-export-reasonDeleted = { $count } deleted
+zotseek-export-itemcountEmpty = No items to add.
+zotseek-export-statusExported = Added { $count } items to "{ $name }".
+zotseek-export-statusExportedSkipped = Added { $count } items to "{ $name }", { $skipped } skipped.
+zotseek-export-statusFailed = Failed to save results as collection.

@@ -3427,5 +3427,33 @@ After completing this tutorial, you can:
 
 ---
 
+## Testing: Save Results as Collection
+
+The Save Results as Collection feature has no automated tests. The project has no test harness at all, so verification is manual and in-Zotero. Before cutting a release, walk through these scenarios. The feature was designed in response to [issue #28](https://github.com/introfini/ZotSeek/issues/28).
+
+1. **Bulk footer button, main search dialog.** Run a search with 10+ results. Click **Save Results as Collection**. Modal opens pre-filled (`ZotSeek: "<query>" · <date>`). Save. New collection appears in sidebar with all the result items; status bar reports `Added N items to "...".`
+
+2. **Submenu "New collection...".** Same search, right-click a subset of rows → **Add to Collection → New collection...** → Save. Only the right-clicked items land in the new collection.
+
+3. **Similar Documents footer button.** Select any indexed item → right-click → **Find Similar Documents**. When results load, click **Save Results as Collection**. Pre-fill reads `ZotSeek: similar to "<title>" · <date>`. Save. Collection contains the similar items.
+
+4. **Naming edge cases.** Clear the name field → Save button disables. Long query (>60 chars) → name truncates cleanly with `…`. Special characters (`"`, `/`, emoji) → accepted verbatim.
+
+5. **Cancel.** Press Esc or click Cancel → modal closes, nothing created, no status change.
+
+6. **Item deleted mid-workflow.** Delete a result item to Trash and empty trash in another Zotero window before clicking Save. Modal status shows `N of M items → <library> (1 deleted)`. Save. Collection has N items; status `Added N items to "...", 1 skipped`.
+
+7. **Multi-library.** Requires a Zotero account with a group library. Index both personal and group. Run a search spanning both → Library dropdown appears in the modal. Switch libraries → item count updates. Save. Collection lands in the chosen library (at its root); items from the other library are reported skipped.
+
+8. **Regression: Add to existing collection.** Right-click → **Add to Collection** → pick an existing collection. Still works (the shared `addItemsToCollection` helper is reused by both the existing flow and the new flow).
+
+If any test fails, check `CLAUDE.md` pitfalls first:
+- XPI override hiding your proxy-file build
+- SpiderMonkey bytecode cache not clearing on plugin reload
+- Fluent attribute form (`data-l10n-id` targets need `.attr = value`, not plain text)
+- `document.l10n` is async at modal open; use the project's `getString` helper for sync access
+
+---
+
 *Happy plugin development! 🚀*
 

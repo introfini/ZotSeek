@@ -9,6 +9,7 @@ import { searchEngine, SearchResult } from '../core/search-engine';
 import { Logger } from '../utils/logger';
 import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
+import { exportItemsToNewCollection } from './collection-export';
 
 class SimilarDocumentsDialog {
   private logger: Logger;
@@ -84,6 +85,9 @@ class SimilarDocumentsDialog {
     // Open button
     const openBtn = doc.getElementById('similar-documents-open-btn');
     openBtn?.addEventListener('command', () => this.openSelected());
+
+    const saveCollectionBtn = doc.getElementById('similar-documents-save-collection-btn');
+    saveCollectionBtn?.addEventListener('command', () => this.saveResultsAsCollection());
 
     // Close button
     const closeBtn = doc.getElementById('similar-documents-close-btn');
@@ -171,6 +175,7 @@ class SimilarDocumentsDialog {
       
       // Enable open button if we have results
       this.setOpenButtonEnabled(true);
+      this.setSaveCollectionButtonEnabled(true);
 
       // Select first result
       this.resultsTable?.selectIndex(0);
@@ -292,6 +297,46 @@ class SimilarDocumentsDialog {
   }
 
   /**
+   * Footer button: export the full results set (deduped) to a new collection.
+   */
+  private async saveResultsAsCollection(): Promise<void> {
+    if (!this.resultsTable || this.results.length === 0) return;
+    // Dedupe: getResultItemIds() returns one entry per row, not per item.
+    const itemIds = [...new Set(this.resultsTable.getResultItemIds())];
+    if (itemIds.length === 0) return;
+
+    const date = new Date().toISOString().slice(0, 10);
+    const MAX = 60;
+    const rawTitle = (this.sourceTitle || '').trim();
+    const truncTitle = rawTitle.length > MAX ? rawTitle.slice(0, MAX - 1) + '…' : rawTitle;
+    const suggestedName = truncTitle.length > 0
+      ? `ZotSeek: similar to “${truncTitle}” · ${date}`
+      : `ZotSeek similar results · ${date}`;
+
+    try {
+      const summary = await exportItemsToNewCollection({
+        items: itemIds,
+        suggestedName,
+        window,
+        logger: this.logger,
+      });
+      if (summary === null) return;
+      const base = getString('export-statusExported',
+        { count: summary.addedCount, name: summary.collectionName });
+      const full = summary.skippedCount > 0
+        ? getString('export-statusExportedSkipped',
+            { count: summary.addedCount, name: summary.collectionName, skipped: summary.skippedCount })
+        : base;
+      this.setStatus(full, 'success');
+    } catch (error: any) {
+      const msg = error?.message || error?.toString() || 'Unknown error';
+      this.logger.error(`Export to collection failed: ${msg}`);
+      if (error?.stack) this.logger.error('Error stack:', error.stack);
+      this.setStatus(getString('export-statusFailed'), 'error');
+    }
+  }
+
+  /**
    * Open a specific item
    */
   private openItem(index: number): void {
@@ -358,6 +403,16 @@ class SimilarDocumentsDialog {
         openBtn.setAttribute('disabled', 'true');
       }
     }
+  }
+
+  /**
+   * Enable/disable the Save Results as Collection button.
+   */
+  private setSaveCollectionButtonEnabled(enabled: boolean): void {
+    const btn = window.document.getElementById('similar-documents-save-collection-btn');
+    if (!btn) return;
+    if (enabled) btn.removeAttribute('disabled');
+    else btn.setAttribute('disabled', 'true');
   }
 
   /**

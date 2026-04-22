@@ -21,6 +21,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 📑 **Section-Aware** - See which section matched (Abstract, Methods, Results)
 - 📍 **Passage-Level Location** - Jump to exact page & paragraph in Full Document mode
 - ✅ **Multi-Select in Results** - Select multiple search results, right-click to add to collections
+- 📁 **Save Results as Collection** - One click saves the full result set into a new Zotero collection so you can revisit the list later without re-running the search
 - 🔄 **Auto-Index** - Automatically index new papers when you add them to your library
 - 🗑️ **Auto-Cleanup** - Embeddings automatically removed when items are deleted or trashed
 - 🚫 **Tag-Based Exclusion** - Tag items with `zotseek-exclude` to skip them during indexing
@@ -459,6 +460,20 @@ The interactive release script bumps the version, syncs `manifest.json` and `upd
 1. Select any paper in your library
 2. Right-click → **"Find Similar Documents"**
 3. Results appear showing similarity percentages
+
+### Save Results as Collection
+
+Every ZotSeek search result set can be saved into a Zotero collection so you can come back to the same list later without re-running the search:
+
+- In the search dialog, click **"Save Results as Collection"** in the footer to export every result.
+- Or right-click any subset of results and choose **Add to Collection → New collection...** to export just the selection.
+- The same button appears in the **Find Similar Documents** dialog.
+
+The modal pre-fills a sensible name (your query + today's date, e.g. `ZotSeek: "machine learning" · 2026-04-21`) that you can edit. A live status line shows `N items → My Library` so you know where the collection will land.
+
+New collections are created at the target library's root. If you want them in a specific subfolder, drag them from Zotero's sidebar after the export — faster and more flexible than a dropdown.
+
+When search results span multiple libraries (for example, your personal library and a group library), a Library dropdown appears so you can pick which library receives the new collection. Items in other libraries are reported as skipped in the confirmation status.
 
 ### Search from PDF Selection
 

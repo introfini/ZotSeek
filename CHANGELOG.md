@@ -4,6 +4,19 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 
 ## [Unreleased]
 
+### Added
+- **Save Results as Collection** (#28) - Export search results into a Zotero collection so the list survives closing the search dialog. Two entry points:
+  - Footer button **"Save Results as Collection"** in both the main search dialog and the Find Similar Documents dialog. Exports every result in the current list.
+  - Submenu entry **Add to Collection → New collection...** in the main search dialog. Exports only the right-clicked subset.
+  - The modal pre-fills a suggested name (e.g. `ZotSeek: "llm" · 2026-04-21`) and shows a live status line (`N items → My Library`). New collections land at the target library's root; drag them into a subfolder from Zotero's sidebar if you want.
+  - When a single result set spans multiple libraries (personal + group), a Library dropdown appears so you can pick which library receives the new collection. Items in other libraries are reported as skipped in the confirmation.
+
+### Technical
+- New shared module `src/ui/collection-export.ts` centralizes collection operations. The existing right-click "Add to Collection -> pick existing" flow and the new bulk/submenu flows all go through it (single source of truth).
+- New modal dialog at `content/collectionExportDialog.xhtml` with its own esbuild bundle (`collection-export-dialog.js`).
+- Localization via the project's sync `Localization` helper (`getString`). The DOMLocalization available as `document.l10n` is async at modal open time and its `formatValueSync` throws; the modal uses `getString` to avoid this.
+- Fluent strings referenced via `data-l10n-id` use the `.attribute = value` form so Fluent sets the named attribute (`.title`, `.label`, `.value`) instead of wiping the element's children.
+
 ---
 
 ## [1.12.0] - 2026-04-11
