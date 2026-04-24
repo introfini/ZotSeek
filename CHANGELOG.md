@@ -2,7 +2,18 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.13.1] - 2026-04-24
+
+### Fixed
+- **Preferences now actually apply to search** (#29) - "Results to show" and "Minimum similarity" were silently ignored by the search dialog, which always returned up to 50 results and filtered at 20% similarity regardless of user settings. Both prefs are now honored in the main search dialog (single-query and multi-query AND/OR) and in the Find Similar Documents dialog.
+
+### Technical
+- `src/ui/search-dialog-vtable.ts` reads `zotseek.topK` and `zotseek.minSimilarityPercent` on dialog open and passes them to the hybrid search engine. For multi-query searches, sub-queries still use a broad threshold (0.15) so AND intersections can form, and the user's threshold is applied to the final combined score.
+- `src/ui/similar-documents-dialog.ts` passes the same prefs to `findSimilar()` instead of the hardcoded `topK: 20`.
+
+---
+
+## [1.13.0] - 2026-04-22
 
 ### Added
 - **Save Results as Collection** (#28) - Export search results into a Zotero collection so the list survives closing the search dialog. Two entry points:

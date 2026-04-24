@@ -149,8 +149,17 @@ class SimilarDocumentsDialog {
       this.setStatus(getString('similar-searching'), 'loading');
       this.logger.debug('Source item ID:', this.sourceItemId);
 
+      // Read result-limit preferences (set from the preferences pane)
+      const topKPref = Z?.Prefs?.get('zotseek.topK', true);
+      const minSimPref = Z?.Prefs?.get('zotseek.minSimilarityPercent', true);
+      const topK = (typeof topKPref === 'number' && topKPref > 0) ? Math.floor(topKPref) : 20;
+      const minSimilarity = (typeof minSimPref === 'number' && minSimPref >= 0 && minSimPref <= 100)
+        ? minSimPref / 100
+        : 0.3;
+
       const results = await searchEngine.findSimilar(this.sourceItemId, {
-        topK: 20,
+        topK,
+        minSimilarity,
         excludeSelf: true,
       });
 

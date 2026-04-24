@@ -43,6 +43,10 @@ export class ZotSeekDialogVTable {
   private searchMode: SearchMode = 'hybrid';
   private autoAdjustWeights: boolean = true;
 
+  // User-configurable result limits (read from prefs on dialog open)
+  private userTopK: number = 20;
+  private userMinSimilarity: number = 0.3;
+
   // Results granularity: 'section' shows aggregated by section, 'location' shows exact page/paragraph
   private granularity: 'section' | 'location' = 'section';
 
@@ -80,6 +84,17 @@ export class ZotSeekDialogVTable {
         }
 
         this.autoAdjustWeights = Z.Prefs.get('extensions.zotero.zotseek.hybridSearch.autoAdjustWeights', true) !== false;
+
+        // Load result-limit preferences set from the preferences pane
+        const topKPref = Z.Prefs.get('zotseek.topK', true);
+        if (typeof topKPref === 'number' && topKPref > 0) {
+          this.userTopK = Math.floor(topKPref);
+        }
+        const minSimPref = Z.Prefs.get('zotseek.minSimilarityPercent', true);
+        if (typeof minSimPref === 'number' && minSimPref >= 0 && minSimPref <= 100) {
+          this.userMinSimilarity = minSimPref / 100;
+        }
+        this.logger.info(`Result limits: topK=${this.userTopK}, minSimilarity=${this.userMinSimilarity}`);
 
         // Load indexing mode to determine if granularity toggle should be shown
         const indexMode = Z.Prefs.get('extensions.zotero.zotseek.indexingMode', true);
@@ -429,15 +444,15 @@ export class ZotSeekDialogVTable {
     // Use smart search (auto-adjusts weights) or regular search based on preference
     if (this.searchMode === 'hybrid' && this.autoAdjustWeights) {
       this.rawResults = await this.hybridSearch.smartSearch(query, {
-        finalTopK: returnAllChunks ? 150 : 50,
-        minSimilarity: 0.2,
+        finalTopK: this.userTopK,
+        minSimilarity: this.userMinSimilarity,
         mode: this.searchMode,
         returnAllChunks,
       });
     } else {
       this.rawResults = await this.hybridSearch.search(query, {
-        finalTopK: returnAllChunks ? 150 : 50,
-        minSimilarity: 0.2,
+        finalTopK: this.userTopK,
+        minSimilarity: this.userMinSimilarity,
         mode: this.searchMode,
         returnAllChunks,
       });
@@ -857,7 +872,10 @@ export class ZotSeekDialogVTable {
 
     // Combine scores based on operator
     const combinedResults: HybridSearchResult[] = [];
-    const minThreshold = 0.15;  // Lower threshold since combination will filter further
+    // Apply the user's configured minimum similarity to the COMBINED score so
+    // "AND" requires every sub-score to clear the bar (combined = min), and
+    // "OR" requires at least one sub-score to clear the bar (combined = max).
+    const minThreshold = this.userMinSimilarity;
 
     for (const [itemId, { results, scores }] of itemScores) {
       const validScores = scores.filter((s): s is number => s !== null);
@@ -900,7 +918,7 @@ export class ZotSeekDialogVTable {
     // Sort by combined score descending
     combinedResults.sort((a, b) => (b.semanticScore ?? 0) - (a.semanticScore ?? 0));
 
-    return combinedResults.slice(0, 50);  // Return top 50
+    return combinedResults.slice(0, this.userTopK);
   }
 
   /**
