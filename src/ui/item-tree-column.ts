@@ -15,6 +15,7 @@
 
 import { Logger } from '../utils/logger';
 import { IVectorStore, ItemIndexStatus } from '../core/storage-factory';
+import { identityFromItem, StableIdentity } from '../core/identity-resolver';
 
 declare const Zotero: any;
 
@@ -53,7 +54,7 @@ export class ItemTreeIndexColumn {
   private cache = new Map<number, CacheEntry>();
   private pending = new Map<number, Promise<void>>();
   private registeredKey: string | null = null;
-  private getStatusFn: ((itemIds: number[]) => Promise<Map<number, ItemIndexStatus>>) | null = null;
+  private vectorStore: IVectorStore | null = null;
 
   /**
    * Register the column with Zotero's ItemTreeManager.
@@ -62,7 +63,7 @@ export class ItemTreeIndexColumn {
   async register(vectorStore: IVectorStore): Promise<void> {
     if (this.registeredKey) return;
 
-    this.getStatusFn = (ids: number[]) => vectorStore.getIndexStatusMap(ids);
+    this.vectorStore = vectorStore;
 
     const itm = Zotero?.ItemTreeManager;
     if (!itm || typeof itm.registerColumns !== 'function') {
@@ -239,17 +240,45 @@ export class ItemTreeIndexColumn {
   }
 
   private async hydrateBatch(ids: number[]): Promise<void> {
-    if (!this.getStatusFn || ids.length === 0) return;
+    if (!this.vectorStore || ids.length === 0) return;
     try {
-      const map = await this.getStatusFn(ids);
+      // Resolve items and their stable identities up front. We do the
+      // identity resolution here (rather than letting the legacy id-keyed
+      // shim do it inside the store) so we only walk Zotero.Items.get()
+      // once per batch — meaningful on libraries with thousands of items.
+      const items = ids
+        .map((id) => Zotero.Items.get(id))
+        .filter((it: any) => !!it);
+
+      const identities: StableIdentity[] = items
+        .map((it: any) => identityFromItem(it))
+        .filter((i: StableIdentity | null): i is StableIdentity => i !== null);
+
+      const byIdentity = identities.length > 0
+        ? await this.vectorStore.getIndexStatusByIdentity(identities)
+        : new Map<string, ItemIndexStatus>();
+
       const now = Date.now();
-      for (const id of ids) {
-        const status = map.get(id) || null;
-        this.cache.set(id, {
-          status,
-          state: status ? (status.wasTruncated ? 'partial' : 'indexed') : 'not-indexed',
+      // Build a per-item-id view that downstream cache lookups expect.
+      const seen = new Set<number>();
+      for (const item of items) {
+        const identity = identityFromItem(item);
+        const status = identity
+          ? (byIdentity.get(`${identity.libraryKey}|${identity.itemKey}`) || null)
+          : null;
+        const cacheStatus = status ? { ...status, itemId: item.id } : null;
+        this.cache.set(item.id, {
+          status: cacheStatus,
+          state: cacheStatus ? (cacheStatus.wasTruncated ? 'partial' : 'indexed') : 'not-indexed',
           cachedAt: now,
         });
+        seen.add(item.id);
+      }
+      // Any ids we couldn't resolve (deleted/feed/etc.) still need to be
+      // marked so we don't re-hydrate them every paint.
+      for (const id of ids) {
+        if (seen.has(id)) continue;
+        this.cache.set(id, { status: null, state: 'not-indexed', cachedAt: now });
       }
     } catch (e: any) {
       this.logger.error(`hydrateBatch failed: ${e?.message || e}`);

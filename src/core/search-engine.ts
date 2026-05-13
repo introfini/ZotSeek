@@ -11,19 +11,29 @@ import { Logger } from '../utils/logger';
 import { PaperEmbedding, IVectorStore, getVectorStore } from './storage-factory';
 import { VectorStoreSQLite, TextSourceType } from './vector-store-sqlite';
 import { EmbeddingPipeline, embeddingPipeline } from './embedding-pipeline';
+import { identityFromItem } from './identity-resolver';
+
+declare const Zotero: any;
 
 export interface SearchResult {
-  itemId: number;
-  itemKey: string;
+  // Stable identity (always present)
+  itemPk: number;              // Internal surrogate PK; stable within DB lifetime, useful for de-dup
+  libraryKey: string;          // 'user' | 'group:<groupID>' | 'orphan' (only if explicitly requested)
+  itemKey: string;             // Zotero 8-char key, stable across machines
+
+  // Resolved local convenience (may be undefined for orphans)
+  itemId?: number;             // Current Zotero.Item.id resolved at read time
+  libraryId?: number;          // Current local library ID resolved at read time
+
   title: string;
-  similarity: number;       // 0-1 cosine similarity (max across chunks, or per-chunk if returnAllChunks)
+  similarity: number;          // 0-1 cosine similarity (max across chunks, or per-chunk if returnAllChunks)
   textSource: TextSourceType;  // Section type: summary, methods, findings, content
   matchedChunkIndex?: number;  // Which chunk had the highest similarity
-  chunkIndex?: number;        // Chunk index (when returnAllChunks=true)
-  authors?: string[];         // Optional: author names for display
-  year?: number;              // Optional: publication year for display
-  pageNumber?: number;        // 1-based page number of matched chunk
-  paragraphIndex?: number;    // 0-based paragraph index within page
+  chunkIndex?: number;         // Chunk index (when returnAllChunks=true)
+  authors?: string[];          // Optional: author names for display
+  year?: number;               // Optional: publication year for display
+  pageNumber?: number;         // 1-based page number of matched chunk
+  paragraphIndex?: number;     // 0-based paragraph index within page
 }
 
 export interface SearchOptions {
@@ -44,8 +54,11 @@ const DEFAULT_OPTIONS: Required<Omit<SearchOptions, 'libraryId' | 'excludeItemId
  * Internal structure for MaxSim aggregation
  */
 interface ItemSimilarity {
-  itemId: number;
+  itemPk: number;
+  libraryKey: string;
   itemKey: string;
+  itemId?: number;
+  libraryId?: number;
   title: string;
   textSource: TextSourceType;
   maxSimilarity: number;
@@ -138,9 +151,12 @@ export class SearchEngine {
     // Get cached embeddings for fast search
     const store = this.getStore();
     let embeddings: Array<{
-      itemId: number;
-      chunkIndex: number;
+      itemPk: number;
+      libraryKey: string;
       itemKey: string;
+      itemId?: number;
+      libraryId?: number;
+      chunkIndex: number;
       title: string;
       textSource: TextSourceType;
       embedding: Float32Array;
@@ -165,9 +181,12 @@ export class SearchEngine {
           }
         }
         return {
-          itemId: e.itemId,
-          chunkIndex: e.chunkIndex,
+          itemPk: e.itemPk!,
+          libraryKey: e.libraryKey,
           itemKey: e.itemKey,
+          itemId: e.itemId,
+          libraryId: e.libraryId,
+          chunkIndex: e.chunkIndex,
           title: e.title,
           textSource: e.textSource,
           embedding: float32Embedding,
@@ -180,10 +199,12 @@ export class SearchEngine {
       embeddings = await (store as VectorStoreSQLite).getAllCached();
     }
 
-    // Filter out excluded items
+    // Filter out excluded items (by resolved local itemId; orphans are never excluded here)
     if (opts.excludeItemIds && opts.excludeItemIds.length > 0) {
       const excludeSet = new Set(opts.excludeItemIds);
-      embeddings = embeddings.filter(e => !excludeSet.has(e.itemId));
+      embeddings = embeddings.filter(
+        e => e.itemId === undefined || e.itemId < 0 || !excludeSet.has(e.itemId)
+      );
     }
 
     // Compute results: either all chunks or MaxSim aggregation
@@ -207,61 +228,102 @@ export class SearchEngine {
   }
 
   /**
-   * Find papers similar to a given paper
-   * Uses MaxSim aggregation: returns max similarity across all chunks per document
+   * Find papers similar to a given paper, by local Zotero item ID.
+   *
+   * Resolves the local item to its stable identity (libraryKey + itemKey) and
+   * delegates to {@link findSimilarByIdentity}. Prefer the identity-keyed
+   * method for any code path that already has stable identity in hand.
    */
   async findSimilar(itemId: number, options: SearchOptions = {}): Promise<SearchResult[]> {
-    this.logger.info(`Finding papers similar to item ${itemId}`);
+    const item = Zotero.Items.get(itemId);
+    if (!item) {
+      throw new Error(`findSimilar: item ${itemId} not in Zotero`);
+    }
+    const identity = identityFromItem(item);
+    if (!identity) {
+      throw new Error(`findSimilar: unable to resolve identity for item ${itemId}`);
+    }
+    return this.findSimilarByIdentity(identity.libraryKey, identity.itemKey, options);
+  }
+
+  /**
+   * Find papers similar to a source paper identified by (libraryKey, itemKey).
+   * Uses MaxSim aggregation: returns max similarity across all chunks per document.
+   *
+   * This is the identity-keyed entry point for "similar documents". Source paper
+   * lookups go through the identity-keyed store API; callers don't need a live
+   * Zotero item.
+   */
+  async findSimilarByIdentity(
+    libraryKey: string,
+    itemKey: string,
+    options: SearchOptions = {}
+  ): Promise<SearchResult[]> {
+    this.logger.info(`Finding papers similar to (${libraryKey}, ${itemKey})`);
 
     const store = this.getStore();
-    
+
     // Ensure store is initialized
     if (!store.isReady()) {
       this.logger.info('Store not ready, initializing...');
       await store.init();
     }
 
-    // Get all chunks for the source paper
-    const sourceChunks = await store.getItemChunks(itemId);
+    // Get all chunks for the source paper via identity
+    const sourceChunks = await store.getItemChunksByIdentity(libraryKey, itemKey);
     if (!sourceChunks || sourceChunks.length === 0) {
-      // Fall back to single get
-      const sourcePaper = await store.get(itemId);
+      // Fall back to single get-by-identity
+      const sourcePaper = await store.getByIdentity(libraryKey, itemKey);
       if (!sourcePaper) {
-        throw new Error(`Paper ${itemId} not indexed`);
+        throw new Error(`Paper (${libraryKey}, ${itemKey}) not indexed`);
       }
-      // Validate source embedding
       if (!sourcePaper.embedding || sourcePaper.embedding.length === 0) {
-        throw new Error(`Paper ${itemId} has invalid embedding data`);
+        throw new Error(`Paper (${libraryKey}, ${itemKey}) has invalid embedding data`);
       }
-      // Use the single embedding
-      return this.findSimilarWithEmbedding(sourcePaper.embedding, itemId, options);
+      return this.findSimilarWithEmbedding(
+        sourcePaper.embedding,
+        libraryKey,
+        itemKey,
+        sourcePaper.itemId,
+        options
+      );
     }
-    
+
     // Validate source chunks
-    const validSourceChunks = sourceChunks.filter(c => 
+    const validSourceChunks = sourceChunks.filter(c =>
       c.embedding && Array.isArray(c.embedding) && c.embedding.length > 0
     );
-    
+
     if (validSourceChunks.length === 0) {
-      throw new Error(`Paper ${itemId} has no valid embedding chunks`);
+      throw new Error(`Paper (${libraryKey}, ${itemKey}) has no valid embedding chunks`);
     }
-    
+
     this.logger.debug(`Source paper has ${validSourceChunks.length} valid chunks`);
 
-    // Exclude the source paper from results
-    const excludeItemIds = [...(options.excludeItemIds || []), itemId];
+    // Resolve source itemId (may be undefined for orphans — in which case we
+    // can't exclude self by itemId, but the identity match below covers it).
+    const sourceItemId = sourceChunks[0].itemId;
+    const excludeItemIds =
+      sourceItemId !== undefined && sourceItemId >= 0
+        ? [...(options.excludeItemIds || []), sourceItemId]
+        : [...(options.excludeItemIds || [])];
     const opts = { ...DEFAULT_OPTIONS, ...options, excludeItemIds };
 
     // Get cached embeddings for fast similarity computation
     let embeddings: Array<{
-      itemId: number;
-      chunkIndex: number;
+      itemPk: number;
+      libraryKey: string;
       itemKey: string;
+      itemId?: number;
+      libraryId?: number;
+      chunkIndex: number;
       title: string;
       textSource: TextSourceType;
       embedding: Float32Array;
+      pageNumber?: number;
+      paragraphIndex?: number;
     }>;
-    
+
     if (opts.libraryId !== undefined) {
       // For library-specific search, convert to cached format
       const paperEmbeddings = await store.getByLibrary(opts.libraryId);
@@ -278,25 +340,35 @@ export class SearchEngine {
           }
         }
         return {
-          itemId: e.itemId,
-          chunkIndex: e.chunkIndex,
+          itemPk: e.itemPk!,
+          libraryKey: e.libraryKey,
           itemKey: e.itemKey,
+          itemId: e.itemId,
+          libraryId: e.libraryId,
+          chunkIndex: e.chunkIndex,
           title: e.title,
           textSource: e.textSource,
           embedding: float32Embedding,
+          pageNumber: e.pageNumber,
+          paragraphIndex: e.paragraphIndex,
         };
       });
     } else {
       // Use cached embeddings (SQLite with in-memory cache)
       embeddings = await (store as VectorStoreSQLite).getAllCached();
     }
-    
+
     this.logger.info(`Retrieved ${embeddings.length} embedding chunks from store`);
 
-    // Filter out excluded items
+    // Filter out the source paper by identity (covers both orphan and live cases)
+    // and any excluded itemIds.
     const excludeSet = new Set(excludeItemIds);
-    embeddings = embeddings.filter(e => !excludeSet.has(e.itemId));
-    
+    embeddings = embeddings.filter(e => {
+      if (e.libraryKey === libraryKey && e.itemKey === itemKey) return false;
+      if (e.itemId !== undefined && e.itemId >= 0 && excludeSet.has(e.itemId)) return false;
+      return true;
+    });
+
     // Filter out invalid embeddings (shouldn't happen with cached data)
     const validEmbeddings = embeddings.filter(e => e.embedding && e.embedding.length > 0);
 
@@ -317,26 +389,27 @@ export class SearchEngine {
     });
 
     // For multi-chunk source, use the maximum similarity from any source chunk
-    // to any target chunk (MaxSim on both sides)
+    // to any target chunk (MaxSim on both sides). Key by itemPk so orphans
+    // (which have no itemId) participate correctly.
     const itemResults = new Map<number, ItemSimilarity>();
 
     for (const targetChunk of validEmbeddings) {
-      // Find max similarity with any source chunk using optimized dot product
       let maxSim = 0;
       for (const sourceFloat32 of sourceFloat32Chunks) {
-        // Since both vectors are normalized, dot product = cosine similarity
         const sim = this.dotProductFloat32(sourceFloat32, targetChunk.embedding);
         if (sim > maxSim) {
           maxSim = sim;
         }
       }
 
-      // Update max for this item (MaxSim aggregation)
-      const existing = itemResults.get(targetChunk.itemId);
+      const existing = itemResults.get(targetChunk.itemPk);
       if (!existing || maxSim > existing.maxSimilarity) {
-        itemResults.set(targetChunk.itemId, {
-          itemId: targetChunk.itemId,
+        itemResults.set(targetChunk.itemPk, {
+          itemPk: targetChunk.itemPk,
+          libraryKey: targetChunk.libraryKey,
           itemKey: targetChunk.itemKey,
+          itemId: targetChunk.itemId,
+          libraryId: targetChunk.libraryId,
           title: targetChunk.title,
           textSource: targetChunk.textSource,
           maxSimilarity: maxSim,
@@ -345,13 +418,15 @@ export class SearchEngine {
       }
     }
 
-    // Convert to results, filter by minSimilarity
     const results: SearchResult[] = [];
     for (const item of itemResults.values()) {
       if (item.maxSimilarity >= opts.minSimilarity) {
         results.push({
-          itemId: item.itemId,
+          itemPk: item.itemPk,
+          libraryKey: item.libraryKey,
           itemKey: item.itemKey,
+          itemId: item.itemId,
+          libraryId: item.libraryId,
           title: item.title,
           similarity: item.maxSimilarity,
           textSource: item.textSource,
@@ -360,7 +435,6 @@ export class SearchEngine {
       }
     }
 
-    // Sort by similarity (descending) and take top K
     results.sort((a, b) => b.similarity - a.similarity);
     const topResults = results.slice(0, opts.topK);
 
@@ -370,16 +444,23 @@ export class SearchEngine {
   }
 
   /**
-   * Find similar papers using a single embedding (legacy path)
+   * Find similar papers using a single embedding (legacy single-chunk path).
+   * Source identity is required so we can exclude the source row by identity,
+   * not just itemId (orphans have no itemId).
    */
   private async findSimilarWithEmbedding(
-    sourceEmbedding: number[], 
-    sourceItemId: number, 
+    sourceEmbedding: number[],
+    sourceLibraryKey: string,
+    sourceItemKey: string,
+    sourceItemId: number | undefined,
     options: SearchOptions
   ): Promise<SearchResult[]> {
     const store = this.getStore();
     const opts = { ...DEFAULT_OPTIONS, ...options };
-    const excludeItemIds = [...(options.excludeItemIds || []), sourceItemId];
+    const excludeItemIds =
+      sourceItemId !== undefined && sourceItemId >= 0
+        ? [...(options.excludeItemIds || []), sourceItemId]
+        : [...(options.excludeItemIds || [])];
 
     // Get all embeddings
     let embeddings: PaperEmbedding[];
@@ -389,12 +470,16 @@ export class SearchEngine {
       embeddings = await store.getAll();
     }
 
-    // Filter out excluded items
+    // Filter out source paper by identity, plus any excluded itemIds.
     const excludeSet = new Set(excludeItemIds);
-    embeddings = embeddings.filter(e => !excludeSet.has(e.itemId));
+    embeddings = embeddings.filter(e => {
+      if (e.libraryKey === sourceLibraryKey && e.itemKey === sourceItemKey) return false;
+      if (e.itemId !== undefined && excludeSet.has(e.itemId)) return false;
+      return true;
+    });
 
     // Filter valid embeddings
-    const validEmbeddings = embeddings.filter(e => 
+    const validEmbeddings = embeddings.filter(e =>
       e.embedding && Array.isArray(e.embedding) && e.embedding.length > 0
     );
 
@@ -407,10 +492,11 @@ export class SearchEngine {
   }
 
   /**
-   * Compute MaxSim results: max similarity per item across all its chunks
+   * Compute MaxSim results: max similarity per item across all its chunks.
+   * Keys by itemPk so orphans (without itemId) participate correctly.
    */
   private computeMaxSimResults(
-    queryEmbedding: number[], 
+    queryEmbedding: number[],
     embeddings: PaperEmbedding[],
     minSimilarity: number
   ): SearchResult[] {
@@ -420,15 +506,21 @@ export class SearchEngine {
       if (!chunk.embedding || !Array.isArray(chunk.embedding) || chunk.embedding.length === 0) {
         continue;
       }
+      if (chunk.itemPk === undefined) {
+        // Defensive: cannot key without surrogate PK
+        continue;
+      }
 
       const similarity = this.cosineSimilarity(queryEmbedding, chunk.embedding);
 
-      // MaxSim: keep only the highest similarity per item
-      const existing = itemResults.get(chunk.itemId);
+      const existing = itemResults.get(chunk.itemPk);
       if (!existing || similarity > existing.maxSimilarity) {
-        itemResults.set(chunk.itemId, {
-          itemId: chunk.itemId,
+        itemResults.set(chunk.itemPk, {
+          itemPk: chunk.itemPk,
+          libraryKey: chunk.libraryKey,
           itemKey: chunk.itemKey,
+          itemId: chunk.itemId,
+          libraryId: chunk.libraryId,
           title: chunk.title,
           textSource: chunk.textSource,
           maxSimilarity: similarity,
@@ -437,13 +529,15 @@ export class SearchEngine {
       }
     }
 
-    // Convert to results, filter by minSimilarity
     const results: SearchResult[] = [];
     for (const item of itemResults.values()) {
       if (item.maxSimilarity >= minSimilarity) {
         results.push({
-          itemId: item.itemId,
+          itemPk: item.itemPk,
+          libraryKey: item.libraryKey,
           itemKey: item.itemKey,
+          itemId: item.itemId,
+          libraryId: item.libraryId,
           title: item.title,
           similarity: item.maxSimilarity,
           textSource: item.textSource,
@@ -503,9 +597,12 @@ export class SearchEngine {
   private computeMaxSimResultsFloat32(
     queryEmbedding: Float32Array,
     embeddings: Array<{
-      itemId: number;
-      chunkIndex: number;
+      itemPk: number;
+      libraryKey: string;
       itemKey: string;
+      itemId?: number;
+      libraryId?: number;
+      chunkIndex: number;
       title: string;
       textSource: TextSourceType;
       embedding: Float32Array;
@@ -524,12 +621,15 @@ export class SearchEngine {
       // Since both vectors are normalized, dot product = cosine similarity
       const similarity = this.dotProductFloat32(queryEmbedding, chunk.embedding);
 
-      // MaxSim: keep only the highest similarity per item
-      const existing = itemResults.get(chunk.itemId);
+      // MaxSim: keep only the highest similarity per item (keyed by itemPk)
+      const existing = itemResults.get(chunk.itemPk);
       if (!existing || similarity > existing.maxSimilarity) {
-        itemResults.set(chunk.itemId, {
-          itemId: chunk.itemId,
+        itemResults.set(chunk.itemPk, {
+          itemPk: chunk.itemPk,
+          libraryKey: chunk.libraryKey,
           itemKey: chunk.itemKey,
+          itemId: chunk.itemId,
+          libraryId: chunk.libraryId,
           title: chunk.title,
           textSource: chunk.textSource,
           maxSimilarity: similarity,
@@ -540,13 +640,15 @@ export class SearchEngine {
       }
     }
 
-    // Convert to results, filter by minSimilarity
     const results: SearchResult[] = [];
     for (const item of itemResults.values()) {
       if (item.maxSimilarity >= minSimilarity) {
         results.push({
-          itemId: item.itemId,
+          itemPk: item.itemPk,
+          libraryKey: item.libraryKey,
           itemKey: item.itemKey,
+          itemId: item.itemId,
+          libraryId: item.libraryId,
           title: item.title,
           similarity: item.maxSimilarity,
           textSource: item.textSource,
@@ -568,9 +670,12 @@ export class SearchEngine {
   private computeAllChunkResultsFloat32(
     queryEmbedding: Float32Array,
     embeddings: Array<{
-      itemId: number;
-      chunkIndex: number;
+      itemPk: number;
+      libraryKey: string;
       itemKey: string;
+      itemId?: number;
+      libraryId?: number;
+      chunkIndex: number;
       title: string;
       textSource: TextSourceType;
       embedding: Float32Array;
@@ -589,11 +694,13 @@ export class SearchEngine {
       // Since both vectors are normalized, dot product = cosine similarity
       const similarity = this.dotProductFloat32(queryEmbedding, chunk.embedding);
 
-      // Include all chunks above minSimilarity threshold
       if (similarity >= minSimilarity) {
         results.push({
-          itemId: chunk.itemId,
+          itemPk: chunk.itemPk,
+          libraryKey: chunk.libraryKey,
           itemKey: chunk.itemKey,
+          itemId: chunk.itemId,
+          libraryId: chunk.libraryId,
           title: chunk.title,
           similarity,
           textSource: chunk.textSource,

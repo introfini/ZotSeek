@@ -363,15 +363,23 @@ The SQLite backend uses the **ATTACH DATABASE** pattern (inspired by Better BibT
 - **Reliable queries** - Uses `columnQueryAsync()` and `valueQueryAsync()` for robust data retrieval
 - **Clean uninstall** - Database file automatically removed when plugin is uninstalled
 
-### Using ZotSeek on Multiple Computers
+### Copying the database between machines
 
-The ZotSeek database is local and not synced by Zotero's built-in sync. To use your index on another computer:
+ZotSeek stores its embeddings in `zotseek.sqlite` inside your Zotero data directory. The file is local and is not synced by Zotero's built-in sync.
 
-1. Copy `zotseek.sqlite` from your Zotero data directory to the same location on the other machine
-2. The embeddings are deterministic - the same paper produces identical embeddings regardless of the computer
-3. With **Auto-index** enabled, new items added after the copy will be indexed automatically on each machine
+If you use Zotero on multiple machines and want to avoid re-indexing your library on each one, you can copy the file manually:
 
-To find your data directory: **Zotero → Settings → Advanced → Files and Folders → Show Data Directory**.
+1. Quit Zotero on both machines.
+2. Find your Zotero data directory (Preferences → Advanced → Files and Folders).
+3. Copy `zotseek.sqlite` from one machine to the other.
+4. Start Zotero on the destination machine.
+
+The plugin identifies items by Zotero's stable item keys (the same identifiers visible in the Zotero web API), so the database works correctly regardless of which machine indexed the items.
+
+Notes:
+- Both Zotero libraries must be in sync — items not yet present on the destination will appear as "unresolved embeddings" in Preferences → Database Health until sync completes.
+- The file can be large (hundreds of MB for libraries with full-document indexing). It is not designed to be cloud-synced continuously.
+- Group libraries are supported via stable group IDs assigned by Zotero's server.
 
 ---
 

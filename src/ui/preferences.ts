@@ -7,6 +7,8 @@ import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
 import { autoIndexManager } from '../core/auto-index-manager';
 
+declare const Services: any;
+
 class PreferencesManager {
   private window: Window | null = null;
   private logger: any;
@@ -39,6 +41,9 @@ class PreferencesManager {
 
       // Auto-load stats
       await this.loadStatsAndCheckMismatch();
+
+      // Auto-load database health stats (orphan count)
+      await this.loadHealthStats();
 
       this.logger.info('Preference pane initialized successfully');
     } catch (error) {
@@ -271,6 +276,90 @@ class PreferencesManager {
     const compactBtn = doc.getElementById('zotseek-compact-db');
     if (compactBtn) {
       compactBtn.addEventListener('command', () => this.compactDatabase());
+    }
+
+    const purgeOrphansBtn = doc.getElementById('zotseek-purge-orphans-btn');
+    if (purgeOrphansBtn) {
+      purgeOrphansBtn.addEventListener('command', () => this.purgeOrphans());
+    }
+  }
+
+  /**
+   * Load database health stats (orphan count) and update the label.
+   */
+  async loadHealthStats(): Promise<void> {
+    if (!this.window) return;
+    const doc = this.window.document;
+    const Z = getZotero();
+    if (!Z) return;
+
+    try {
+      const raw = await Z.DB.valueQueryAsync(
+        'SELECT COUNT(*) FROM zotseek.orphan_items'
+      );
+      const count = Number(raw) || 0;
+      const label = doc.getElementById('zotseek-orphan-count');
+      if (label) {
+        label.setAttribute('data-l10n-args', JSON.stringify({ count }));
+        // Fallback text for environments where Fluent doesn't translate immediately.
+        label.textContent = `Unresolved embeddings: ${count}`;
+      }
+      this.logger.debug(`Health stats loaded: ${count} orphans`);
+    } catch (e: any) {
+      this.logger.error(`loadHealthStats failed: ${e?.message || e}`);
+    }
+  }
+
+  /**
+   * Purge all orphan embeddings after user confirmation.
+   */
+  private async purgeOrphans(): Promise<void> {
+    if (!this.window) return;
+    const Z = getZotero();
+    if (!Z) return;
+
+    try {
+      const before = Number(await Z.DB.valueQueryAsync(
+        'SELECT COUNT(*) FROM zotseek.orphan_items'
+      )) || 0;
+
+      const confirmed = Services.prompt.confirm(
+        this.window,
+        'ZotSeek',
+        'This will permanently delete embeddings for items not found in your current Zotero library. Continue?'
+      );
+      if (!confirmed) return;
+
+      await Z.DB.executeTransaction(async () => {
+        await Z.DB.queryAsync(
+          `DELETE FROM zotseek.chunks WHERE item_pk IN (
+             SELECT item_pk FROM zotseek.items WHERE library_key = 'orphan'
+           )`
+        );
+        await Z.DB.queryAsync(
+          `DELETE FROM zotseek.items WHERE library_key = 'orphan'`
+        );
+        await Z.DB.queryAsync(`DELETE FROM zotseek.orphan_items`);
+      });
+
+      this.logger.info(`Purged ${before} orphan entries`);
+
+      // Refresh stats: orphan count and overall index stats (chunks/storage).
+      await this.loadHealthStats();
+      await this.loadStatsAndCheckMismatch();
+
+      const pw = new Z.ProgressWindow({ closeOnClick: true });
+      pw.changeHeadline('Orphans Purged');
+      pw.addDescription(`Removed ${before} unresolved entries.`);
+      pw.show();
+      pw.startCloseTimer(4000);
+    } catch (e: any) {
+      this.logger.error(`purgeOrphans failed: ${e?.message || e}`);
+      const pw = new Z.ProgressWindow({ closeOnClick: true });
+      pw.changeHeadline('Purge Failed');
+      pw.addDescription(e?.message || String(e));
+      pw.show();
+      pw.startCloseTimer(4000);
     }
   }
 

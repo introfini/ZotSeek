@@ -225,25 +225,31 @@ export class HybridSearchEngine {
         returnAllChunks: opts.returnAllChunks,
       });
 
+      // Drop orphan results (no resolved local itemId) — hybrid search needs a
+      // local item for keyword merging and navigation.
+      let filteredResults = results.filter(
+        (r): r is SearchResult & { itemId: number } => r.itemId !== undefined
+      );
+
       // Filter out books if preference is set
       const excludeBooks = Zotero.Prefs.get('zotseek.excludeBooks', true) ?? true;
-      let filteredResults = results;
       if (excludeBooks) {
-        filteredResults = [];
-        for (const r of results) {
+        const kept: typeof filteredResults = [];
+        for (const r of filteredResults) {
           try {
             const item = await Zotero.Items.getAsync(r.itemId);
             if (item && item.itemType !== 'book') {
-              filteredResults.push(r);
+              kept.push(r);
             }
           } catch {
             // If we can't get the item, include it anyway
-            filteredResults.push(r);
+            kept.push(r);
           }
         }
+        filteredResults = kept;
       }
 
-      return filteredResults.map((r: SearchResult) => ({
+      return filteredResults.map((r) => ({
         itemId: r.itemId,
         score: r.similarity,
         textSource: r.textSource,

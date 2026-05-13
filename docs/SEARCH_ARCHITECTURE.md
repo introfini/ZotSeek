@@ -25,7 +25,9 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
 7. [Section-Aware Chunking](#section-aware-chunking)
    - [References Filtering](#references-filtering)
 8. [Performance Optimizations](#performance-optimizations)
-9. [Query Analysis](#query-analysis)
+9. [Database Schema](#database-schema)
+   - [Stable Identity (Schema v8)](#stable-identity-schema-v8)
+10. [Query Analysis](#query-analysis)
 
 ---
 
@@ -572,7 +574,7 @@ chunkDocumentWithPagesEx(...) → {
 }
 ```
 
-These three values are stored on the `items` table (schema v7 — `was_truncated`, `pages_indexed`, `pages_total`) so the index-status column and the indexing progress window can surface partial coverage to the user. See [README §Indexing Status Column](../README.md#indexing-status-column) for the user-facing glyphs.
+These three values are stored on the `items` table (`was_truncated`, `pages_indexed`, `pages_total` — added in schema v7) so the index-status column and the indexing progress window can surface partial coverage to the user. See [README §Indexing Status Column](../README.md#indexing-status-column) for the user-facing glyphs.
 
 To capture the full content of long papers, raise *Max Chunks per Paper* in **Settings → ZotSeek** or switch the affected papers to Abstract mode (tag them with `zotseek-exclude` if you want only the abstract).
 
@@ -796,6 +798,26 @@ Tested on MacBook Pro M3:
 | First search | ~200ms |
 | Subsequent searches | <50ms |
 | Hybrid search | ~150ms |
+
+---
+
+## Database Schema
+
+ZotSeek stores embeddings in a separate SQLite database (`zotseek.sqlite`) attached to Zotero's main connection. The schema is normalized into two tables:
+
+- **`items`** — one row per indexed paper, keyed by an internal autoincrement `item_pk`, with metadata (title, abstract), the model identifier, indexing timestamp, content hash, and truncation/coverage fields (`was_truncated`, `pages_indexed`, `pages_total`).
+- **`chunks`** — one row per embedding chunk, referencing `item_pk`, with the chunk text, source label, base64-encoded Float32 embedding, and location metadata (page, paragraph, char offsets, bbox).
+
+### Stable Identity (Schema v8)
+
+ZotSeek identifies indexed items using a stable `(library_key, item_key)` pair, decoupled from Zotero's mutable local IDs:
+
+- `library_key`: `'user'` for the user library, or `'group:<groupID>'` where `<groupID>` is the server-assigned Zotero group ID.
+- `item_key`: Zotero's 8-character `Item.key`, generated once at item creation and propagated by sync.
+
+Both identifiers are stable across all machines syncing the same library, and survive Zotero reinstalls, profile rebuilds, and database moves. The `items` table uses an internal autoincrement `item_pk` as the primary key referenced by `chunks`. Local `Zotero.Item.id` values are resolved at runtime via `identity-resolver.ts` and never stored.
+
+Migration from v7 to v8 resolves each row's identity using the stored `item_key` (which v7 already populated), so cross-machine database copies succeed even when local `item_id` values from the source machine no longer match the destination's local IDs.
 
 ---
 

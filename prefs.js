@@ -39,3 +39,7 @@ pref("extensions.zotero.zotseek.hybridSearch.semanticWeightPercent", 50);
 pref("extensions.zotero.zotseek.hybridSearch.rrfK", 60);
 // Auto-adjust weights based on query analysis
 pref("extensions.zotero.zotseek.hybridSearch.autoAdjustWeights", true);
+
+// Dev mode: when true, mounts the self-test harness under Zotero.ZotSeek._selfTest
+// Used for autonomous verification via MCP. End users should leave this false.
+pref("extensions.zotero.zotseek.devMode", false);

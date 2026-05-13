@@ -15,9 +15,13 @@ export class Logger {
   private ztoolkit: BasicTool;
 
   constructor(prefix: string) {
-    this.prefix = `[${prefix}]`;
+    // Always emit a stable `[ZotSeek:<module>]` prefix so log filters can
+    // catch every ZotSeek-internal module by matching `[ZotSeek`. The plain
+    // `ZotSeek` tag is treated as the root module and rendered as just
+    // `[ZotSeek]` for backward compatibility with existing log greps.
+    this.prefix = prefix === 'ZotSeek' ? '[ZotSeek]' : `[ZotSeek:${prefix}]`;
     this.debugEnabled = true; // TODO: Read from preferences
-    
+
     // Initialize ZoteroToolkit for this logger
     this.ztoolkit = new BasicTool();
     this.ztoolkit.basicOptions.log.prefix = this.prefix;
