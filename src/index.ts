@@ -30,6 +30,8 @@ import { similarDocumentsWrapper } from './ui/similar-documents-wrapper';
 import { toolbarButton } from './ui/toolbar-button';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
+// Self-test harness (mounted only when extensions.zotseek.devMode = true)
+import { selfTest as zotseekSelfTest } from './dev/self-test';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
@@ -239,6 +241,18 @@ class ZotSeekPlugin {
       }
     } catch (e: any) {
       this.logger.warn(`Could not register item-tree column: ${e?.message || e}`);
+    }
+
+    // Dev-only self-test harness (gated by extensions.zotseek.devMode pref)
+    try {
+      const devMode = Z.Prefs.get('zotseek.devMode', true) === true;
+      if (devMode) {
+        Z.ZotSeek = Z.ZotSeek || {};
+        Z.ZotSeek._selfTest = zotseekSelfTest;
+        this.logger.info('Self-test harness mounted (devMode=true)');
+      }
+    } catch (e: any) {
+      this.logger.warn(`Self-test harness failed to mount: ${e?.message || e}`);
     }
 
     this.logger.info('=== Plugin Started Successfully ===');
