@@ -31,10 +31,21 @@ export type TextSourceType =
   | 'content';      // Generic content (fallback when sections not detected)
 
 export interface PaperEmbedding {
-  itemId: number;
+  // Internal surrogate PK (assigned by SQLite on insert). Optional on input,
+  // present on output. Callers should not depend on its specific value.
+  itemPk?: number;
+
+  // STABLE identity (use these for any cross-session reference)
+  libraryKey: string;       // 'user' | 'group:<groupID>'
+  itemKey: string;          // Zotero 8-char key, stable across machines
+
+  // LOCAL convenience (resolved at runtime, not stored as identity)
+  itemId?: number;          // Current Zotero.Item.id for this row in this session
+
   chunkIndex: number;       // 0 = summary (title+abstract), 1+ = fulltext chunks
-  itemKey: string;
-  libraryId: number;
+  /** @deprecated Use libraryKey for identity. This field is populated at read
+   *  time from libraryKey but is not stored in v8. Will be removed in v2.1. */
+  libraryId?: number;
   title: string;
   abstract?: string;
   chunkText?: string;       // The actual text that was embedded (for debugging)
@@ -63,7 +74,11 @@ export interface PaperEmbedding {
  * whether to show "Indexed", "Partial", "Outdated", etc.
  */
 export interface ItemIndexStatus {
-  itemId: number;
+  libraryKey: string;
+  itemKey: string;
+  // Legacy field kept for UI compatibility until item-tree-column is migrated.
+  // Will be resolved at read time.
+  itemId?: number;
   indexedAt: string;
   wasTruncated: boolean;
   pagesIndexed: number;
@@ -88,7 +103,7 @@ export interface VectorStoreStats {
 // Database configuration
 const DB_NAME = 'zotseek';           // Schema name when attached
 const DB_FILE = 'zotseek.sqlite';    // Database filename
-const SCHEMA_VERSION = 7;            // Adds per-item indexing status (was_truncated, pages_indexed, pages_total)
+const SCHEMA_VERSION = 8;            // v8: stable identity (library_key + item_key + item_pk surrogate)
 
 // Legacy table prefix (for migration from old schema)
 const LEGACY_TABLE_PREFIX = 'zs_';
