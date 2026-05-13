@@ -15,7 +15,13 @@
  */
 
 import { Logger } from '../utils/logger';
-import { identityFromItem, localItemIDFromIdentity } from './identity-resolver';
+import {
+  identityFromItem,
+  localItemIDFromIdentity,
+  localLibraryIDFromKey,
+  bulkResolve,
+  libraryKeyFromLocalID,
+} from './identity-resolver';
 
 declare const Zotero: any;
 declare const PathUtils: any;
@@ -121,9 +127,11 @@ export class VectorStoreSQLite {
   private attached = false;
   private cache: {
     data: Array<{
-      itemId: number;
-      chunkIndex: number;
+      itemPk: number;
+      libraryKey: string;
       itemKey: string;
+      itemId?: number;
+      chunkIndex: number;
       title: string;
       textSource: TextSourceType;
       embedding: Float32Array;
@@ -1252,6 +1260,58 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Convert a joined items+chunks row into a PaperEmbedding.
+   * Resolves the local Zotero itemId on the fly via the identity resolver.
+   */
+  private rowToEmbedding(row: {
+    itemPk: number;
+    libraryKey: string;
+    itemKey: string;
+    title: string;
+    abstract?: string | null;
+    modelId: string;
+    indexedAt: string;
+    contentHash: string;
+    chunkIndex: number;
+    chunkText?: string | null;
+    textSource: string;
+    embedding: string;
+    pageNumber?: number | null;
+    paragraphIndex?: number | null;
+    startChar?: number | null;
+    endChar?: number | null;
+    bbox?: string | null;
+  }): PaperEmbedding {
+    const itemId = localItemIDFromIdentity({
+      libraryKey: row.libraryKey,
+      itemKey: row.itemKey,
+    }) ?? undefined;
+    const libraryId = localLibraryIDFromKey(row.libraryKey) ?? undefined;
+
+    return {
+      itemPk: row.itemPk,
+      libraryKey: row.libraryKey,
+      itemKey: row.itemKey,
+      itemId,
+      libraryId,
+      chunkIndex: row.chunkIndex,
+      title: row.title,
+      abstract: row.abstract || undefined,
+      chunkText: row.chunkText || undefined,
+      textSource: (row.textSource as TextSourceType) || 'abstract',
+      embedding: this.base64ToEmbedding(row.embedding),
+      modelId: row.modelId,
+      indexedAt: row.indexedAt,
+      contentHash: row.contentHash,
+      pageNumber: row.pageNumber != null ? Number(row.pageNumber) : undefined,
+      paragraphIndex: row.paragraphIndex != null ? Number(row.paragraphIndex) : undefined,
+      startChar: row.startChar != null ? Number(row.startChar) : undefined,
+      endChar: row.endChar != null ? Number(row.endChar) : undefined,
+      bbox: row.bbox || undefined,
+    };
+  }
+
+  /**
    * Resolve (library_key, item_key) to an existing item_pk, or create a new
    * row in items if absent. Updates item-level metadata on UPSERT.
    *
@@ -1562,122 +1622,152 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Get all chunks for a specific item
-   * Uses columnQueryAsync and parallel fetching for reliability
+   * Get all chunks for a specific item by local Zotero item ID.
+   * @deprecated Use getItemChunksByIdentity(libraryKey, itemKey).
    */
   async getItemChunks(itemId: number): Promise<PaperEmbedding[]> {
+    const item = Zotero.Items.get(itemId);
+    if (!item) return [];
+    const id = identityFromItem(item);
+    if (!id) return [];
+    return this.getItemChunksByIdentity(id.libraryKey, id.itemKey);
+  }
+
+  /**
+   * Get all chunks for a specific item by stable identity.
+   */
+  async getItemChunksByIdentity(libraryKey: string, itemKey: string): Promise<PaperEmbedding[]> {
     await this.ensureInit();
-
-    // First get all chunk indexes for this item
-    let chunkIndexes: number[] = [];
-    try {
-      const raw = await Zotero.DB.columnQueryAsync(
-        `SELECT chunk_index FROM ${DB_NAME}.chunks WHERE item_id = ? ORDER BY chunk_index`,
-        [itemId]
-      );
-      chunkIndexes = (raw || []).map((v: any) => Number(v));
-    } catch (e) {
-      this.logger.error(`getItemChunks(${itemId}): Failed to get chunk indexes: ${e}`);
-      return [];
-    }
-
-    if (chunkIndexes.length === 0) return [];
-
-    // Fetch all chunks in parallel
-    const chunks = await Promise.all(
-      chunkIndexes.map(ci => this.getChunk(itemId, ci))
+    const pk = await Zotero.DB.valueQueryAsync(
+      `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [libraryKey, itemKey]
     );
+    if (!pk) return [];
 
+    const rawChunkIdxs = await Zotero.DB.columnQueryAsync(
+      `SELECT chunk_index FROM ${DB_NAME}.chunks WHERE item_pk = ? ORDER BY chunk_index`,
+      [Number(pk)]
+    );
+    const chunkIndexes: number[] = (rawChunkIdxs || []).map((v: any) => Number(v));
+
+    const chunks = await Promise.all(
+      chunkIndexes.map((ci: number) => this.getChunkByPk(Number(pk), ci))
+    );
     return chunks.filter((c): c is PaperEmbedding => c !== undefined);
   }
 
   /**
-   * Get the summary embedding (chunk_index=0) for a specific item - O(1) lookup
-   * Note: We select specific columns instead of SELECT * because Zotero's DB
-   * wrapper can have issues with SELECT * on rows with large TEXT columns.
+   * Get the summary embedding (chunk_index=0) for a specific item.
+   * @deprecated Use getByIdentity(libraryKey, itemKey).
    */
   async get(itemId: number): Promise<PaperEmbedding | undefined> {
-    await this.ensureInit();
-
-    this.logger.debug(`Getting summary embedding for item ${itemId}`);
-
-    // Check existence first using lightweight query - safe in Zotero 8
-    const checkRow = await Zotero.DB.queryAsync(`SELECT item_id FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = 0`, [itemId]);
-    if (!checkRow || checkRow.length === 0) {
-      // Try to get any chunk if summary doesn't exist
-      const anyChunk = await Zotero.DB.queryAsync(`SELECT item_id, chunk_index FROM ${DB_NAME}.chunks WHERE item_id = ? ORDER BY chunk_index LIMIT 1`, [itemId]);
-      if (!anyChunk || anyChunk.length === 0) {
-        return undefined;
-      }
-      // Get the first available chunk
-      return this.getChunk(itemId, anyChunk[0].chunk_index);
-    }
-
-    return this.getChunk(itemId, 0);
+    const item = Zotero.Items.get(itemId);
+    if (!item) return undefined;
+    const id = identityFromItem(item);
+    if (!id) return undefined;
+    return this.getByIdentity(id.libraryKey, id.itemKey);
   }
 
   /**
-   * Get a specific chunk for an item
-   * Uses parallel valueQueryAsync calls - most reliable method in Zotero 8
+   * Get the summary chunk for an item by stable identity. Falls back to the
+   * lowest-indexed chunk when no chunk_index=0 row exists.
    */
-  async getChunk(itemId: number, chunkIndex: number): Promise<PaperEmbedding | undefined> {
+  async getByIdentity(libraryKey: string, itemKey: string): Promise<PaperEmbedding | undefined> {
     await this.ensureInit();
 
-    // Use parallel valueQueryAsync calls - most reliable method in Zotero 8
-    // Item-level fields from items table, chunk-level fields from chunks table
+    const pk = await Zotero.DB.valueQueryAsync(
+      `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [libraryKey, itemKey]
+    );
+    if (!pk || Number(pk) <= 0) return undefined;
+
+    // Prefer summary chunk (chunk_index=0); otherwise pick the smallest index
+    let chunkIndex = 0;
+    const hasZero = await Zotero.DB.valueQueryAsync(
+      `SELECT 1 FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = 0 LIMIT 1`,
+      [Number(pk)]
+    );
+    if (hasZero !== 1) {
+      const firstChunk = await Zotero.DB.valueQueryAsync(
+        `SELECT chunk_index FROM ${DB_NAME}.chunks WHERE item_pk = ? ORDER BY chunk_index LIMIT 1`,
+        [Number(pk)]
+      );
+      if (firstChunk == null) return undefined;
+      chunkIndex = Number(firstChunk);
+    }
+
+    return this.getChunkByPk(Number(pk), chunkIndex);
+  }
+
+  /**
+   * Get a specific chunk for an item by local Zotero item ID.
+   * @deprecated Use getChunkByPk for internal callers, or getByIdentity for external callers.
+   */
+  async getChunk(itemId: number, chunkIndex: number): Promise<PaperEmbedding | undefined> {
+    const item = Zotero.Items.get(itemId);
+    if (!item) return undefined;
+    const id = identityFromItem(item);
+    if (!id) return undefined;
+    const pk = await Zotero.DB.valueQueryAsync(
+      `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [id.libraryKey, id.itemKey]
+    );
+    if (!pk) return undefined;
+    return this.getChunkByPk(Number(pk), chunkIndex);
+  }
+
+  /**
+   * Internal: fetch a chunk by item_pk + chunk_index, joined with items.
+   * Uses parallel valueQueryAsync calls - most reliable method in Zotero 8.
+   */
+  private async getChunkByPk(itemPk: number, chunkIndex: number): Promise<PaperEmbedding | undefined> {
+    await this.ensureInit();
     try {
       const [
-        item_key, library_id, title, model_id, indexed_at, content_hash, abstract,
+        library_key, item_key, title, model_id, indexed_at, content_hash, abstract,
         text_source, chunk_text, embedding,
         page_number, paragraph_index, start_char, end_char, bbox
       ] = await Promise.all([
-        // Item-level fields (from items table)
-        Zotero.DB.valueQueryAsync(`SELECT item_key FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-        Zotero.DB.valueQueryAsync(`SELECT library_id FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-        Zotero.DB.valueQueryAsync(`SELECT title FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-        Zotero.DB.valueQueryAsync(`SELECT model_id FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-        Zotero.DB.valueQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-        Zotero.DB.valueQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-        Zotero.DB.valueQueryAsync(`SELECT abstract FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-        // Chunk-level fields (from chunks table)
-        Zotero.DB.valueQueryAsync(`SELECT text_source FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT chunk_text FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT embedding FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
-        // Location columns (from chunks table)
-        Zotero.DB.valueQueryAsync(`SELECT page_number FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT paragraph_index FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT start_char FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT end_char FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT bbox FROM ${DB_NAME}.chunks WHERE item_id = ? AND chunk_index = ?`, [itemId, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT library_key FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
+        Zotero.DB.valueQueryAsync(`SELECT item_key FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
+        Zotero.DB.valueQueryAsync(`SELECT title FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
+        Zotero.DB.valueQueryAsync(`SELECT model_id FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
+        Zotero.DB.valueQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
+        Zotero.DB.valueQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
+        Zotero.DB.valueQueryAsync(`SELECT abstract FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
+        Zotero.DB.valueQueryAsync(`SELECT text_source FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT chunk_text FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT embedding FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT page_number FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT paragraph_index FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT start_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT end_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT bbox FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
       ]);
 
-      // Check if row exists
-      if (!item_key || !embedding) {
-        return undefined;
-      }
+      if (!library_key || !item_key || !embedding) return undefined;
 
-      return {
-        itemId,
-        chunkIndex,
+      return this.rowToEmbedding({
+        itemPk,
+        libraryKey: library_key,
         itemKey: item_key,
-        libraryId: Number(library_id) || 0,
         title: title || '',
-        abstract: abstract || undefined,
-        chunkText: chunk_text || undefined,
-        textSource: (text_source as TextSourceType) || 'abstract',
-        embedding: this.base64ToEmbedding(embedding),
+        abstract,
         modelId: model_id || '',
         indexedAt: indexed_at || '',
         contentHash: content_hash || '',
-        // Location fields (v4)
-        pageNumber: page_number != null ? Number(page_number) : undefined,
-        paragraphIndex: paragraph_index != null ? Number(paragraph_index) : undefined,
-        startChar: start_char != null ? Number(start_char) : undefined,
-        endChar: end_char != null ? Number(end_char) : undefined,
-        bbox: bbox || undefined,
-      };
+        chunkIndex,
+        chunkText: chunk_text,
+        textSource: text_source || 'abstract',
+        embedding,
+        pageNumber: page_number,
+        paragraphIndex: paragraph_index,
+        startChar: start_char,
+        endChar: end_char,
+        bbox,
+      });
     } catch (e) {
-      this.logger.error(`getChunk(${itemId}, ${chunkIndex}): Failed: ${e}`);
+      this.logger.error(`getChunkByPk(${itemPk}, ${chunkIndex}): ${e}`);
       return undefined;
     }
   }
@@ -1687,9 +1777,12 @@ export class VectorStoreSQLite {
    * Returns cached data if available, otherwise fetches from DB and caches
    */
   async getAllCached(): Promise<Array<{
-    itemId: number;
-    chunkIndex: number;
+    itemPk: number;
+    libraryKey: string;
     itemKey: string;
+    /** @deprecated Compatibility field: current local Zotero ID, or -1 for orphans. */
+    itemId?: number;
+    chunkIndex: number;
     title: string;
     textSource: TextSourceType;
     embedding: Float32Array;
@@ -1728,9 +1821,11 @@ export class VectorStoreSQLite {
       }
 
       return {
-        itemId: e.itemId,
-        chunkIndex: e.chunkIndex,
+        itemPk: e.itemPk!,
+        libraryKey: e.libraryKey,
         itemKey: e.itemKey,
+        itemId: e.itemId ?? -1,
+        chunkIndex: e.chunkIndex,
         title: e.title,
         textSource: e.textSource,
         embedding: float32Embedding,
@@ -1760,133 +1855,103 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Get all embeddings (all chunks)
-   * Uses two-table schema: fetches item data into Map, then assembles with chunk data
+   * Get all embeddings (all chunks) by joining items+chunks on item_pk.
+   * Orphans (library_key='orphan') are excluded from results, even though
+   * they remain in the database.
+   *
+   * Local Zotero IDs are bulk-resolved at read time via the identity resolver.
    */
   async getAll(): Promise<PaperEmbedding[]> {
     await this.ensureInit();
 
-    // Step 1: Get all chunk keys from chunks table
-    let chunkItemIds: number[] = [];
+    // Fetch all chunks joined with items in one go using parallel column queries
+    // (Zotero 8 DB wrapper workaround - multi-column SELECTs are unreliable).
+    let pks: number[] = [];
+    let libraryKeys: string[] = [];
+    let itemKeys: string[] = [];
+    let titles: string[] = [];
+    let abstracts: (string | null)[] = [];
+    let modelIds: string[] = [];
+    let indexedAts: string[] = [];
+    let contentHashes: string[] = [];
     let chunkIndexes: number[] = [];
+    let chunkTexts: (string | null)[] = [];
+    let textSources: string[] = [];
+    let embeddings: string[] = [];
+    let pageNumbers: (number | null)[] = [];
+    let paragraphIndexes: (number | null)[] = [];
+    let startChars: (number | null)[] = [];
+    let endChars: (number | null)[] = [];
+    let bboxes: (string | null)[] = [];
 
     try {
-      const rawIds = await Zotero.DB.columnQueryAsync(
-        `SELECT item_id FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`
-      );
-      const rawChunks = await Zotero.DB.columnQueryAsync(
-        `SELECT chunk_index FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`
-      );
-
-      if (rawIds && rawChunks && rawIds.length === rawChunks.length) {
-        chunkItemIds = rawIds.map((v: any) => Number(v));
-        chunkIndexes = rawChunks.map((v: any) => Number(v));
-      }
+      [
+        pks, libraryKeys, itemKeys, titles, abstracts, modelIds, indexedAts, contentHashes,
+        chunkIndexes, chunkTexts, textSources, embeddings,
+        pageNumbers, paragraphIndexes, startChars, endChars, bboxes
+      ] = await Promise.all([
+        Zotero.DB.columnQueryAsync(`SELECT c.item_pk FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => (r || []).map(Number)),
+        Zotero.DB.columnQueryAsync(`SELECT i.library_key FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT i.item_key FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT i.title FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT i.abstract FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT i.model_id FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT i.indexed_at FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT i.content_hash FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.chunk_index FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => (r || []).map(Number)),
+        Zotero.DB.columnQueryAsync(`SELECT c.chunk_text FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.text_source FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.embedding FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.page_number FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.paragraph_index FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.start_char FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.end_char FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.bbox FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+      ]);
     } catch (e) {
-      this.logger.error(`getAll(): columnQueryAsync failed: ${e}`);
+      this.logger.error(`getAll(): batch failed: ${e}`);
       return [];
     }
 
-    if (chunkItemIds.length === 0) {
+    if (pks.length === 0) {
       this.logger.debug('getAll(): No embeddings found');
       return [];
     }
 
-    this.logger.debug(`getAll(): Found ${chunkItemIds.length} chunks, fetching data...`);
+    // Bulk-resolve local Zotero IDs for the embedded rows
+    const identities = pks.map((_, i) => ({
+      libraryKey: libraryKeys[i],
+      itemKey: itemKeys[i],
+    }));
+    const idMap = bulkResolve(identities);
 
-    // Step 2: Build item metadata Map from items table
-    const itemMap = new Map<number, {
-      itemKey: string; libraryId: number; title: string; abstract?: string;
-      modelId: string; indexedAt: string; contentHash: string;
-    }>();
-
-    try {
-      const [iIds, iKeys, iLibs, iTitles, iAbstracts, iModels, iIndexedAts, iHashes] = await Promise.all([
-        Zotero.DB.columnQueryAsync(`SELECT item_id FROM ${DB_NAME}.items ORDER BY item_id`),
-        Zotero.DB.columnQueryAsync(`SELECT item_key FROM ${DB_NAME}.items ORDER BY item_id`),
-        Zotero.DB.columnQueryAsync(`SELECT library_id FROM ${DB_NAME}.items ORDER BY item_id`),
-        Zotero.DB.columnQueryAsync(`SELECT title FROM ${DB_NAME}.items ORDER BY item_id`),
-        Zotero.DB.columnQueryAsync(`SELECT abstract FROM ${DB_NAME}.items ORDER BY item_id`),
-        Zotero.DB.columnQueryAsync(`SELECT model_id FROM ${DB_NAME}.items ORDER BY item_id`),
-        Zotero.DB.columnQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items ORDER BY item_id`),
-        Zotero.DB.columnQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items ORDER BY item_id`),
-      ]);
-
-      if (iIds) {
-        for (let i = 0; i < iIds.length; i++) {
-          itemMap.set(Number(iIds[i]), {
-            itemKey: iKeys?.[i] || '',
-            libraryId: Number(iLibs?.[i]) || 0,
-            title: iTitles?.[i] || '',
-            abstract: iAbstracts?.[i] || undefined,
-            modelId: iModels?.[i] || '',
-            indexedAt: iIndexedAts?.[i] || '',
-            contentHash: iHashes?.[i] || '',
-          });
-        }
-      }
-    } catch (e) {
-      this.logger.error(`getAll(): Failed to fetch item metadata: ${e}`);
-      return [];
-    }
-
-    // Step 3: Fetch chunk-level columns in parallel
-    let embeddings: string[] = [];
-    try {
-      embeddings = await Zotero.DB.columnQueryAsync(
-        `SELECT embedding FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`
-      ) || [];
-    } catch (e) {
-      this.logger.error(`getAll(): Failed to fetch embeddings column: ${e}`);
-      return [];
-    }
-
-    if (embeddings.length !== chunkItemIds.length) {
-      this.logger.error(`getAll(): Embedding count mismatch: ${embeddings.length} vs ${chunkItemIds.length}`);
-      return [];
-    }
-
-    const [textSources, chunkTexts, pageNumbers, paragraphIndexes, startChars, endChars, bboxes] = await Promise.all([
-      Zotero.DB.columnQueryAsync(`SELECT text_source FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`),
-      Zotero.DB.columnQueryAsync(`SELECT chunk_text FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`),
-      Zotero.DB.columnQueryAsync(`SELECT page_number FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`),
-      Zotero.DB.columnQueryAsync(`SELECT paragraph_index FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`),
-      Zotero.DB.columnQueryAsync(`SELECT start_char FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`),
-      Zotero.DB.columnQueryAsync(`SELECT end_char FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`),
-      Zotero.DB.columnQueryAsync(`SELECT bbox FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`),
-    ]);
-
-    // Step 4: Assemble results using item Map for O(1) lookup
     const results: PaperEmbedding[] = [];
-    for (let i = 0; i < chunkItemIds.length; i++) {
-      const item = itemMap.get(chunkItemIds[i]);
-      if (!item) {
-        this.logger.debug(`getAll(): Skipping orphan chunk for item_id=${chunkItemIds[i]}`);
-        continue;
-      }
-
+    for (let i = 0; i < pks.length; i++) {
+      const lookupKey = `${libraryKeys[i]}|${itemKeys[i]}`;
       results.push({
-        itemId: chunkItemIds[i],
+        itemPk: pks[i],
+        libraryKey: libraryKeys[i],
+        itemKey: itemKeys[i],
+        itemId: idMap.get(lookupKey),
+        libraryId: localLibraryIDFromKey(libraryKeys[i]) ?? undefined,
         chunkIndex: chunkIndexes[i],
-        itemKey: item.itemKey,
-        libraryId: item.libraryId,
-        title: item.title,
-        abstract: item.abstract,
-        chunkText: chunkTexts?.[i] || undefined,
-        textSource: (textSources?.[i] as TextSourceType) || 'abstract',
+        title: titles[i] || '',
+        abstract: abstracts[i] || undefined,
+        chunkText: chunkTexts[i] || undefined,
+        textSource: (textSources[i] as TextSourceType) || 'abstract',
         embedding: this.base64ToEmbedding(embeddings[i]),
-        modelId: item.modelId,
-        indexedAt: item.indexedAt,
-        contentHash: item.contentHash,
-        pageNumber: pageNumbers?.[i] != null ? Number(pageNumbers[i]) : undefined,
-        paragraphIndex: paragraphIndexes?.[i] != null ? Number(paragraphIndexes[i]) : undefined,
-        startChar: startChars?.[i] != null ? Number(startChars[i]) : undefined,
-        endChar: endChars?.[i] != null ? Number(endChars[i]) : undefined,
-        bbox: bboxes?.[i] || undefined,
+        modelId: modelIds[i] || '',
+        indexedAt: indexedAts[i] || '',
+        contentHash: contentHashes[i] || '',
+        pageNumber: pageNumbers[i] != null ? Number(pageNumbers[i]) : undefined,
+        paragraphIndex: paragraphIndexes[i] != null ? Number(paragraphIndexes[i]) : undefined,
+        startChar: startChars[i] != null ? Number(startChars[i]) : undefined,
+        endChar: endChars[i] != null ? Number(endChars[i]) : undefined,
+        bbox: bboxes[i] || undefined,
       });
     }
 
-    this.logger.debug(`getAll(): Returning ${results.length} embeddings`);
+    this.logger.debug(`getAll(): returning ${results.length} embeddings`);
     return results;
   }
 
@@ -2066,151 +2131,26 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Get embeddings for a specific library
-   * Note: We split queries to avoid DB wrapper issues.
+   * Get embeddings for a specific library by local Zotero library ID.
+   * Translates to library_key and delegates to getByLibraryKey.
    */
   async getByLibrary(libraryId: number): Promise<PaperEmbedding[]> {
+    const libraryKey = libraryKeyFromLocalID(libraryId);
+    if (!libraryKey) return [];
+    return this.getByLibraryKey(libraryKey);
+  }
+
+  /**
+   * Get embeddings for a specific library by stable library_key.
+   *
+   * Note: Implemented as a filter on getAll() for code simplicity and correctness.
+   * Acceptable for libraries with <50k chunks. If profiling shows this is a
+   * bottleneck, inline a library-filtered version of the getAll JOIN.
+   */
+  async getByLibraryKey(libraryKey: string): Promise<PaperEmbedding[]> {
     await this.ensureInit();
-
-    // Step 1: Build item metadata Map for this library
-    const itemMap = new Map<number, {
-      itemKey: string; libraryId: number; title: string; abstract?: string;
-      modelId: string; indexedAt: string; contentHash: string;
-    }>();
-
-    try {
-      const [iIds, iKeys, iTitles, iAbstracts, iModels, iIndexedAts, iHashes] = await Promise.all([
-        Zotero.DB.columnQueryAsync(`SELECT item_id FROM ${DB_NAME}.items WHERE library_id = ? ORDER BY item_id`, [libraryId]),
-        Zotero.DB.columnQueryAsync(`SELECT item_key FROM ${DB_NAME}.items WHERE library_id = ? ORDER BY item_id`, [libraryId]),
-        Zotero.DB.columnQueryAsync(`SELECT title FROM ${DB_NAME}.items WHERE library_id = ? ORDER BY item_id`, [libraryId]),
-        Zotero.DB.columnQueryAsync(`SELECT abstract FROM ${DB_NAME}.items WHERE library_id = ? ORDER BY item_id`, [libraryId]),
-        Zotero.DB.columnQueryAsync(`SELECT model_id FROM ${DB_NAME}.items WHERE library_id = ? ORDER BY item_id`, [libraryId]),
-        Zotero.DB.columnQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items WHERE library_id = ? ORDER BY item_id`, [libraryId]),
-        Zotero.DB.columnQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items WHERE library_id = ? ORDER BY item_id`, [libraryId]),
-      ]);
-
-      if (iIds && iIds.length > 0) {
-        for (let i = 0; i < iIds.length; i++) {
-          itemMap.set(Number(iIds[i]), {
-            itemKey: iKeys?.[i] || '',
-            libraryId,
-            title: iTitles?.[i] || '',
-            abstract: iAbstracts?.[i] || undefined,
-            modelId: iModels?.[i] || '',
-            indexedAt: iIndexedAts?.[i] || '',
-            contentHash: iHashes?.[i] || '',
-          });
-        }
-      }
-    } catch (e) {
-      this.logger.error(`getByLibrary(${libraryId}): Failed to fetch item metadata: ${e}`);
-    }
-
-    // Zotero 8 fallback: if columnQueryAsync failed, try row-by-row
-    if (itemMap.size === 0) {
-      const itemIds = await this.getItemIdsSafe('WHERE library_id = ?', [libraryId]);
-      if (itemIds.length === 0) return [];
-
-      this.logger.debug(`getByLibrary(${libraryId}): Batch metadata failed, fetching ${itemIds.length} items row-by-row`);
-      for (const itemId of itemIds) {
-        try {
-          const [item_key, title, abstract, model_id, indexed_at, content_hash] = await Promise.all([
-            Zotero.DB.valueQueryAsync(`SELECT item_key FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-            Zotero.DB.valueQueryAsync(`SELECT title FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-            Zotero.DB.valueQueryAsync(`SELECT abstract FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-            Zotero.DB.valueQueryAsync(`SELECT model_id FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-            Zotero.DB.valueQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-            Zotero.DB.valueQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items WHERE item_id = ?`, [itemId]),
-          ]);
-          itemMap.set(itemId, {
-            itemKey: item_key || '',
-            libraryId,
-            title: title || '',
-            abstract: abstract || undefined,
-            modelId: model_id || '',
-            indexedAt: indexed_at || '',
-            contentHash: content_hash || '',
-          });
-        } catch (e) {
-          this.logger.error(`getByLibrary(): Error fetching item ${itemId}: ${e}`);
-        }
-      }
-    }
-
-    if (itemMap.size === 0) return [];
-
-    // Step 2: Get chunks for these items using IN clause
-    const itemIdList = Array.from(itemMap.keys());
-    const placeholders = itemIdList.map(() => '?').join(',');
-
-    // Fetch chunk keys and data
-    let chunkItemIds: number[] = [];
-    let chunkIndexes: number[] = [];
-    let embeddingStrs: string[] = [];
-    let textSources: string[] = [];
-
-    try {
-      [chunkItemIds, chunkIndexes, embeddingStrs, textSources] = await Promise.all([
-        Zotero.DB.columnQueryAsync(`SELECT item_id FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList).then((r: any) => (r || []).map(Number)),
-        Zotero.DB.columnQueryAsync(`SELECT chunk_index FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList).then((r: any) => (r || []).map(Number)),
-        Zotero.DB.columnQueryAsync(`SELECT embedding FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList).then((r: any) => r || []),
-        Zotero.DB.columnQueryAsync(`SELECT text_source FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList).then((r: any) => r || []),
-      ]) as [number[], number[], string[], string[]];
-    } catch (e) {
-      this.logger.error(`getByLibrary(${libraryId}): Failed to fetch chunks: ${e}`);
-    }
-
-    if (chunkItemIds.length === 0) {
-      // Fallback: use getChunkKeysByLibrary and getChunk
-      const chunks = await this.getChunkKeysByLibrary(libraryId);
-      if (chunks.length === 0) return [];
-
-      this.logger.debug(`getByLibrary(${libraryId}): Chunk batch failed, fetching ${chunks.length} chunks row-by-row`);
-      const results: PaperEmbedding[] = [];
-      for (const { itemId, chunkIndex } of chunks) {
-        const chunk = await this.getChunk(itemId, chunkIndex);
-        if (chunk) results.push(chunk);
-      }
-      return results;
-    }
-
-    // Step 3: Assemble results
-    const [chunkTexts, pageNumbers, paragraphIndexes, startChars, endChars, bboxes] = await Promise.all([
-      Zotero.DB.columnQueryAsync(`SELECT chunk_text FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList),
-      Zotero.DB.columnQueryAsync(`SELECT page_number FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList),
-      Zotero.DB.columnQueryAsync(`SELECT paragraph_index FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList),
-      Zotero.DB.columnQueryAsync(`SELECT start_char FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList),
-      Zotero.DB.columnQueryAsync(`SELECT end_char FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList),
-      Zotero.DB.columnQueryAsync(`SELECT bbox FROM ${DB_NAME}.chunks WHERE item_id IN (${placeholders}) ORDER BY item_id, chunk_index`, itemIdList),
-    ]);
-
-    const results: PaperEmbedding[] = [];
-    for (let i = 0; i < chunkItemIds.length; i++) {
-      const item = itemMap.get(chunkItemIds[i]);
-      if (!item) continue;
-
-      results.push({
-        itemId: chunkItemIds[i],
-        chunkIndex: chunkIndexes[i],
-        itemKey: item.itemKey,
-        libraryId: item.libraryId,
-        title: item.title,
-        abstract: item.abstract,
-        chunkText: chunkTexts?.[i] || undefined,
-        textSource: (textSources?.[i] as TextSourceType) || 'abstract',
-        embedding: this.base64ToEmbedding(embeddingStrs[i]),
-        modelId: item.modelId,
-        indexedAt: item.indexedAt,
-        contentHash: item.contentHash,
-        pageNumber: pageNumbers?.[i] != null ? Number(pageNumbers[i]) : undefined,
-        paragraphIndex: paragraphIndexes?.[i] != null ? Number(paragraphIndexes[i]) : undefined,
-        startChar: startChars?.[i] != null ? Number(startChars[i]) : undefined,
-        endChar: endChars?.[i] != null ? Number(endChars[i]) : undefined,
-        bbox: bboxes?.[i] || undefined,
-      });
-    }
-
-    return results;
+    const all = await this.getAll();
+    return all.filter(e => e.libraryKey === libraryKey);
   }
 
   /**

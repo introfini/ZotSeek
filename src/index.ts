@@ -36,6 +36,7 @@ import { selfTest as zotseekSelfTest } from './dev/self-test';
 import './dev/suites/task-1-identity-resolver';
 import './dev/suites/task-6-write-delete';
 import './dev/suites/task-7-lookups';
+import './dev/suites/task-8-reads';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
