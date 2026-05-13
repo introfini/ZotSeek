@@ -15,6 +15,7 @@
  */
 
 import { Logger } from '../utils/logger';
+import { identityFromItem } from './identity-resolver';
 
 declare const Zotero: any;
 declare const PathUtils: any;
@@ -1251,42 +1252,98 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Store a paper embedding (single chunk)
+   * Resolve (library_key, item_key) to an existing item_pk, or create a new
+   * row in items if absent. Updates item-level metadata on UPSERT.
+   *
+   * Uses a manual "SELECT then INSERT" pattern because the version of SQLite
+   * bundled with Zotero 8 doesn't reliably support RETURNING.
+   */
+  private async getOrCreateItemPk(meta: {
+    libraryKey: string;
+    itemKey: string;
+    title: string;
+    abstract?: string | null;
+    modelId: string;
+    indexedAt: string;
+    contentHash: string;
+    wasTruncated?: boolean;
+    pagesIndexed?: number;
+    pagesTotal?: number;
+  }): Promise<number> {
+    // Try to find existing
+    const existing = await Zotero.DB.valueQueryAsync(
+      `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [meta.libraryKey, meta.itemKey]
+    );
+
+    if (existing && Number(existing) > 0) {
+      // Update metadata in case it changed (re-index path)
+      await Zotero.DB.queryAsync(`
+        UPDATE ${DB_NAME}.items
+        SET title = ?, abstract = ?, model_id = ?, indexed_at = ?,
+            content_hash = ?, was_truncated = ?, pages_indexed = ?, pages_total = ?
+        WHERE item_pk = ?
+      `, [
+        meta.title, meta.abstract ?? null, meta.modelId, meta.indexedAt,
+        meta.contentHash,
+        meta.wasTruncated ? 1 : 0,
+        meta.pagesIndexed ?? 0,
+        meta.pagesTotal ?? 0,
+        Number(existing)
+      ]);
+      return Number(existing);
+    }
+
+    // Insert new
+    await Zotero.DB.queryAsync(`
+      INSERT INTO ${DB_NAME}.items
+        (library_key, item_key, title, abstract, model_id, indexed_at,
+         content_hash, was_truncated, pages_indexed, pages_total)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      meta.libraryKey, meta.itemKey, meta.title, meta.abstract ?? null,
+      meta.modelId, meta.indexedAt, meta.contentHash,
+      meta.wasTruncated ? 1 : 0, meta.pagesIndexed ?? 0, meta.pagesTotal ?? 0
+    ]);
+    const newPk = await Zotero.DB.valueQueryAsync(`SELECT last_insert_rowid()`);
+    return Number(newPk);
+  }
+
+  /**
+   * Store a paper embedding (single chunk).
+   *
+   * Requires stable identity (libraryKey + itemKey) on the embedding.
    */
   async put(embedding: PaperEmbedding): Promise<void> {
     await this.ensureInit();
 
+    if (!embedding.libraryKey || !embedding.itemKey) {
+      throw new Error(`put: embedding missing libraryKey/itemKey identity`);
+    }
+
+    const itemPk = await this.getOrCreateItemPk({
+      libraryKey: embedding.libraryKey,
+      itemKey: embedding.itemKey,
+      title: embedding.title,
+      abstract: embedding.abstract,
+      modelId: embedding.modelId,
+      indexedAt: embedding.indexedAt,
+      contentHash: embedding.contentHash,
+      wasTruncated: embedding.wasTruncated,
+      pagesIndexed: embedding.pagesIndexed,
+      pagesTotal: embedding.pagesTotal,
+    });
+
     const embeddingStr = this.embeddingToBase64(embedding.embedding);
     const chunkIndex = embedding.chunkIndex ?? 0;
 
-    // Write item-level data
-    await Zotero.DB.queryAsync(`
-      INSERT OR REPLACE INTO ${DB_NAME}.items
-      (item_id, item_key, library_id, title, abstract, model_id, indexed_at, content_hash,
-       was_truncated, pages_indexed, pages_total)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      embedding.itemId,
-      embedding.itemKey,
-      embedding.libraryId,
-      embedding.title,
-      embedding.abstract || null,
-      embedding.modelId,
-      embedding.indexedAt,
-      embedding.contentHash,
-      embedding.wasTruncated ? 1 : 0,
-      embedding.pagesIndexed ?? 0,
-      embedding.pagesTotal ?? 0,
-    ]);
-
-    // Write chunk-level data
     await Zotero.DB.queryAsync(`
       INSERT OR REPLACE INTO ${DB_NAME}.chunks
-      (item_id, chunk_index, chunk_text, text_source, embedding, page_number, paragraph_index, start_char, end_char, bbox)
+      (item_pk, chunk_index, chunk_text, text_source, embedding,
+       page_number, paragraph_index, start_char, end_char, bbox)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      embedding.itemId,
-      chunkIndex,
+      itemPk, chunkIndex,
       embedding.chunkText || null,
       embedding.textSource,
       embeddingStr,
@@ -1297,67 +1354,70 @@ export class VectorStoreSQLite {
       embedding.bbox ?? null,
     ]);
 
-    this.logger.debug(`Stored embedding for item ${embedding.itemId} chunk ${chunkIndex}${embedding.pageNumber ? ` (p.${embedding.pageNumber})` : ''}`);
+    this.logger.debug(`Stored chunk for (${embedding.libraryKey}, ${embedding.itemKey}) idx=${chunkIndex}`);
     this.invalidateCache();
   }
 
   /**
-   * Store multiple embeddings in a batch using transaction
+   * Store multiple embeddings in a batch using transaction.
+   *
+   * Resolves all unique (libraryKey, itemKey) identities to item_pks first
+   * (dedup'd in-process), then writes chunks pointing at those pks.
    */
   async putBatch(embeddings: PaperEmbedding[]): Promise<void> {
     await this.ensureInit();
+    if (embeddings.length === 0) return;
 
     this.logger.info(`Storing ${embeddings.length} embeddings...`);
-    // Log what item IDs we're storing (unique)
-    const itemIds = [...new Set(embeddings.map(e => e.itemId))];
-    this.logger.info(`Storing embeddings for ${itemIds.length} items: ${JSON.stringify(itemIds)}`);
+    const idents = new Set(embeddings.map(e => `${e.libraryKey}|${e.itemKey}`));
+    this.logger.info(`Storing embeddings for ${idents.size} unique items`);
 
-    // Count how many have location data
     const withLocation = embeddings.filter(e => e.pageNumber != null).length;
     if (withLocation > 0) {
       this.logger.info(`${withLocation}/${embeddings.length} chunks have location data`);
     }
 
-    // Use Zotero's transaction for better performance
     await Zotero.DB.executeTransaction(async () => {
-      // Deduplicate item inserts - only insert once per item_id
-      const insertedItems = new Set<number>();
+      // Resolve all unique items to item_pks (insert-or-update)
+      const pkByIdent = new Map<string, number>();
+      const seen = new Set<string>();
+      for (const e of embeddings) {
+        if (!e.libraryKey || !e.itemKey) {
+          throw new Error('putBatch: embedding missing libraryKey/itemKey');
+        }
+        const key = `${e.libraryKey}|${e.itemKey}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const pk = await this.getOrCreateItemPk({
+          libraryKey: e.libraryKey,
+          itemKey: e.itemKey,
+          title: e.title,
+          abstract: e.abstract,
+          modelId: e.modelId,
+          indexedAt: e.indexedAt,
+          contentHash: e.contentHash,
+          wasTruncated: e.wasTruncated,
+          pagesIndexed: e.pagesIndexed,
+          pagesTotal: e.pagesTotal,
+        });
+        pkByIdent.set(key, pk);
+      }
 
+      // Write chunks
       for (const embedding of embeddings) {
+        const key = `${embedding.libraryKey}|${embedding.itemKey}`;
+        const itemPk = pkByIdent.get(key);
+        if (!itemPk) throw new Error(`putBatch: lost pk for ${key}`); // defensive
         const embeddingStr = this.embeddingToBase64(embedding.embedding);
         const chunkIndex = embedding.chunkIndex ?? 0;
 
-        // Write item-level data (once per item)
-        if (!insertedItems.has(embedding.itemId)) {
-          await Zotero.DB.queryAsync(`
-            INSERT OR REPLACE INTO ${DB_NAME}.items
-            (item_id, item_key, library_id, title, abstract, model_id, indexed_at, content_hash,
-             was_truncated, pages_indexed, pages_total)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, [
-            embedding.itemId,
-            embedding.itemKey,
-            embedding.libraryId,
-            embedding.title,
-            embedding.abstract || null,
-            embedding.modelId,
-            embedding.indexedAt,
-            embedding.contentHash,
-            embedding.wasTruncated ? 1 : 0,
-            embedding.pagesIndexed ?? 0,
-            embedding.pagesTotal ?? 0,
-          ]);
-          insertedItems.add(embedding.itemId);
-        }
-
-        // Write chunk-level data
         await Zotero.DB.queryAsync(`
           INSERT OR REPLACE INTO ${DB_NAME}.chunks
-          (item_id, chunk_index, chunk_text, text_source, embedding, page_number, paragraph_index, start_char, end_char, bbox)
+          (item_pk, chunk_index, chunk_text, text_source, embedding,
+           page_number, paragraph_index, start_char, end_char, bbox)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          embedding.itemId,
-          chunkIndex,
+          itemPk, chunkIndex,
           embedding.chunkText || null,
           embedding.textSource,
           embeddingStr,
@@ -1372,27 +1432,91 @@ export class VectorStoreSQLite {
 
     this.logger.info(`Stored ${embeddings.length} embeddings`);
 
-    // Verify storage
-    const verifyRows = await Zotero.DB.queryAsync(`SELECT COUNT(*) as count FROM ${DB_NAME}.chunks`);
-    this.logger.info(`Verification: table now has ${verifyRows?.[0]?.count || 0} total embedding chunks`);
+    // Verification log only — not a correctness check
+    const verifyRows = await Zotero.DB.queryAsync(
+      `SELECT COUNT(*) as count FROM ${DB_NAME}.chunks`
+    );
+    this.logger.info(`Table now has ${verifyRows?.[0]?.count || 0} total embedding chunks`);
     this.invalidateCache();
   }
 
   /**
-   * Delete all chunks for an item before re-indexing
+   * Delete all chunks AND the item row for a given stable identity.
+   * No-op if the item is not indexed.
+   *
+   * SQLite foreign-key enforcement is OFF by default in Zotero's DB
+   * connection, so we cannot rely on `ON DELETE CASCADE`. We delete
+   * chunks explicitly inside a transaction.
    */
-  async deleteItemChunks(itemId: number): Promise<void> {
+  async deleteItem(libraryKey: string, itemKey: string): Promise<void> {
     await this.ensureInit();
 
-    await Zotero.DB.queryAsync(`
-      DELETE FROM ${DB_NAME}.chunks WHERE item_id = ?
-    `, [itemId]);
-    await Zotero.DB.queryAsync(`
-      DELETE FROM ${DB_NAME}.items WHERE item_id = ?
-    `, [itemId]);
+    const pk = await Zotero.DB.valueQueryAsync(
+      `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [libraryKey, itemKey]
+    );
+    if (!pk || Number(pk) <= 0) {
+      this.logger.debug(`deleteItem: no item for (${libraryKey}, ${itemKey})`);
+      return;
+    }
 
-    this.logger.debug(`Deleted all chunks for item ${itemId}`);
+    await Zotero.DB.executeTransaction(async () => {
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ?`,
+        [Number(pk)]
+      );
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.items WHERE item_pk = ?`,
+        [Number(pk)]
+      );
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.orphan_items WHERE item_pk = ?`,
+        [Number(pk)]
+      );
+    });
+
+    this.logger.debug(`Deleted item (${libraryKey}, ${itemKey})`);
     this.invalidateCache();
+  }
+
+  /**
+   * Delete only the chunks for an item, preserving the items row.
+   * Used before re-indexing the same item to clean stale chunks.
+   */
+  async deleteChunksForItem(libraryKey: string, itemKey: string): Promise<void> {
+    await this.ensureInit();
+    const pk = await Zotero.DB.valueQueryAsync(
+      `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [libraryKey, itemKey]
+    );
+    if (!pk || Number(pk) <= 0) return;
+    await Zotero.DB.queryAsync(
+      `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ?`,
+      [Number(pk)]
+    );
+    this.invalidateCache();
+  }
+
+  /** @deprecated Use deleteItem(libraryKey, itemKey). Resolves identity via the resolver. */
+  async delete(itemId: number): Promise<void> {
+    await this.ensureInit();
+    const item = Zotero.Items.get(itemId);
+    if (!item) {
+      this.logger.warn(`delete(${itemId}): item not in Zotero`);
+      return;
+    }
+    const id = identityFromItem(item);
+    if (!id) return;
+    return this.deleteItem(id.libraryKey, id.itemKey);
+  }
+
+  /** @deprecated Use deleteChunksForItem(libraryKey, itemKey). */
+  async deleteItemChunks(itemId: number): Promise<void> {
+    const item = Zotero.Items.get(itemId);
+    if (!item) return;
+    const id = identityFromItem(item);
+    if (!id) return;
+    return this.deleteChunksForItem(id.libraryKey, id.itemKey);
   }
 
   /**
@@ -2200,23 +2324,6 @@ export class VectorStoreSQLite {
 
     if (!rows || rows.length === 0) return true;
     return rows[0].content_hash !== contentHash;
-  }
-
-  /**
-   * Delete embedding for an item
-   */
-  async delete(itemId: number): Promise<void> {
-    await this.ensureInit();
-
-    await Zotero.DB.queryAsync(`
-      DELETE FROM ${DB_NAME}.chunks WHERE item_id = ?
-    `, [itemId]);
-    await Zotero.DB.queryAsync(`
-      DELETE FROM ${DB_NAME}.items WHERE item_id = ?
-    `, [itemId]);
-
-    this.logger.debug(`Deleted embedding for item ${itemId}`);
-    this.invalidateCache();
   }
 
   /**

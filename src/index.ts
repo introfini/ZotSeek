@@ -34,6 +34,7 @@ import { preferencesManager } from './ui/preferences';
 import { selfTest as zotseekSelfTest } from './dev/self-test';
 // Task suites: imported for registration side effects only.
 import './dev/suites/task-1-identity-resolver';
+import './dev/suites/task-6-write-delete';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
