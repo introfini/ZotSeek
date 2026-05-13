@@ -137,8 +137,9 @@ class SimilarDocumentsDialog {
         try {
           const sourceItem = await Z.Items.getAsync(this.sourceItemId);
           if (sourceItem) {
-            this.sourceTitle = sourceItem.getField('title');
-            this.setSourceInfo(this.sourceTitle);
+            const fetchedTitle: string = sourceItem.getField('title') || '';
+            this.sourceTitle = fetchedTitle;
+            this.setSourceInfo(fetchedTitle);
           }
         } catch (e) {
           this.logger.warn('Could not fetch source item title:', e);
@@ -157,10 +158,11 @@ class SimilarDocumentsDialog {
         ? minSimPref / 100
         : 0.3;
 
+      // findSimilar always excludes the source item from results internally,
+      // so no excludeSelf flag is needed.
       const results = await searchEngine.findSimilar(this.sourceItemId, {
         topK,
         minSimilarity,
-        excludeSelf: true,
       });
 
       if (results.length === 0) {
@@ -210,8 +212,14 @@ class SimilarDocumentsDialog {
     this.enrichedData.clear();
     
     for (const result of this.results) {
+      const localId = result.itemId;
+      if (localId === undefined) {
+        // Orphan: item not in current Zotero library, skip enrichment.
+        this.logger.debug(`Skipping enrichment for orphan result (${result.libraryKey}, ${result.itemKey})`);
+        continue;
+      }
       try {
-        const item = await Z.Items.getAsync(result.itemId);
+        const item = await Z.Items.getAsync(localId);
         if (item) {
           const enriched: any = {
             title: item.getField('title') || result.title || 'Untitled',
@@ -227,11 +235,11 @@ class SimilarDocumentsDialog {
               enriched.year = parseInt(yearMatch[0]);
             }
           }
-          
+
           // Get authors
           const creators = item.getCreators();
-          this.logger.debug(`Item ${result.itemId} has ${creators.length} creators`);
-          
+          this.logger.debug(`Item ${localId} has ${creators.length} creators`);
+
           enriched.authors = creators
             .filter((c: any) => c.creatorType === 'author' || c.creatorType === 1)
             .map((c: any) => {
@@ -252,25 +260,25 @@ class SimilarDocumentsDialog {
             try {
               const firstCreator = item.getCreator(0);
               if (firstCreator && firstCreator.lastName) {
-                const name = firstCreator.firstName 
+                const name = firstCreator.firstName
                   ? `${firstCreator.lastName}, ${firstCreator.firstName.charAt(0)}.`
                   : firstCreator.lastName;
                 enriched.authors = [name];
               }
             } catch (e) {
-              this.logger.debug(`No creators for item ${result.itemId}`);
+              this.logger.debug(`No creators for item ${localId}`);
             }
           }
 
-          this.logger.debug(`Item ${result.itemId} authors: ${enriched.authors.join(', ')}`);
-          this.enrichedData.set(result.itemId, enriched);
-          
+          this.logger.debug(`Item ${localId} authors: ${enriched.authors.join(', ')}`);
+          this.enrichedData.set(localId, enriched);
+
           // Also update the result object
           result.authors = enriched.authors;
           result.year = enriched.year;
         }
       } catch (e) {
-        this.logger.warn(`Failed to get metadata for item ${result.itemId}:`, e);
+        this.logger.warn(`Failed to get metadata for item ${localId}:`, e);
       }
     }
 
@@ -298,7 +306,9 @@ class SimilarDocumentsDialog {
   private openSelected(): void {
     const selected = this.resultsTable?.getSelectedResult();
     if (selected) {
-      const index = this.results.indexOf(selected);
+      // The results table stores AnySearchResult; this dialog only ever puts
+      // SearchResult instances into it, so the cast is safe.
+      const index = this.results.indexOf(selected as SearchResult);
       if (index >= 0) {
         this.openItem(index);
       }
@@ -350,8 +360,14 @@ class SimilarDocumentsDialog {
    */
   private openItem(index: number): void {
     if (index < 0 || index >= this.results.length) return;
-    
+
     const result = this.results[index];
+    const localId = result.itemId;
+    if (localId === undefined) {
+      this.logger.warn(`Cannot open orphan result (${result.libraryKey}, ${result.itemKey})`);
+      this.setStatus('Item is not in your local Zotero library', 'error');
+      return;
+    }
     const Z = getZotero();
     if (!Z) return;
 
@@ -359,7 +375,7 @@ class SimilarDocumentsDialog {
       // Select the item in the library
       const zp = Z.getActiveZoteroPane();
       if (zp && zp.selectItem) {
-        zp.selectItem(result.itemId);
+        zp.selectItem(localId);
         this.logger.info(`Opened item: ${result.title}`);
         
         // Close dialog after opening

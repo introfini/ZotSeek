@@ -233,16 +233,17 @@ export class SearchResultsTable {
       };
     }
 
-    const enriched = this.enrichedResults.get(result.itemId);
-    
+    const localId = result.itemId;
+    const enriched = localId !== undefined ? this.enrichedResults.get(localId) : undefined;
+
     // Check if this is a hybrid search result
     const isHybrid = this.isHybridSearchResult(result);
-    
+
     // Get the data with fallbacks
     let authors: string | string[];
     let year: number | undefined;
     let title: string;
-    
+
     if (isHybrid) {
       // HybridSearchResult already has formatted data
       const hybridResult = result as HybridSearchResult;
@@ -254,6 +255,11 @@ export class SearchResultsTable {
       authors = enriched?.authors || (result as SearchResult).authors || [];
       year = enriched?.year || (result as SearchResult).year;
       title = enriched?.title || result.title || 'Untitled';
+    }
+
+    // Mark orphan results (item not present in current Zotero library)
+    if (localId === undefined) {
+      title = `[Not synced] ${title}`;
     }
     
     // Format the data for display
@@ -419,10 +425,13 @@ export class SearchResultsTable {
   }
 
   /**
-   * Get item IDs of current results (for finding pages)
+   * Get item IDs of current results (for finding pages).
+   * Orphan results (no resolved local itemId) are filtered out.
    */
   getResultItemIds(): number[] {
-    return this.results.map(r => r.itemId);
+    return this.results
+      .map(r => r.itemId)
+      .filter((id): id is number => id !== undefined);
   }
 
   /**
@@ -530,8 +539,8 @@ export class SearchResultsTable {
       const isHybridA = this.isHybridSearchResult(a);
       const isHybridB = this.isHybridSearchResult(b);
       
-      const enrichedA = this.enrichedResults.get(a.itemId);
-      const enrichedB = this.enrichedResults.get(b.itemId);
+      const enrichedA = a.itemId !== undefined ? this.enrichedResults.get(a.itemId) : undefined;
+      const enrichedB = b.itemId !== undefined ? this.enrichedResults.get(b.itemId) : undefined;
       
       switch (column) {
         case 'similarity':
