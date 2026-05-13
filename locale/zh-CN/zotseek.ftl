@@ -88,6 +88,16 @@ zotseek-pref-avgLine = 平均：{ $avg } 分块/文献
 zotseek-pref-lastIndexedLine = 上次索引：{ $date }
 zotseek-pref-compacted = 数据库已压缩
 zotseek-pref-compactionFailed = 压缩失败
+zotseek-pref-healthHeader = 数据库健康
+zotseek-pref-healthOrphans = 未解析的嵌入：{ $count }
+zotseek-pref-healthOrphansDesc = 这些嵌入对应的项目无法与当前 Zotero 库匹配。清理可释放空间，但操作不可撤销。
+zotseek-pref-healthPurgeOrphans =
+    .label = 清理孤立项
+zotseek-pref-healthPurgeConfirmTitle = 清理未解析的嵌入
+zotseek-pref-healthPurgeConfirmMsg = 这将永久删除在当前 Zotero 库中找不到的项目嵌入。是否继续？
+zotseek-pref-healthPurgeDoneTitle = 孤立项已清理
+zotseek-pref-healthPurgeDoneMsg = 已移除 { $count } 个未解析的条目。
+zotseek-pref-healthPurgeFailedTitle = 清理失败
 
 ## Search dialog
 

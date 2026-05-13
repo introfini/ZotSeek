@@ -359,6 +359,26 @@
   </vbox>
 </groupbox>
 
+<!-- Database Health -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-pref-healthHeader">Database Health</html:h2></label>
+  <html:div class="zotseek-settings-box" style="border-radius: 6px; padding: 12px; border-width: 1px; border-style: solid;">
+    <hbox align="center">
+      <html:label id="zotseek-orphan-count"
+                  data-l10n-id="zotseek-pref-healthOrphans"
+                  data-l10n-args='{"count": 0}'
+                  style="color: var(--zotseek-text-primary);">Unresolved embeddings: 0</html:label>
+      <spacer flex="1"/>
+      <button id="zotseek-purge-orphans-btn"
+              label="Purge Orphans"
+              data-l10n-id="zotseek-pref-healthPurgeOrphans" />
+    </hbox>
+    <html:p data-l10n-id="zotseek-pref-healthOrphansDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
+      Embeddings whose source items couldn't be matched to your current library. Purging frees space but cannot be undone.
+    </html:p>
+  </html:div>
+</groupbox>
+
 <!-- About -->
 <groupbox>
   <label><html:h2 data-l10n-id="zotseek-pref-about">About</html:h2></label>

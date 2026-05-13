@@ -88,6 +88,16 @@ zotseek-pref-avgLine = Avg: { $avg } chunks/paper
 zotseek-pref-lastIndexedLine = Last indexed: { $date }
 zotseek-pref-compacted = Database Compacted
 zotseek-pref-compactionFailed = Compaction Failed
+zotseek-pref-healthHeader = Database Health
+zotseek-pref-healthOrphans = Unresolved embeddings: { $count }
+zotseek-pref-healthOrphansDesc = Embeddings whose source items couldn't be matched to your current library. Purging frees space but cannot be undone.
+zotseek-pref-healthPurgeOrphans =
+    .label = Purge Orphans
+zotseek-pref-healthPurgeConfirmTitle = Purge Unresolved Embeddings
+zotseek-pref-healthPurgeConfirmMsg = This will permanently delete embeddings for items not found in your current Zotero library. Continue?
+zotseek-pref-healthPurgeDoneTitle = Orphans Purged
+zotseek-pref-healthPurgeDoneMsg = Removed { $count } unresolved entries.
+zotseek-pref-healthPurgeFailedTitle = Purge Failed
 
 ## Search dialog
 
