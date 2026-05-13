@@ -217,6 +217,9 @@ export class VectorStoreSQLite {
       // Migrate to v7 (per-item indexing status columns) if needed
       await this.migrateToV7();
 
+      // Migrate to v8 (stable identity: library_key + item_key + item_pk) if needed
+      await this.migrateToV8();
+
       this.initialized = true;
       this.logger.info('SQLite store initialized successfully');
 
@@ -703,6 +706,355 @@ export class VectorStoreSQLite {
       this.logger.error(`Migration to v7 failed: ${error?.message || error}`);
       // Non-fatal: if the columns can't be added, the column UI will fall back
       // to chunk-count-only status and the rest of the plugin still works.
+    }
+  }
+
+  /**
+   * Migrate to schema v8: Stable cross-machine identity.
+   *
+   * v7 used `items.item_id` (Zotero's local auto-increment ID) as the primary
+   * key, which breaks when the database is copied to another Zotero
+   * installation because local item IDs aren't stable across machines.
+   *
+   * v8 introduces:
+   * - `items.item_pk` (autoincrement surrogate, ZotSeek-internal)
+   * - `items.library_key` ('user' | 'group:<groupID>', stable via sync)
+   * - `items.item_key` (already existed, Zotero's stable 8-char key)
+   * - UNIQUE(library_key, item_key) as the logical identity
+   * - `chunks.item_pk` FK to items.item_pk
+   *
+   * Migration strategy: resolve each old row's identity using its stored
+   * `item_key` and the current Zotero state. Works uniformly whether the
+   * database was indexed on this machine OR copied from another. Rows
+   * whose `item_key` doesn't resolve to any local Zotero item are moved
+   * to the `orphan_items` table (data preserved, not searchable).
+   *
+   * Detection: presence of `library_key` column in items is the ground truth.
+   * The `schema_version` row is unreliable (see CLAUDE.md pitfall #8).
+   */
+  private async migrateToV8(): Promise<void> {
+    // Detect v8 by column presence
+    let existing: Set<string>;
+    try {
+      const cols: any[] = await Zotero.DB.queryAsync(`PRAGMA ${DB_NAME}.table_info(items)`);
+      existing = new Set((cols || []).map((c: any) => c.name));
+    } catch (e: any) {
+      this.logger.error(`migrateToV8: could not introspect items table: ${e?.message || e}`);
+      return;
+    }
+
+    if (existing.has('library_key') && existing.has('item_pk')) {
+      this.logger.debug('items table already at v8, skipping migration');
+      return;
+    }
+
+    // Must have a v7 items table to migrate from
+    if (!existing.has('item_id') || !existing.has('item_key')) {
+      this.logger.debug('No v7 items table found, skipping v8 migration');
+      return;
+    }
+
+    this.logger.info('Migrating schema from v7 to v8 (stable cross-machine identity)...');
+
+    // === 1. Pre-migration backup ===
+    const dbPath = this.getDbPath();
+    const backupPath = `${dbPath}.v7.bak`;
+    try {
+      // Use IOUtils to copy the file; we need Zotero to flush first.
+      // The simplest safe approach is to DETACH, copy, ATTACH.
+      await this.detachDatabase();
+      await IOUtils.copy(dbPath, backupPath, { noOverwrite: false });
+      this.logger.info(`Pre-migration backup written to ${backupPath}`);
+      await this.attachDatabase();
+    } catch (e: any) {
+      this.logger.error(`Backup failed, aborting migration: ${e?.message || e}`);
+      // Ensure DB is attached so the rest of init doesn't break
+      try { await this.attachDatabase(); } catch { /* ignore */ }
+      throw new Error(`v8 migration aborted: backup failed (${e?.message || e})`);
+    }
+
+    // === 2. Resolve identity for every old row ===
+    // We read the entire items table into memory (4000-10000 rows is trivial).
+    // For each row, we resolve (library_key, item_key) using identity-resolver.
+
+    const { findIdentityByItemKey, libraryKeyFromLocalID } = await import('./identity-resolver');
+
+    let oldRows: Array<{
+      item_id: number;
+      item_key: string;
+      library_id: number;
+      title: string;
+      abstract: string | null;
+      model_id: string;
+      indexed_at: string;
+      content_hash: string;
+      was_truncated: number;
+      pages_indexed: number;
+      pages_total: number;
+    }> = [];
+
+    try {
+      // Use parallel columnQueryAsync to dodge the multi-column SELECT
+      // empty-result quirk documented in CLAUDE.md.
+      const orderBy = `ORDER BY item_id`;
+      const [
+        itemIds, itemKeys, libraryIds, titles, abstracts, modelIds,
+        indexedAts, contentHashes, wasTruncateds, pagesIndexeds, pagesTotals
+      ] = await Promise.all([
+        Zotero.DB.columnQueryAsync(`SELECT item_id FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT item_key FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT library_id FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT title FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT abstract FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT model_id FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT was_truncated FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT pages_indexed FROM ${DB_NAME}.items ${orderBy}`),
+        Zotero.DB.columnQueryAsync(`SELECT pages_total FROM ${DB_NAME}.items ${orderBy}`),
+      ]);
+
+      const n = (itemIds || []).length;
+      for (let i = 0; i < n; i++) {
+        oldRows.push({
+          item_id: Number(itemIds[i]),
+          item_key: itemKeys[i],
+          library_id: Number(libraryIds[i]),
+          title: titles[i],
+          abstract: abstracts[i],
+          model_id: modelIds[i],
+          indexed_at: indexedAts[i],
+          content_hash: contentHashes[i],
+          was_truncated: Number(wasTruncateds[i] || 0),
+          pages_indexed: Number(pagesIndexeds[i] || 0),
+          pages_total: Number(pagesTotals[i] || 0),
+        });
+      }
+    } catch (e: any) {
+      this.logger.error(`migrateToV8: failed to read old items: ${e?.message || e}`);
+      throw e;
+    }
+
+    this.logger.info(`migrateToV8: resolving identity for ${oldRows.length} items...`);
+
+    type ResolvedRow = typeof oldRows[number] & {
+      library_key: string | null;
+      resolved: boolean;
+    };
+
+    const resolved: ResolvedRow[] = [];
+    let matchedCount = 0;
+    let orphanCount = 0;
+
+    for (const row of oldRows) {
+      // First try the row's stored library_id directly — fast path for upgrades
+      // on the original machine.
+      let libraryKey = libraryKeyFromLocalID(row.library_id);
+      let stillMatches = false;
+      if (libraryKey) {
+        try {
+          const liveID = Zotero.Items.getIDFromLibraryAndKey(row.library_id, row.item_key);
+          stillMatches = !!(liveID && liveID === row.item_id);
+        } catch (e: any) {
+          stillMatches = false;
+        }
+      }
+
+      if (libraryKey && stillMatches) {
+        resolved.push({ ...row, library_key: libraryKey, resolved: true });
+        matchedCount++;
+        continue;
+      }
+
+      // Fall back to scanning all libraries by item_key (cross-machine copy case).
+      let identity: { libraryKey: string; itemKey: string } | null = null;
+      try {
+        identity = findIdentityByItemKey(row.item_key, row.library_id);
+      } catch (e: any) {
+        identity = null;
+      }
+
+      if (identity) {
+        resolved.push({ ...row, library_key: identity.libraryKey, resolved: true });
+        matchedCount++;
+      } else {
+        resolved.push({ ...row, library_key: null, resolved: false });
+        orphanCount++;
+      }
+    }
+
+    this.logger.info(`migrateToV8: ${matchedCount} matched, ${orphanCount} orphans`);
+
+    // === 3. Build the new tables inside a transaction ===
+    try {
+      await Zotero.DB.executeTransaction(async () => {
+        // Rename old tables out of the way
+        await Zotero.DB.queryAsync(`ALTER TABLE ${DB_NAME}.items RENAME TO items_v7_old`);
+        await Zotero.DB.queryAsync(`ALTER TABLE ${DB_NAME}.chunks RENAME TO chunks_v7_old`);
+
+        // Create new v8 tables
+        await Zotero.DB.queryAsync(`
+          CREATE TABLE ${DB_NAME}.items (
+            item_pk INTEGER PRIMARY KEY AUTOINCREMENT,
+            library_key TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            abstract TEXT,
+            model_id TEXT NOT NULL,
+            indexed_at TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            was_truncated INTEGER NOT NULL DEFAULT 0,
+            pages_indexed INTEGER NOT NULL DEFAULT 0,
+            pages_total INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(library_key, item_key)
+          )
+        `);
+
+        await Zotero.DB.queryAsync(`
+          CREATE TABLE ${DB_NAME}.chunks (
+            item_pk INTEGER NOT NULL,
+            chunk_index INTEGER NOT NULL DEFAULT 0,
+            chunk_text TEXT,
+            text_source TEXT NOT NULL,
+            embedding TEXT NOT NULL,
+            page_number INTEGER,
+            paragraph_index INTEGER,
+            start_char INTEGER,
+            end_char INTEGER,
+            bbox TEXT,
+            PRIMARY KEY (item_pk, chunk_index),
+            FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
+          )
+        `);
+
+        await Zotero.DB.queryAsync(`
+          CREATE TABLE IF NOT EXISTS ${DB_NAME}.orphan_items (
+            item_pk INTEGER PRIMARY KEY,
+            library_key TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            detected_at TEXT NOT NULL,
+            reason TEXT NOT NULL
+          )
+        `);
+
+        // === 4. Copy data using the resolution map ===
+        // We insert items in old item_id order so the mapping old_item_id -> new item_pk
+        // can be reconstructed if needed. Since SQLite assigns AUTOINCREMENT
+        // values sequentially in insert order, we capture each new item_pk
+        // via last_insert_rowid().
+
+        const oldIdToNewPk = new Map<number, number>();
+        const nowIso = new Date().toISOString();
+
+        for (const r of resolved) {
+          const libraryKey = r.library_key || 'orphan';
+
+          // INSERT into items (active) or orphan_items (unresolved)
+          if (r.resolved) {
+            await Zotero.DB.queryAsync(`
+              INSERT INTO ${DB_NAME}.items
+                (library_key, item_key, title, abstract, model_id, indexed_at,
+                 content_hash, was_truncated, pages_indexed, pages_total)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+              libraryKey, r.item_key, r.title, r.abstract, r.model_id, r.indexed_at,
+              r.content_hash, r.was_truncated, r.pages_indexed, r.pages_total
+            ]);
+            const newPk = await Zotero.DB.valueQueryAsync('SELECT last_insert_rowid()');
+            oldIdToNewPk.set(r.item_id, Number(newPk));
+          } else {
+            // Orphan path: still insert into items so chunks can point at it,
+            // but with a placeholder library_key. We also log to orphan_items
+            // for UI surfacing.
+            await Zotero.DB.queryAsync(`
+              INSERT INTO ${DB_NAME}.items
+                (library_key, item_key, title, abstract, model_id, indexed_at,
+                 content_hash, was_truncated, pages_indexed, pages_total)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+              'orphan', r.item_key, r.title, r.abstract, r.model_id, r.indexed_at,
+              r.content_hash, r.was_truncated, r.pages_indexed, r.pages_total
+            ]);
+            const newPk = await Zotero.DB.valueQueryAsync('SELECT last_insert_rowid()');
+            oldIdToNewPk.set(r.item_id, Number(newPk));
+            await Zotero.DB.queryAsync(`
+              INSERT INTO ${DB_NAME}.orphan_items
+                (item_pk, library_key, item_key, detected_at, reason)
+              VALUES (?, ?, ?, ?, ?)
+            `, [Number(newPk), 'orphan', r.item_key, nowIso, 'item_key not found in any current Zotero library']);
+          }
+        }
+
+        // === 5. Copy chunks, remapping item_id -> item_pk ===
+        // We do this in bulk via INSERT ... SELECT joining a temp mapping table.
+        await Zotero.DB.queryAsync(`
+          CREATE TEMPORARY TABLE _id_map (old_id INTEGER PRIMARY KEY, new_pk INTEGER NOT NULL)
+        `);
+        for (const [oldId, newPk] of oldIdToNewPk.entries()) {
+          await Zotero.DB.queryAsync(
+            `INSERT INTO _id_map (old_id, new_pk) VALUES (?, ?)`,
+            [oldId, newPk]
+          );
+        }
+
+        await Zotero.DB.queryAsync(`
+          INSERT INTO ${DB_NAME}.chunks
+            (item_pk, chunk_index, chunk_text, text_source, embedding,
+             page_number, paragraph_index, start_char, end_char, bbox)
+          SELECT m.new_pk, c.chunk_index, c.chunk_text, c.text_source, c.embedding,
+                 c.page_number, c.paragraph_index, c.start_char, c.end_char, c.bbox
+          FROM ${DB_NAME}.chunks_v7_old c
+          INNER JOIN _id_map m ON m.old_id = c.item_id
+        `);
+
+        await Zotero.DB.queryAsync('DROP TABLE _id_map');
+
+        // === 6. Drop old tables and create indexes ===
+        await Zotero.DB.queryAsync(`DROP TABLE ${DB_NAME}.items_v7_old`);
+        await Zotero.DB.queryAsync(`DROP TABLE ${DB_NAME}.chunks_v7_old`);
+
+        await Zotero.DB.queryAsync(`
+          CREATE INDEX ${DB_NAME}.idx_items_identity ON items(library_key, item_key)
+        `);
+        await Zotero.DB.queryAsync(`
+          CREATE INDEX ${DB_NAME}.idx_items_library_key ON items(library_key)
+        `);
+        await Zotero.DB.queryAsync(`
+          CREATE INDEX ${DB_NAME}.idx_items_content_hash ON items(content_hash)
+        `);
+        await Zotero.DB.queryAsync(`
+          CREATE INDEX ${DB_NAME}.idx_chunks_item_pk ON chunks(item_pk)
+        `);
+        await Zotero.DB.queryAsync(`
+          CREATE INDEX ${DB_NAME}.idx_chunks_page_number ON chunks(page_number)
+        `);
+        await Zotero.DB.queryAsync(`
+          CREATE INDEX ${DB_NAME}.idx_orphan_items_identity ON orphan_items(library_key, item_key)
+        `);
+
+        // === 7. Update schema version ===
+        await Zotero.DB.queryAsync(`
+          INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value) VALUES ('schema_version', '8')
+        `);
+      });
+
+      this.logger.info(`Schema migration to v8 completed: ${matchedCount} matched, ${orphanCount} orphans`);
+
+      // Stash post-migration stats for the UI (optional but useful)
+      await Zotero.DB.queryAsync(`
+        INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value) VALUES ('v8_migration_matched', ?)
+      `, [String(matchedCount)]);
+      await Zotero.DB.queryAsync(`
+        INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value) VALUES ('v8_migration_orphans', ?)
+      `, [String(orphanCount)]);
+      await Zotero.DB.queryAsync(`
+        INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value) VALUES ('v8_migration_completed_at', ?)
+      `, [new Date().toISOString()]);
+
+    } catch (error: any) {
+      this.logger.error(`Migration to v8 FAILED: ${error?.message || error}`);
+      this.logger.error(`Backup at ${backupPath}. To rollback: quit Zotero, restore the backup file over zotseek.sqlite.`);
+      throw error;
     }
   }
 
