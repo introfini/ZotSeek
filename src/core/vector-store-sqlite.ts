@@ -725,60 +725,82 @@ export class VectorStoreSQLite {
    * Create database schema in the attached database
    */
   private async createTables(): Promise<void> {
+    // If old embeddings table exists (very old schema), defer to legacy migration.
     const oldTableExists = await this.tableExists('embeddings');
     if (oldTableExists) {
-      // Old schema present - let migrateToV6() handle the conversion
       this.logger.debug('Old embeddings table found, deferring to migration');
       return;
     }
 
-    // Fresh install or already migrated - create new normalized schema
-    await Zotero.DB.queryAsync(`
-      CREATE TABLE IF NOT EXISTS ${DB_NAME}.items (
-        item_id INTEGER PRIMARY KEY,
-        item_key TEXT NOT NULL,
-        library_id INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        abstract TEXT,
-        model_id TEXT NOT NULL,
-        indexed_at TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        was_truncated INTEGER NOT NULL DEFAULT 0,
-        pages_indexed INTEGER NOT NULL DEFAULT 0,
-        pages_total INTEGER NOT NULL DEFAULT 0
-      )
-    `);
+    // If a v7 items table exists, the v8 migration will recreate the tables.
+    // Skip create here; migrateToV8() handles the transition.
+    const v7ItemsExists = await this.tableExists('items');
+    if (v7ItemsExists) {
+      // Check if it's already v8 (has library_key column)
+      const cols = await Zotero.DB.queryAsync(`PRAGMA ${DB_NAME}.table_info(items)`);
+      const hasLibraryKey = (cols || []).some((c: any) => c.name === 'library_key');
+      if (!hasLibraryKey) {
+        this.logger.debug('v7 items table present, deferring to migrateToV8');
+        return;
+      }
+      // Already v8, fall through to ensure indexes exist
+    } else {
+      // Fresh install: create v8 schema from scratch
+      await Zotero.DB.queryAsync(`
+        CREATE TABLE IF NOT EXISTS ${DB_NAME}.items (
+          item_pk INTEGER PRIMARY KEY AUTOINCREMENT,
+          library_key TEXT NOT NULL,
+          item_key TEXT NOT NULL,
+          title TEXT NOT NULL,
+          abstract TEXT,
+          model_id TEXT NOT NULL,
+          indexed_at TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          was_truncated INTEGER NOT NULL DEFAULT 0,
+          pages_indexed INTEGER NOT NULL DEFAULT 0,
+          pages_total INTEGER NOT NULL DEFAULT 0,
+          UNIQUE(library_key, item_key)
+        )
+      `);
 
-    await Zotero.DB.queryAsync(`
-      CREATE TABLE IF NOT EXISTS ${DB_NAME}.chunks (
-        item_id INTEGER NOT NULL,
-        chunk_index INTEGER NOT NULL DEFAULT 0,
-        chunk_text TEXT,
-        text_source TEXT NOT NULL,
-        embedding TEXT NOT NULL,
-        page_number INTEGER,
-        paragraph_index INTEGER,
-        start_char INTEGER,
-        end_char INTEGER,
-        bbox TEXT,
-        PRIMARY KEY (item_id, chunk_index)
-      )
-    `);
+      await Zotero.DB.queryAsync(`
+        CREATE TABLE IF NOT EXISTS ${DB_NAME}.chunks (
+          item_pk INTEGER NOT NULL,
+          chunk_index INTEGER NOT NULL DEFAULT 0,
+          chunk_text TEXT,
+          text_source TEXT NOT NULL,
+          embedding TEXT NOT NULL,
+          page_number INTEGER,
+          paragraph_index INTEGER,
+          start_char INTEGER,
+          end_char INTEGER,
+          bbox TEXT,
+          PRIMARY KEY (item_pk, chunk_index),
+          FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
+        )
+      `);
+    }
 
     await this.createIndexes();
     await this.updateSchemaVersion();
 
-    this.logger.debug('Tables created successfully');
+    this.logger.debug('Tables created successfully (v8)');
   }
 
   /**
    * Create indexes for items and chunks tables
    */
   private async createIndexes(): Promise<void> {
-    // Items table indexes
+    // Identity lookup (library_key, item_key) → item_pk. The UNIQUE constraint
+    // on items already provides this, but an explicit index helps query planners.
     await Zotero.DB.queryAsync(`
-      CREATE INDEX IF NOT EXISTS ${DB_NAME}.idx_items_library_id
-      ON items(library_id)
+      CREATE INDEX IF NOT EXISTS ${DB_NAME}.idx_items_identity
+      ON items(library_key, item_key)
+    `);
+
+    await Zotero.DB.queryAsync(`
+      CREATE INDEX IF NOT EXISTS ${DB_NAME}.idx_items_library_key
+      ON items(library_key)
     `);
 
     await Zotero.DB.queryAsync(`
@@ -786,10 +808,9 @@ export class VectorStoreSQLite {
       ON items(content_hash)
     `);
 
-    // Chunks table indexes
     await Zotero.DB.queryAsync(`
-      CREATE INDEX IF NOT EXISTS ${DB_NAME}.idx_chunks_item_id
-      ON chunks(item_id)
+      CREATE INDEX IF NOT EXISTS ${DB_NAME}.idx_chunks_item_pk
+      ON chunks(item_pk)
     `);
 
     await Zotero.DB.queryAsync(`
