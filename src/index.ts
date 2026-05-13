@@ -30,6 +30,7 @@ import { similarDocumentsWrapper } from './ui/similar-documents-wrapper';
 import { toolbarButton } from './ui/toolbar-button';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
+import { identityFromItem, libraryKeyFromLocalID } from './core/identity-resolver';
 // Self-test harness (mounted only when extensions.zotseek.devMode = true)
 import { selfTest as zotseekSelfTest } from './dev/self-test';
 // Task suites: imported for registration side effects only.
@@ -324,7 +325,9 @@ class ZotSeekPlugin {
     for (const item of items) {
       if (!item?.isRegularItem?.()) continue;
       if (hasExcludeTag(item)) continue;
-      const indexed = await this.vectorStore.isIndexed(item.id);
+      const identity = identityFromItem(item);
+      if (!identity) continue;
+      const indexed = await this.vectorStore.isIndexedByIdentity(identity.libraryKey, identity.itemKey);
       if (!indexed) pending.push(item);
     }
 
@@ -400,6 +403,19 @@ class ZotSeekPlugin {
             for (const id of ids) {
               const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
               if (isNaN(numericId)) continue;
+              // Try to resolve stable identity from the (possibly trashed) item.
+              // If the item is fully gone, fall back to the legacy id-based shim.
+              const item = Zotero.Items.get(numericId);
+              if (item) {
+                const identity = identityFromItem(item);
+                if (identity) {
+                  await this.vectorStore.deleteItem(identity.libraryKey, identity.itemKey);
+                  cleanedIds.push(numericId);
+                  cleaned++;
+                  continue;
+                }
+              }
+              // Fallback for items that no longer have a resolvable identity
               await this.vectorStore.delete(numericId);
               cleanedIds.push(numericId);
               cleaned++;
@@ -1077,7 +1093,9 @@ class ZotSeekPlugin {
           skippedExcluded++;
           continue;
         }
-        const isIndexed = await this.vectorStore!.isIndexed(item.id);
+        const identity = identityFromItem(item);
+        if (!identity) continue;
+        const isIndexed = await this.vectorStore!.isIndexedByIdentity(identity.libraryKey, identity.itemKey);
         if (!isIndexed) {
           itemsToIndex.push(item);
         }
@@ -1242,9 +1260,15 @@ class ZotSeekPlugin {
             const embeddingResult = embeddingMap.get(embeddingKey);
 
             if (embeddingResult) {
+              const libraryKey = libraryKeyFromLocalID(extracted.libraryId);
+              if (!libraryKey) {
+                this.logger.warn(`[bulk-index] Cannot resolve libraryKey for item ${extracted.itemId} (libraryId=${extracted.libraryId}); skipping chunk`);
+                continue;
+              }
               batchEmbeddings.push({
                 itemId: extracted.itemId,
                 chunkIndex: chunk.index,
+                libraryKey,
                 itemKey: extracted.itemKey,
                 libraryId: extracted.libraryId,
                 title: extracted.title,
@@ -1483,6 +1507,11 @@ class ZotSeekPlugin {
           );
         }
 
+        const libraryKey = libraryKeyFromLocalID(extracted.libraryId);
+        if (!libraryKey) {
+          this.logger.warn(`[auto-index] Cannot resolve libraryKey for item ${extracted.itemId} (libraryId=${extracted.libraryId}); skipping`);
+          continue;
+        }
         for (const chunk of extracted.chunks) {
           const embeddingKey = `${extracted.itemId}_${chunk.index}`;
           const embeddingData = embeddingMap.get(embeddingKey);
@@ -1491,6 +1520,7 @@ class ZotSeekPlugin {
           paperEmbeddings.push({
             itemId: extracted.itemId,
             chunkIndex: chunk.index,
+            libraryKey,
             itemKey: extracted.itemKey,
             libraryId: extracted.libraryId,
             title: extracted.title,
@@ -1653,8 +1683,9 @@ class ZotSeekPlugin {
       '\n\n(Click on items in the list to navigate)'
     );
 
-    // Select first result in Zotero
-    if (results.length > 0) {
+    // Select first result in Zotero (itemId is resolved per-session and may
+    // be missing if the local item was deleted; skip in that case).
+    if (results.length > 0 && results[0].itemId !== undefined) {
       this.zoteroAPI.selectItem(results[0].itemId);
     }
   }
