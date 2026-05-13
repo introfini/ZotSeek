@@ -779,6 +779,16 @@ export class VectorStoreSQLite {
           FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
         )
       `);
+
+      await Zotero.DB.queryAsync(`
+        CREATE TABLE IF NOT EXISTS ${DB_NAME}.orphan_items (
+          item_pk INTEGER PRIMARY KEY,
+          library_key TEXT NOT NULL,
+          item_key TEXT NOT NULL,
+          detected_at TEXT NOT NULL,
+          reason TEXT NOT NULL
+        )
+      `);
     }
 
     await this.createIndexes();
@@ -816,6 +826,11 @@ export class VectorStoreSQLite {
     await Zotero.DB.queryAsync(`
       CREATE INDEX IF NOT EXISTS ${DB_NAME}.idx_chunks_page_number
       ON chunks(page_number)
+    `);
+
+    await Zotero.DB.queryAsync(`
+      CREATE INDEX IF NOT EXISTS ${DB_NAME}.idx_orphan_items_identity
+      ON orphan_items(library_key, item_key)
     `);
   }
 
