@@ -19,25 +19,39 @@ export type { PaperEmbedding, VectorStoreStats, ItemIndexStatus } from './vector
  */
 export interface IVectorStore {
   init(): Promise<void>;
-  put(embedding: import('./vector-store-sqlite').PaperEmbedding): Promise<void>;
+
+  // Identity-keyed methods (preferred)
   putBatch(embeddings: import('./vector-store-sqlite').PaperEmbedding[]): Promise<void>;
+  put(embedding: import('./vector-store-sqlite').PaperEmbedding): Promise<void>;
+  getByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding | undefined>;
+  getItemChunksByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
+  deleteItem(libraryKey: string, itemKey: string): Promise<void>;
+  deleteChunksForItem(libraryKey: string, itemKey: string): Promise<void>;
+  isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean>;
+  needsReindexByIdentity(libraryKey: string, itemKey: string, contentHash: string): Promise<boolean>;
+  getChunkCountByIdentity(libraryKey: string, itemKey: string): Promise<number>;
+  getIndexStatusByIdentity(identities: Array<{libraryKey: string; itemKey: string}>): Promise<Map<string, import('./vector-store-sqlite').ItemIndexStatus>>;
+  getByLibraryKey(libraryKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
+
+  // Legacy id-keyed methods (deprecated, kept until call sites migrate)
   get(itemId: number): Promise<import('./vector-store-sqlite').PaperEmbedding | undefined>;
   getItemChunks(itemId: number): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
   deleteItemChunks(itemId: number): Promise<void>;
-  getAll(): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
-  getByLibrary(libraryId: number): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
-  getUniqueItemIds(): Promise<number[]>;
-  getIndexStatusMap(itemIds: number[]): Promise<Map<number, import('./vector-store-sqlite').ItemIndexStatus>>;
+  delete(itemId: number): Promise<void>;
   isIndexed(itemId: number): Promise<boolean>;
   needsReindex(itemId: number, contentHash: string): Promise<boolean>;
-  delete(itemId: number): Promise<void>;
+  getIndexStatusMap(itemIds: number[]): Promise<Map<number, import('./vector-store-sqlite').ItemIndexStatus>>;
+  getByLibrary(libraryId: number): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
+
+  // Bulk / housekeeping
+  getAll(): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
+  getUniqueItemIds(): Promise<number[]>;
   clear(): Promise<void>;
   getStats(): Promise<import('./vector-store-sqlite').VectorStoreStats>;
   getMetadata(key: string): Promise<any>;
   setMetadata(key: string, value: any): Promise<void>;
   isReady(): boolean;
   close(): Promise<void>;
-  // New methods for database management
   deleteDatabase(): Promise<void>;
   getDatabasePath(): string;
 }

@@ -2287,18 +2287,14 @@ export class VectorStoreSQLite {
     return result;
   }
 
-  /**
-   * Check if item needs re-indexing
-   */
+  /** @deprecated Use needsReindexByIdentity. */
   async needsReindex(itemId: number, contentHash: string): Promise<boolean> {
-    await this.ensureInit();
-
-    const rows = await Zotero.DB.queryAsync(`
-      SELECT content_hash FROM ${DB_NAME}.items WHERE item_id = ?
-    `, [itemId]);
-
-    if (!rows || rows.length === 0) return true;
-    return rows[0].content_hash !== contentHash;
+    const { identityFromItem } = await import('./identity-resolver');
+    const item = Zotero.Items.get(itemId);
+    if (!item) return true;
+    const id = identityFromItem(item);
+    if (!id) return true;
+    return this.needsReindexByIdentity(id.libraryKey, id.itemKey, contentHash);
   }
 
   /**
