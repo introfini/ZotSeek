@@ -7,6 +7,9 @@
  *
  * Invoke from MCP via:
  *   await Zotero.ZotSeek._selfTest.runSelfTest('task-N-name')
+ *
+ * Future task suites should live in their own files under `src/dev/suites/`
+ * and import `selfTest`, `scenario`, and the assert helpers from `../self-test`.
  */
 
 import { Logger } from '../utils/logger';
@@ -37,11 +40,15 @@ type SuiteFn = () => Promise<Scenario[]>;
 
 class SelfTestRunner {
   private suites = new Map<string, SuiteFn>();
-  private errorBaseline = 0;
 
+  /**
+   * Register a suite. Throws if a suite with the same name already exists.
+   * Dev-only infrastructure: fail fast so name clashes surface immediately
+   * instead of silently overwriting earlier registrations.
+   */
   register(taskName: string, suite: SuiteFn): void {
     if (this.suites.has(taskName)) {
-      logger.warn(`Self-test suite '${taskName}' already registered, overwriting`);
+      throw new Error(`Self-test suite '${taskName}' already registered`);
     }
     this.suites.set(taskName, suite);
   }
@@ -51,29 +58,44 @@ class SelfTestRunner {
   }
 
   /**
+   * Verify that the registry contains exactly the expected set of suites.
+   * Returns the missing and extra suite names so callers (MCP runner, CI,
+   * humans) can fail loudly if a task forgot to import its suite module.
+   *
+   * Doesn't throw or mutate state; pure diagnostic helper.
+   */
+  verifyRegistry(expected: string[]): { missing: string[]; extra: string[] } {
+    const present = new Set(this.suites.keys());
+    const wanted = new Set(expected);
+    const missing = expected.filter(n => !present.has(n));
+    const extra = Array.from(present).filter(n => !wanted.has(n));
+    return { missing, extra };
+  }
+
+  /**
    * Capture the current error-log count so we can detect new errors emitted
-   * while the suite runs. Call right before runSelfTest if you want a clean
-   * baseline; runSelfTest does it automatically.
+   * while the suite runs. Returns the baseline; caller passes it back to
+   * `collectNewErrors`. Local to each runSelfTest call so concurrent
+   * invocations don't clobber each other.
    */
   private captureLogBaseline(): number {
     try {
       const output = Zotero.Debug.getConsoleViewerOutput?.() || [];
-      this.errorBaseline = output.filter((l: string) =>
-        l.includes('[ZotSeek]') && /error/i.test(l)
+      return output.filter((l: string) =>
+        l.includes('[ZotSeek') && /error/i.test(l)
       ).length;
     } catch {
-      this.errorBaseline = 0;
+      return 0;
     }
-    return this.errorBaseline;
   }
 
-  private collectNewErrors(): string[] {
+  private collectNewErrors(baseline: number): string[] {
     try {
       const output = Zotero.Debug.getConsoleViewerOutput?.() || [];
       const errors = output.filter((l: string) =>
-        l.includes('[ZotSeek]') && /error/i.test(l)
+        l.includes('[ZotSeek') && /error/i.test(l)
       );
-      return errors.slice(this.errorBaseline);
+      return errors.slice(baseline);
     } catch {
       return [];
     }
@@ -82,7 +104,7 @@ class SelfTestRunner {
   async runSelfTest(taskName: string): Promise<TestResult> {
     const startedAt = new Date().toISOString();
     const t0 = Date.now();
-    this.captureLogBaseline();
+    const baseline = this.captureLogBaseline();
 
     const suite = this.suites.get(taskName);
     if (!suite) {
@@ -118,7 +140,7 @@ class SelfTestRunner {
       failed: scenarios.filter(s => s.status === 'fail').length,
       skipped: scenarios.filter(s => s.status === 'skip').length,
       scenarios,
-      newErrorsInLog: this.collectNewErrors(),
+      newErrorsInLog: this.collectNewErrors(baseline),
     };
 
     logger.info(`runSelfTest(${taskName}): ${result.passed}p / ${result.failed}f / ${result.skipped}s in ${result.durationMs}ms`);
@@ -158,20 +180,23 @@ export function assertEq<T>(actual: T, expected: T, message?: string): void {
   }
 }
 
-export function assertTrue(condition: any, message?: string): void {
+export function assertTrue(condition: unknown, message?: string): asserts condition {
   if (!condition) {
     throw new Error(message || 'assertTrue failed');
   }
 }
 
-export function assertContains(haystack: string | any[], needle: any, message?: string): void {
-  const found = Array.isArray(haystack) ? haystack.includes(needle) : haystack.includes(String(needle));
+export function assertContains<T>(haystack: string | readonly T[], needle: T, message?: string): void {
+  const found = Array.isArray(haystack)
+    ? haystack.includes(needle)
+    : (haystack as string).includes(String(needle));
   if (!found) {
     throw new Error(`${message || 'assertContains failed'}: ${JSON.stringify(needle)} not in ${JSON.stringify(haystack)}`);
   }
 }
 
-// Bootstrap suite: verifies the harness contract itself
+// Bootstrap suite: verifies the harness contract itself.
+// Future task suites should live under src/dev/suites/ in their own files.
 selfTest.register('harness-bootstrap', async () => {
   return [
     await scenario('harness can register and call a suite', async () => {
