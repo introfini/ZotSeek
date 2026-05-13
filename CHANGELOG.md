@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [2.0.0] - 2026-05-13
+## [1.14.0] - 2026-05-13
 
 ### Changed
 - **Database schema upgraded to v8 with stable cross-machine identity.** The `zotseek.sqlite` file can now be copied between machines without re-indexing, even if local Zotero item IDs differ. Migration is automatic on first start after upgrade. (#27)
