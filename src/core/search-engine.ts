@@ -11,6 +11,9 @@ import { Logger } from '../utils/logger';
 import { PaperEmbedding, IVectorStore, getVectorStore } from './storage-factory';
 import { VectorStoreSQLite, TextSourceType } from './vector-store-sqlite';
 import { EmbeddingPipeline, embeddingPipeline } from './embedding-pipeline';
+import { identityFromItem } from './identity-resolver';
+
+declare const Zotero: any;
 
 export interface SearchResult {
   // Stable identity (always present)
@@ -232,7 +235,6 @@ export class SearchEngine {
    * method for any code path that already has stable identity in hand.
    */
   async findSimilar(itemId: number, options: SearchOptions = {}): Promise<SearchResult[]> {
-    const { identityFromItem } = await import('./identity-resolver');
     const item = Zotero.Items.get(itemId);
     if (!item) {
       throw new Error(`findSimilar: item ${itemId} not in Zotero`);
