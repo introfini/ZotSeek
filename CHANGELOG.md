@@ -2,6 +2,25 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [2.0.0] - 2026-05-13
+
+### Changed
+- **Database schema upgraded to v8 with stable cross-machine identity.** The `zotseek.sqlite` file can now be copied between machines without re-indexing, even if local Zotero item IDs differ. Migration is automatic on first start after upgrade. (#27)
+
+### Added
+- README section documenting how to copy `zotseek.sqlite` between machines.
+- Database Health panel in Preferences showing the count of unresolved embeddings (items no longer present in the current Zotero library), with a Purge Orphans action to reclaim space.
+
+### Technical
+- `items` table now keyed by autoincrement `item_pk` with `UNIQUE(library_key, item_key)`. The `library_key` is `'user'` or `'group:<groupID>'`, both stable across all machines syncing the same library.
+- `chunks` table uses `item_pk` as foreign key instead of local Zotero `itemID`.
+- New `identity-resolver` module centralizes Zotero ID ↔ ZotSeek identity mapping.
+- v7 → v8 migration resolves each row via its stored `item_key` and works uniformly whether running on the original machine or after a cross-machine copy.
+- Pre-migration backup written to `zotseek.sqlite.v7.bak`.
+- Internal self-test harness for dev-mode verification (gated by `extensions.zotero.zotseek.devMode` pref, dead code at runtime for end users).
+
+---
+
 ## [Unreleased]
 
 ### Added
