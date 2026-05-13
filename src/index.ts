@@ -31,6 +31,14 @@ import { toolbarButton } from './ui/toolbar-button';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 
+/**
+ * Persisted scope of a bulk-index run, used to offer resume on next startup
+ * if the run was interrupted (cancel, crash, sleep, plugin reload).
+ */
+type BulkScope =
+  | { type: 'library'; libraryId: number }
+  | { type: 'collection'; libraryId: number; collectionId: number };
+
 interface PluginInfo {
   id: string;
   version: string;
@@ -210,6 +218,13 @@ class ZotSeekPlugin {
     // Initialize auto-index manager (monitors for new items)
     this.initAutoIndexManager();
 
+    // If a previous bulk indexing run was interrupted (cancel, crash, sleep,
+    // plugin reload), offer to resume. Runs after auto-index manager so its
+    // state is settled. Non-blocking — failure here doesn't fail startup.
+    this.checkAndOfferResume().catch((e: any) => {
+      this.logger.debug(`checkAndOfferResume failed: ${e?.message || e}`);
+    });
+
     // Register the item-tree index-status column.
     // Needs the vector store to be initialised — do it lazily by ensuring
     // the store is ready first, but only if the user opens it later. To keep
@@ -227,6 +242,92 @@ class ZotSeekPlugin {
     }
 
     this.logger.info('=== Plugin Started Successfully ===');
+  }
+
+  /**
+   * If a previous bulk-indexing run was interrupted, offer the user a chance
+   * to resume it. The intent (library or collection) was persisted by
+   * `indexItems` when the run started; we only ask if there are still
+   * un-indexed items in that scope.
+   */
+  private async checkAndOfferResume(): Promise<void> {
+    const Z = getZotero();
+    if (!Z) return;
+
+    const PENDING_PREF = 'zotseek.bulkIndex.pendingScope';
+    let raw: string | undefined;
+    try {
+      raw = Z.Prefs.get(PENDING_PREF, true) as string | undefined;
+    } catch {
+      return;
+    }
+    if (!raw) return;
+
+    let scope: BulkScope | null = null;
+    try {
+      scope = JSON.parse(raw) as BulkScope;
+    } catch {
+      // Corrupt pref — clear it and move on
+      try { Z.Prefs.clear(PENDING_PREF, true); } catch { /* ignore */ }
+      return;
+    }
+
+    // Rebuild the candidate item list for the recorded scope, then ask the
+    // user whether to resume. Cheap to compute (no embedding work yet).
+    let items: any[] = [];
+    let label = '';
+    try {
+      if (scope.type === 'library') {
+        items = await this.zoteroAPI.getLibraryItems();
+        label = getString('resume-scopeLibrary');
+      } else {
+        items = await this.zoteroAPI.getCollectionItems(scope.collectionId);
+        const collection = await Z.Collections.getAsync(scope.collectionId);
+        label = collection?.name
+          ? getString('resume-scopeCollection', { name: collection.name })
+          : getString('resume-scopeCollection', { name: '?' });
+      }
+    } catch (e: any) {
+      this.logger.debug(`checkAndOfferResume: could not rebuild scope: ${e?.message || e}`);
+      try { Z.Prefs.clear(PENDING_PREF, true); } catch { /* ignore */ }
+      return;
+    }
+
+    // Filter out items that are already indexed — they're done, so no
+    // resume work is needed for them.
+    await this.ensureStoreReady();
+    if (!this.vectorStore) return;
+
+    const pending: any[] = [];
+    for (const item of items) {
+      if (!item?.isRegularItem?.()) continue;
+      if (hasExcludeTag(item)) continue;
+      const indexed = await this.vectorStore.isIndexed(item.id);
+      if (!indexed) pending.push(item);
+    }
+
+    if (pending.length === 0) {
+      // Nothing left to do — clear the marker silently.
+      try { Z.Prefs.clear(PENDING_PREF, true); } catch { /* ignore */ }
+      this.logger.info('Resume marker found but no pending items — clearing');
+      return;
+    }
+
+    const win = Z.getMainWindow();
+    const proceed = Services.prompt.confirm(
+      win,
+      getString('resume-title'),
+      getString('resume-message', { count: pending.length, scope: label })
+    );
+
+    if (!proceed) {
+      try { Z.Prefs.clear(PENDING_PREF, true); } catch { /* ignore */ }
+      this.logger.info('User declined resume — clearing marker');
+      return;
+    }
+
+    this.logger.info(`Resuming bulk index for ${pending.length} items (${label})`);
+    await this.indexItems(pending, scope);
   }
 
   /**
@@ -816,7 +917,11 @@ class ZotSeekPlugin {
     }
 
     this.logger.info(`Indexing collection "${collectionName}" (${items.length} items)`);
-    await this.indexItems(items);
+    await this.indexItems(items, {
+      type: 'collection',
+      libraryId: collection.libraryID,
+      collectionId: collection.id,
+    });
   }
 
   /**
@@ -844,7 +949,8 @@ class ZotSeekPlugin {
     const items = await this.zoteroAPI.getLibraryItems();
     this.logger.info(`Found ${items.length} items to index`);
 
-    await this.indexItems(items);
+    const libraryId = (Z.Libraries?.userLibraryID ?? items[0]?.libraryID ?? 1) as number;
+    await this.indexItems(items, { type: 'library', libraryId });
   }
 
   /**
@@ -891,16 +997,35 @@ class ZotSeekPlugin {
    *
    * Implements checkpoint/incremental saving:
    * - Skips already-indexed items (allows resuming after crash)
-   * - Saves embeddings in batches of ~25 items (prevents total loss on crash)
+   * - Saves embeddings in batches of ~10 items (prevents total loss on crash)
    * - Memory efficient (only one batch in memory at a time)
+   *
+   * @param scope - Optional scope marker used to persist "this bulk run is in
+   *                progress" so the next startup can offer to resume it after
+   *                a crash or sleep. Pass undefined for one-off runs.
    */
-  private async indexItems(items: any[]): Promise<void> {
+  private async indexItems(items: any[], scope?: BulkScope): Promise<void> {
     this.indexing = true;
     const Z = getZotero();
+
+    // Persist intent for auto-resume after crash/sleep. Only bother for runs
+    // big enough that resuming saves real time — single-item indexing doesn't
+    // need to survive a restart.
+    const PENDING_PREF = 'zotseek.bulkIndex.pendingScope';
+    const RESUME_THRESHOLD = 25;
+    if (scope && items.length >= RESUME_THRESHOLD) {
+      try {
+        Z?.Prefs.set(PENDING_PREF, JSON.stringify(scope), true);
+      } catch (e: any) {
+        this.logger.debug(`Could not persist resume scope: ${e?.message || e}`);
+      }
+    }
     const indexStartTime = Date.now(); // Track total indexing time
 
-    // Checkpoint batch size - save every N items to prevent data loss
-    const CHECKPOINT_BATCH_SIZE = 25;
+    // Checkpoint batch size - save every N items to prevent data loss.
+    // Kept small (10) so a cancel or crash mid-batch loses at most ~10 items
+    // of extraction/embedding work. Trade-off: more transaction overhead.
+    const CHECKPOINT_BATCH_SIZE = 10;
 
     // Create stable progress window using toolkit
     const progressWindow = new StableProgressWindow({
@@ -1180,16 +1305,24 @@ class ZotSeekPlugin {
 
       progressWindow.complete(getString('indexing-completeSuccess'), true);
 
+      // Successful completion — clear the resume marker so the next startup
+      // doesn't pester the user about a finished run.
+      try { Z?.Prefs.clear(PENDING_PREF, true); } catch { /* ignore */ }
+
     } catch (error: any) {
       if (progressWindow.isCancelled()) {
         this.logger.info('Indexing cancelled by user');
         showQuickNotification(getString('indexing-cancelled'), 'default', 3000);
+        // Explicit cancel = user's choice. Don't prompt them to resume on
+        // next startup; they can re-trigger Index Library themselves.
+        try { Z?.Prefs.clear(PENDING_PREF, true); } catch { /* ignore */ }
       } else {
         this.logger.error(`Indexing failed: ${error}`);
         progressWindow.error(getString('indexing-failed', { error: error.message || error }), false);
         // Keep window open for 10 seconds so user can see the error
         setTimeout(() => progressWindow.close(), 10000);
         this.showAlert(getString('indexing-failed', { error: error.message || error }));
+        // Leave PENDING_PREF set — user may want to retry on next startup.
       }
     } finally {
       this.indexing = false;

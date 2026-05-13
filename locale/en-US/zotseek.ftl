@@ -247,6 +247,12 @@ zotseek-indexing-emptyCollection = Collection "{ $name }" has no items to index.
 zotseek-indexing-updateTitle = ZotSeek - Update Library Index
 zotseek-indexing-updateConfirmMsg = This will index all unindexed items in your library for semantic search.
 
+# Auto-resume prompt shown at startup when a previous bulk-index run was interrupted.
+zotseek-resume-title = ZotSeek - Resume Indexing
+zotseek-resume-message = A previous indexing run was interrupted. { $count } item(s) in { $scope } are still pending. Resume now?
+zotseek-resume-scopeLibrary = your library
+zotseek-resume-scopeCollection = the "{ $name }" collection
+
     Items that are already indexed will be skipped.
 
     This may take several minutes depending on the number of new items.

@@ -27,7 +27,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 🚫 **Tag-Based Exclusion** - Tag items with `zotseek-exclude` to skip them during indexing
 - 📊 **Indexing Status Column** - "ZotSeek" column in the item list shows whether each paper is fully indexed, partially indexed (chunk limit hit), out of date, excluded, or not indexed
 - ⏸️ **Pause & Cancel** - Pause or cancel long-running indexing operations at any time
-- 💾 **Crash-Resilient** - Checkpoint saving every 25 items, resume after interruption, skips problematic chunks automatically
+- 💾 **Crash-Resilient** - Checkpoint saving every 10 items, **auto-resume on next startup** if a bulk run was interrupted, worker recovery on sleep/wake, skips problematic chunks automatically
 - 🔌 **Plugin API** - Other Zotero plugins can [call ZotSeek's search programmatically](docs/API.md)
 - ⚙️ **Configurable** - Customize via Zotero Settings → ZotSeek (also accessible from search dialog)
 - 🌐 **Localized** - UI available in English and Chinese (zh-CN)

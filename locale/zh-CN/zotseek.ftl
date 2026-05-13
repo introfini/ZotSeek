@@ -247,6 +247,12 @@ zotseek-indexing-emptyCollection = 合集"{ $name }"没有可索引的条目。
 zotseek-indexing-updateTitle = ZotSeek - 更新文献库索引
 zotseek-indexing-updateConfirmMsg = 这将为文献库中所有未索引的条目建立语义搜索索引。
 
+# 启动时检测到先前中断的索引任务时显示的恢复提示。
+zotseek-resume-title = ZotSeek - 恢复索引
+zotseek-resume-message = 上一次索引被中断。{ $scope }中仍有 { $count } 个条目待处理。现在恢复？
+zotseek-resume-scopeLibrary = 您的文献库
+zotseek-resume-scopeCollection = "{ $name }" 收藏夹
+
     已索引的条目将被跳过。
 
     根据新条目数量，这可能需要几分钟。

@@ -43,6 +43,10 @@ export class EmbeddingPipeline {
   private workerReady = false;
   private pendingJobs = new Map<string, { resolve: Function; reject: Function }>();
   private ready = false;
+  // Bounded recovery attempts so a permanently-broken worker doesn't loop forever
+  // within a single embed() call. Resets on every successful embed.
+  private consecutiveRecoveries = 0;
+  private static MAX_RECOVERIES_PER_EMBED = 2;
 
   constructor() {
     this.logger = new Logger('EmbeddingPipeline');
@@ -136,6 +140,16 @@ export class EmbeddingPipeline {
           this.logger.error(`Worker error: ${errorInfo.message} at ${errorInfo.filename}:${errorInfo.lineno}:${errorInfo.colno}`);
           this.logger.error(`Error details: ${errorInfo.error}`);
           clearTimeout(timeout);
+
+          // Mark the worker as dead so embed() will trigger recovery.
+          // Reject any in-flight jobs with a recoverable error code so the
+          // caller knows to retry rather than treat as permanent failure.
+          this.workerReady = false;
+          for (const [jobId, job] of this.pendingJobs) {
+            job.reject(new Error('WORKER_DIED'));
+            this.pendingJobs.delete(jobId);
+          }
+
           reject(new Error(`Worker failed: ${errorInfo.message}`));
         };
 
@@ -181,17 +195,52 @@ export class EmbeddingPipeline {
    * Generate embedding for a single text
    * @param text - Text to embed
    * @param isQuery - If true, embed as search query; if false, embed as document
+   *
+   * Resilient against worker death: if the ChromeWorker has crashed (sleep,
+   * OOM, parent process recycled the worker process), this method silently
+   * tears it down and re-initialises before retrying. Bounded by
+   * MAX_RECOVERIES_PER_EMBED to prevent an infinite loop on a permanently
+   * broken state.
    */
   async embed(text: string, isQuery: boolean = false): Promise<EmbeddingResult> {
-    if (!this.ready) {
-      await this.init();
+    for (let attempt = 0; ; attempt++) {
+      if (!this.ready || !this.workerReady) {
+        await this.recoverWorker();
+      }
+      try {
+        const result = await this.embedWithWorker(text, isQuery);
+        this.consecutiveRecoveries = 0;
+        return result;
+      } catch (e: any) {
+        const isWorkerDeath = e?.message === 'WORKER_DIED' || !this.workerReady;
+        if (!isWorkerDeath) throw e;
+        if (attempt >= EmbeddingPipeline.MAX_RECOVERIES_PER_EMBED) {
+          throw new Error(
+            `Embedding worker died and could not be recovered after ${attempt + 1} attempts`
+          );
+        }
+        this.consecutiveRecoveries++;
+        this.logger.warn(
+          `Embedding worker died — attempting recovery (${this.consecutiveRecoveries} total)`
+        );
+        // Loop: recoverWorker() will run at the top of the next iteration.
+      }
     }
+  }
 
-    if (!this.workerReady) {
-      throw new Error('Embedding worker not ready. Please ensure Transformers.js is initialized.');
+  /**
+   * Tear down the current worker (if any) and re-initialise. Used both for
+   * the first init and for recovery after a worker crash.
+   */
+  private async recoverWorker(): Promise<void> {
+    if (this.worker) {
+      try { this.worker.terminate(); } catch { /* ignore */ }
+      this.worker = null;
     }
-
-    return this.embedWithWorker(text, isQuery);
+    this.workerReady = false;
+    this.ready = false;
+    this.pendingJobs.clear();
+    await this.init();
   }
 
   /**

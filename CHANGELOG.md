@@ -5,14 +5,21 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 ## [Unreleased]
 
 ### Added
+- **Resume interrupted indexing on startup** (#31) — If a previous "Index Library" or "Index Collection" run was interrupted by a crash, sleep, plugin reload, or Zotero quit, the next startup now asks "Resume indexing N items?" and continues exactly where it stopped. Explicit cancels do not re-prompt — only true interruptions do.
 - **Indexing status column** (#30) — Resolves silent truncation of long PDFs when the *Max Chunks per Paper* limit cut content from a paper without telling the user. Two surfaces:
   - A new "ZotSeek" column in the item list shows whether each paper is fully indexed (`✓`), partially indexed (`◐`), out of date (`↻`), excluded (`⊘`), or not indexed (empty). The column appears automatically on first install; users can hide or move it like any other Zotero column.
   - The indexing progress window now adds a summary line "⚠ Partial content: N item(s) hit the Max Chunks per Paper limit" whenever truncation happened, and the debug log gains one `[ZotSeek] ⚠ Truncated at chunk limit: "<title>" (<pages>/<total> pages)` line per affected paper.
+
+### Changed
+- **Smaller checkpoint batch** (#31) — Bulk-index checkpoint batch dropped from 25 items to 10. A cancel or crash mid-batch now loses at most ~10 items of extraction/embedding work instead of ~25.
+- **Embedding worker auto-recovers** (#31) — If the embedding ChromeWorker dies mid-run (sleep/wake, OOM, parent process recycle), the next `embed()` call silently tears it down and re-initialises before retrying. Bounded by 2 recovery attempts per embed to avoid infinite loops on a permanently broken state.
 
 ### Technical
 - `src/utils/chunker.ts` exposes new `chunkDocumentEx` / `chunkDocumentWithPagesEx` returning `{chunks, wasTruncated, pagesIndexed, pagesTotal}`. Every `break` hit by the `maxChunks` ceiling now flags `wasTruncated`, including the post-process safety net in `enforceCharLimitEx`.
 - Schema **v7** adds three columns to the `items` table: `was_truncated INTEGER`, `pages_indexed INTEGER`, `pages_total INTEGER`. Migration is defensive — it detects v7 by introspecting `PRAGMA table_info` rather than trusting `schema_version`, because `createTables()` could bump the version marker even when the underlying `CREATE TABLE IF NOT EXISTS` was a no-op on an existing v6 database.
 - New `VectorStoreSQLite.getIndexStatusMap(itemIds)` API returns `{itemId, indexedAt, wasTruncated, pagesIndexed, pagesTotal, chunkCount}` in a single batched call. Uses parallel `columnQueryAsync` calls per Zotero 8 workaround.
+- `src/index.ts` persists the bulk-index scope (`zotseek.bulkIndex.pendingScope`) when starting a run of 25+ items and clears it on successful completion or explicit cancel. New `checkAndOfferResume()` runs at startup, rebuilds the candidate list, filters out items already indexed, and prompts via `Services.prompt.confirm` if any remain.
+- `src/core/embedding-pipeline.ts` adds `recoverWorker()` and rewrites `embed()` as a retry loop that distinguishes worker-death (signalled by the `WORKER_DIED` error code rejected from any in-flight job inside `onerror`) from regular embedding failures.
 - New module `src/ui/item-tree-column.ts` registers the column via `Zotero.ItemTreeManager.registerColumns`. Cell text is served from a per-item in-memory cache that is hydrated lazily in batches when the tree paints, and invalidated on every `putBatch`/`delete`. "Out of date" detection compares `item.dateModified > indexed_at` as a cheap proxy. First-run UX auto-shows the column once, guarded by `zotseek.indexStatusColumn.firstShown`.
 
 ---
