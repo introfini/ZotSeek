@@ -2217,69 +2217,105 @@ export class VectorStoreSQLite {
   async getIndexStatusMap(itemIds: number[]): Promise<Map<number, ItemIndexStatus>> {
     const result = new Map<number, ItemIndexStatus>();
     if (itemIds.length === 0) return result;
-    await this.ensureInit();
 
-    // Run several columnQueryAsync calls in parallel — same workaround used
-    // elsewhere in this file for the Zotero 8 DB wrapper that flakes on
-    // multi-column SELECTs.
-    try {
-      const placeholders = itemIds.map(() => '?').join(',');
-      const [ids, indexedAts, truncs, pIdx, pTot, chunkCounts] = await Promise.all([
-        Zotero.DB.columnQueryAsync(
-          `SELECT item_id FROM ${DB_NAME}.items WHERE item_id IN (${placeholders})`,
-          itemIds
-        ),
-        Zotero.DB.columnQueryAsync(
-          `SELECT indexed_at FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
-          itemIds
-        ),
-        Zotero.DB.columnQueryAsync(
-          `SELECT was_truncated FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
-          itemIds
-        ),
-        Zotero.DB.columnQueryAsync(
-          `SELECT pages_indexed FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
-          itemIds
-        ),
-        Zotero.DB.columnQueryAsync(
-          `SELECT pages_total FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
-          itemIds
-        ),
-        // Chunk counts joined by item_id, ordered by item_id to align with the
-        // other columns above.
-        Zotero.DB.queryAsync(
-          `SELECT item_id, COUNT(*) AS cnt FROM ${DB_NAME}.chunks
-           WHERE item_id IN (${placeholders})
-           GROUP BY item_id ORDER BY item_id`,
-          itemIds
-        ),
-      ]);
+    const identities: Array<{ libraryKey: string; itemKey: string }> = [];
+    const idByLookupKey = new Map<string, number>();
+    for (const id of itemIds) {
+      const item = Zotero.Items.get(id);
+      if (!item) continue;
+      const identity = identityFromItem(item);
+      if (!identity) continue;
+      identities.push(identity);
+      idByLookupKey.set(`${identity.libraryKey}|${identity.itemKey}`, id);
+    }
 
-      // Build sorted ids list as the anchor — other parallel queries are
-      // already ordered by item_id so positions align.
-      const sortedIds: number[] = (ids || [])
-        .map((v: any) => Number(v))
-        .sort((a: number, b: number) => a - b);
+    const byIdentity = await this.getIndexStatusByIdentity(identities);
 
-      // Map chunk counts by id for easy lookup
-      const chunkCountMap = new Map<number, number>();
-      for (const row of (chunkCounts || [])) {
-        chunkCountMap.set(Number(row.item_id), Number(row.cnt) || 0);
+    for (const [lookupKey, status] of byIdentity.entries()) {
+      const itemId = idByLookupKey.get(lookupKey);
+      if (itemId !== undefined) {
+        result.set(itemId, { ...status, itemId });
       }
+    }
 
-      for (let i = 0; i < sortedIds.length; i++) {
-        const id = sortedIds[i];
-        result.set(id, {
-          itemId: id,
-          indexedAt: String(indexedAts?.[i] ?? ''),
-          wasTruncated: Number(truncs?.[i] ?? 0) === 1,
-          pagesIndexed: Number(pIdx?.[i] ?? 0),
-          pagesTotal: Number(pTot?.[i] ?? 0),
-          chunkCount: chunkCountMap.get(id) ?? 0,
-        });
+    return result;
+  }
+
+  /**
+   * Identity-keyed variant of {@link getIndexStatusMap}.
+   *
+   * Returns a Map keyed by `${libraryKey}|${itemKey}` with per-item status.
+   * Items not in the index are absent from the map. Batched in groups of 200
+   * using a composite OR-clause because SQLite cannot match tuples via IN.
+   */
+  async getIndexStatusByIdentity(
+    identities: Array<{ libraryKey: string; itemKey: string }>
+  ): Promise<Map<string, ItemIndexStatus>> {
+    await this.ensureInit();
+    const result = new Map<string, ItemIndexStatus>();
+    if (identities.length === 0) return result;
+
+    const CHUNK = 200;
+    try {
+      for (let start = 0; start < identities.length; start += CHUNK) {
+        const batch = identities.slice(start, start + CHUNK);
+
+        // SQLite cannot match tuples via IN, and Zotero 8's DB wrapper
+        // returns mozIStorageRow objects for multi-column SELECTs that don't
+        // expose named properties. Workaround: parallel columnQueryAsync per
+        // column, anchored by a stable ORDER BY (item_pk).
+        const placeholders = batch.map(() => '(library_key = ? AND item_key = ?)').join(' OR ');
+        const params: any[] = [];
+        for (const id of batch) { params.push(id.libraryKey, id.itemKey); }
+
+        const baseWhere = `WHERE ${placeholders} ORDER BY item_pk`;
+        const [pks, libKeys, itemKeys, indexedAts, truncs, pIdx, pTot] = await Promise.all([
+          Zotero.DB.columnQueryAsync(`SELECT item_pk FROM ${DB_NAME}.items ${baseWhere}`, params),
+          Zotero.DB.columnQueryAsync(`SELECT library_key FROM ${DB_NAME}.items ${baseWhere}`, params),
+          Zotero.DB.columnQueryAsync(`SELECT item_key FROM ${DB_NAME}.items ${baseWhere}`, params),
+          Zotero.DB.columnQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items ${baseWhere}`, params),
+          Zotero.DB.columnQueryAsync(`SELECT was_truncated FROM ${DB_NAME}.items ${baseWhere}`, params),
+          Zotero.DB.columnQueryAsync(`SELECT pages_indexed FROM ${DB_NAME}.items ${baseWhere}`, params),
+          Zotero.DB.columnQueryAsync(`SELECT pages_total FROM ${DB_NAME}.items ${baseWhere}`, params),
+        ]);
+
+        const pkArr: number[] = (pks || []).map((v: any) => Number(v));
+        if (pkArr.length === 0) continue;
+
+        // Build chunk-count map keyed by item_pk.
+        const chunkPlaceholders = pkArr.map(() => '?').join(',');
+        const [cPks, cCounts] = await Promise.all([
+          Zotero.DB.columnQueryAsync(
+            `SELECT item_pk FROM ${DB_NAME}.chunks WHERE item_pk IN (${chunkPlaceholders}) GROUP BY item_pk ORDER BY item_pk`,
+            pkArr
+          ),
+          Zotero.DB.columnQueryAsync(
+            `SELECT COUNT(*) FROM ${DB_NAME}.chunks WHERE item_pk IN (${chunkPlaceholders}) GROUP BY item_pk ORDER BY item_pk`,
+            pkArr
+          ),
+        ]);
+        const chunkCountMap = new Map<number, number>();
+        for (let i = 0; i < (cPks || []).length; i++) {
+          chunkCountMap.set(Number(cPks[i]), Number(cCounts[i]) || 0);
+        }
+
+        for (let i = 0; i < pkArr.length; i++) {
+          const lk = String(libKeys?.[i] ?? '');
+          const ik = String(itemKeys?.[i] ?? '');
+          const key = `${lk}|${ik}`;
+          result.set(key, {
+            libraryKey: lk,
+            itemKey: ik,
+            indexedAt: String(indexedAts?.[i] ?? ''),
+            wasTruncated: Number(truncs?.[i] ?? 0) === 1,
+            pagesIndexed: Number(pIdx?.[i] ?? 0),
+            pagesTotal: Number(pTot?.[i] ?? 0),
+            chunkCount: chunkCountMap.get(pkArr[i]) ?? 0,
+          });
+        }
       }
     } catch (e) {
-      this.logger.error(`getIndexStatusMap(): ${e}`);
+      this.logger.error(`getIndexStatusByIdentity(): ${e}`);
     }
 
     return result;
