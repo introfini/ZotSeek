@@ -2153,40 +2153,6 @@ export class VectorStoreSQLite {
     return all.filter(e => e.libraryKey === libraryKey);
   }
 
-  /**
-   * Get only the embedding vectors (for search) - more efficient
-   */
-  async getEmbeddingsOnly(): Promise<Array<{ itemId: number; embedding: number[] }>> {
-    await this.ensureInit();
-
-    // Fetch item_id and embedding from chunks table (one per chunk, not per item)
-    let chunkItemIds: number[] = [];
-    let embeddingStrs: string[] = [];
-
-    try {
-      const rawIds = await Zotero.DB.columnQueryAsync(
-        `SELECT item_id FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`
-      );
-      chunkItemIds = (rawIds || []).map((v: any) => Number(v));
-
-      embeddingStrs = await Zotero.DB.columnQueryAsync(
-        `SELECT embedding FROM ${DB_NAME}.chunks ORDER BY item_id, chunk_index`
-      ) || [];
-    } catch (e) {
-      this.logger.warn(`Failed to batch fetch embeddings only: ${e}`);
-    }
-
-    if (chunkItemIds.length === 0 || embeddingStrs.length !== chunkItemIds.length) {
-      return [];
-    }
-
-    return chunkItemIds.map((id: number, i: number) => ({
-      itemId: id,
-      embedding: this.base64ToEmbedding(embeddingStrs[i]),
-    }));
-  }
-
-
   /** @deprecated Use isIndexedByIdentity(libraryKey, itemKey). */
   async isIndexed(itemId: number): Promise<boolean> {
     await this.ensureInit();
@@ -2336,48 +2302,61 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Clear all embeddings
+   * Clear all embeddings (v8 schema): empties chunks, items, and orphan_items,
+   * and resets the autoincrement counter so item_pk starts back at 1.
    */
   async clear(): Promise<void> {
     await this.ensureInit();
 
-    await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.chunks`);
-    await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.items`);
-    this.logger.info('Cleared all embeddings');
+    await Zotero.DB.executeTransaction(async () => {
+      await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.chunks`);
+      await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.items`);
+      await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.orphan_items`);
+      // Reset autoincrement counter so item_pks start from 1 again.
+      // sqlite_sequence is the SQLite system table; failure here is non-fatal
+      // (e.g. if AUTOINCREMENT was never used), so isolate the error.
+      try {
+        await Zotero.DB.queryAsync(
+          `DELETE FROM ${DB_NAME}.sqlite_sequence WHERE name IN ('items')`
+        );
+      } catch (e) {
+        this.logger.warn(`clear(): could not reset sqlite_sequence: ${e}`);
+      }
+    });
     this.invalidateCache();
+    this.logger.info('Cleared all embeddings (v8 schema)');
   }
 
   /**
-   * Get count of stored embedding chunks
+   * Get count of stored embedding chunks (excludes chunks belonging to
+   * orphaned items so the figure matches what search will actually see).
    */
   async getCount(): Promise<number> {
     if (!this.initialized) return 0;
 
     try {
-      const rows = await Zotero.DB.queryAsync(`
-        SELECT COUNT(*) as count FROM ${DB_NAME}.chunks
+      const v = await Zotero.DB.valueQueryAsync(`
+        SELECT COUNT(*) FROM ${DB_NAME}.chunks c
+        INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk
+        WHERE i.library_key != 'orphan'
       `);
-
-      if (!rows || rows.length === 0) return 0;
-      return rows[0]?.count || 0;
+      return Number(v) || 0;
     } catch (e) {
       return 0;
     }
   }
 
   /**
-   * Get count of unique items (papers)
+   * Get count of unique items (papers), excluding orphans.
    */
   async getItemCount(): Promise<number> {
     if (!this.initialized) return 0;
 
     try {
-      const rows = await Zotero.DB.queryAsync(`
-        SELECT COUNT(*) as count FROM ${DB_NAME}.items
+      const v = await Zotero.DB.valueQueryAsync(`
+        SELECT COUNT(*) FROM ${DB_NAME}.items WHERE library_key != 'orphan'
       `);
-
-      if (!rows || rows.length === 0) return 0;
-      return rows[0]?.count || 0;
+      return Number(v) || 0;
     } catch (e) {
       return 0;
     }
@@ -2392,11 +2371,14 @@ export class VectorStoreSQLite {
 
     this.logger.debug('getStats(): Fetching statistics...');
 
-    // Count total chunks - use valueQueryAsync for reliability
+    // Count total chunks (excluding chunks owned by orphan items so the
+    // user-visible totals match what search actually returns).
     let chunkCount = 0;
     try {
       const countResult = await Zotero.DB.valueQueryAsync(`
-        SELECT COUNT(*) FROM ${DB_NAME}.chunks
+        SELECT COUNT(*) FROM ${DB_NAME}.chunks c
+        INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk
+        WHERE i.library_key != 'orphan'
       `);
       chunkCount = Number(countResult) || 0;
       this.logger.debug(`getStats(): Total chunks = ${chunkCount}`);
@@ -2404,11 +2386,11 @@ export class VectorStoreSQLite {
       this.logger.error(`getStats(): Failed to count chunks: ${e}`);
     }
 
-    // Count unique items (papers) - use valueQueryAsync
+    // Count unique items (papers), excluding orphans.
     let itemCount = 0;
     try {
       const itemCountResult = await Zotero.DB.valueQueryAsync(`
-        SELECT COUNT(*) FROM ${DB_NAME}.items
+        SELECT COUNT(*) FROM ${DB_NAME}.items WHERE library_key != 'orphan'
       `);
       itemCount = Number(itemCountResult) || 0;
       this.logger.debug(`getStats(): Unique items = ${itemCount}`);
@@ -2416,11 +2398,12 @@ export class VectorStoreSQLite {
       this.logger.error(`getStats(): Failed to count items: ${e}`);
     }
 
-    // Get model ID
+    // Get model ID (pick from a non-orphan row so a future "orphan-only" DB
+    // doesn't surface a stale model name).
     let modelId = 'none';
     try {
       const modelResult = await Zotero.DB.valueQueryAsync(`
-        SELECT model_id FROM ${DB_NAME}.items LIMIT 1
+        SELECT model_id FROM ${DB_NAME}.items WHERE library_key != 'orphan' LIMIT 1
       `);
       if (modelResult) {
         modelId = String(modelResult);
@@ -2430,11 +2413,11 @@ export class VectorStoreSQLite {
       this.logger.error(`getStats(): Failed to get model: ${e}`);
     }
 
-    // Get last indexed date
+    // Get last indexed date among live (non-orphan) items.
     let lastIndexed: Date | null = null;
     try {
       const lastResult = await Zotero.DB.valueQueryAsync(`
-        SELECT MAX(indexed_at) FROM ${DB_NAME}.items
+        SELECT MAX(indexed_at) FROM ${DB_NAME}.items WHERE library_key != 'orphan'
       `);
       if (lastResult) {
         lastIndexed = new Date(String(lastResult));
@@ -2457,11 +2440,14 @@ export class VectorStoreSQLite {
     }
     const avgChunksPerPaper = itemCount > 0 ? chunkCount / itemCount : 0;
 
-    // Count chunks with location data (v4 feature)
+    // Count chunks with location data (v4 feature), excluding orphans so the
+    // coverage percent matches the chunkCount denominator above.
     let chunksWithLocation = 0;
     try {
       const locationResult = await Zotero.DB.valueQueryAsync(`
-        SELECT COUNT(*) FROM ${DB_NAME}.chunks WHERE page_number IS NOT NULL
+        SELECT COUNT(*) FROM ${DB_NAME}.chunks c
+        INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk
+        WHERE c.page_number IS NOT NULL AND i.library_key != 'orphan'
       `);
       chunksWithLocation = Number(locationResult) || 0;
       this.logger.debug(`getStats(): Chunks with location = ${chunksWithLocation}`);
