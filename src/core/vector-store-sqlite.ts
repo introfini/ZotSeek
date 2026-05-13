@@ -15,7 +15,7 @@
  */
 
 import { Logger } from '../utils/logger';
-import { identityFromItem } from './identity-resolver';
+import { identityFromItem, localItemIDFromIdentity } from './identity-resolver';
 
 declare const Zotero: any;
 declare const PathUtils: any;
@@ -1310,6 +1310,48 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Check whether an item is indexed by stable identity.
+   */
+  async isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean> {
+    await this.ensureInit();
+    try {
+      const result = await Zotero.DB.valueQueryAsync(
+        `SELECT 1 FROM ${DB_NAME}.items
+         WHERE library_key = ? AND item_key = ? LIMIT 1`,
+        [libraryKey, itemKey]
+      );
+      return result === 1;
+    } catch (e) {
+      this.logger.error(`isIndexedByIdentity(${libraryKey}, ${itemKey}): ${e}`);
+      return false;
+    }
+  }
+
+  async getChunkCountByIdentity(libraryKey: string, itemKey: string): Promise<number> {
+    await this.ensureInit();
+    try {
+      const result = await Zotero.DB.valueQueryAsync(`
+        SELECT COUNT(*) FROM ${DB_NAME}.chunks c
+        INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk
+        WHERE i.library_key = ? AND i.item_key = ?
+      `, [libraryKey, itemKey]);
+      return Number(result) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  async needsReindexByIdentity(libraryKey: string, itemKey: string, contentHash: string): Promise<boolean> {
+    await this.ensureInit();
+    const stored = await Zotero.DB.valueQueryAsync(
+      `SELECT content_hash FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [libraryKey, itemKey]
+    );
+    if (!stored) return true;          // not indexed at all
+    return String(stored) !== contentHash;
+  }
+
+  /**
    * Store a paper embedding (single chunk).
    *
    * Requires stable identity (libraryKey + itemKey) on the embedding.
@@ -1989,27 +2031,38 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Get unique item IDs (for counting papers, not chunks)
+   * Return current local Zotero itemIDs for all indexed items.
+   * Items whose stable identity does not resolve to a local Zotero item
+   * (orphans) are excluded.
    */
   async getUniqueItemIds(): Promise<number[]> {
     await this.ensureInit();
 
+    let libraryKeys: string[] = [];
+    let itemKeys: string[] = [];
     try {
-      if (Zotero.DB.columnQueryAsync) {
-        const ids = await Zotero.DB.columnQueryAsync(`
-          SELECT item_id FROM ${DB_NAME}.items ORDER BY item_id
-        `);
-        return (ids || []).map((v: any) => Number(v)).filter((n: number) => Number.isFinite(n));
-      }
+      [libraryKeys, itemKeys] = await Promise.all([
+        Zotero.DB.columnQueryAsync(
+          `SELECT library_key FROM ${DB_NAME}.items WHERE library_key != 'orphan' ORDER BY item_pk`
+        ).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(
+          `SELECT item_key FROM ${DB_NAME}.items WHERE library_key != 'orphan' ORDER BY item_pk`
+        ).then((r: any) => r || []),
+      ]);
     } catch (e) {
-      this.logger.debug(`getUniqueItemIds(): columnQueryAsync failed: ${e}`);
+      this.logger.error(`getUniqueItemIds(): ${e}`);
+      return [];
     }
 
-    const rows = await Zotero.DB.queryAsync(`
-      SELECT item_id FROM ${DB_NAME}.items ORDER BY item_id
-    `);
-    if (!rows) return [];
-    return rows.map((r: any) => Number(r.item_id)).filter((n: number) => Number.isFinite(n));
+    const result: number[] = [];
+    for (let i = 0; i < libraryKeys.length; i++) {
+      const localID = localItemIDFromIdentity({
+        libraryKey: libraryKeys[i],
+        itemKey: itemKeys[i]
+      });
+      if (localID !== null) result.push(localID);
+    }
+    return result;
   }
 
   /**
@@ -2194,43 +2247,23 @@ export class VectorStoreSQLite {
   }
 
 
-  /**
-   * Check if item is indexed (has at least one chunk)
-   * Uses valueQueryAsync for most reliable existence check
-   */
+  /** @deprecated Use isIndexedByIdentity(libraryKey, itemKey). */
   async isIndexed(itemId: number): Promise<boolean> {
     await this.ensureInit();
-
-    try {
-      // valueQueryAsync returns the value or false/undefined if no rows
-      const result = await Zotero.DB.valueQueryAsync(
-        `SELECT 1 FROM ${DB_NAME}.items WHERE item_id = ? LIMIT 1`,
-        [itemId]
-      );
-      // Must check for exact value 1, as valueQueryAsync can return false/undefined when no rows
-      const isIndexed = result === 1;
-      this.logger.debug(`isIndexed(${itemId}): result=${result}, type=${typeof result}, returning=${isIndexed}`);
-      return isIndexed;
-    } catch (e) {
-      this.logger.error(`isIndexed(${itemId}): Failed: ${e}`);
-      return false;
-    }
+    const item = Zotero.Items.get(itemId);
+    if (!item) return false;
+    const id = identityFromItem(item);
+    if (!id) return false;
+    return this.isIndexedByIdentity(id.libraryKey, id.itemKey);
   }
 
-  /**
-   * Get the number of chunks for an item
-   */
+  /** @deprecated Use getChunkCountByIdentity(libraryKey, itemKey). */
   async getChunkCount(itemId: number): Promise<number> {
-    await this.ensureInit();
-
-    try {
-      const rows = await Zotero.DB.queryAsync(`
-        SELECT COUNT(*) as count FROM ${DB_NAME}.chunks WHERE item_id = ?
-      `, [itemId]);
-      return rows?.[0]?.count || 0;
-    } catch (e) {
-      return 0;
-    }
+    const item = Zotero.Items.get(itemId);
+    if (!item) return 0;
+    const id = identityFromItem(item);
+    if (!id) return 0;
+    return this.getChunkCountByIdentity(id.libraryKey, id.itemKey);
   }
 
   /**
