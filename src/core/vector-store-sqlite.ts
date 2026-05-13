@@ -50,6 +50,25 @@ export interface PaperEmbedding {
   startChar?: number;        // Character offset in full extracted text
   endChar?: number;          // End character offset
   bbox?: string;             // JSON: [l, t, r, b] bounding box coordinates
+
+  // Per-item indexing status (v7) — same value across all chunks of an item.
+  // Stored on the items table; populated here so putBatch can write it.
+  wasTruncated?: boolean;    // True if maxChunksPerPaper limit cut off content
+  pagesIndexed?: number;     // Number of distinct PDF pages with at least one chunk
+  pagesTotal?: number;       // Total pages in the source PDF (0 if unknown)
+}
+
+/**
+ * Per-item indexing status — used by the item-tree column to decide
+ * whether to show "Indexed", "Partial", "Outdated", etc.
+ */
+export interface ItemIndexStatus {
+  itemId: number;
+  indexedAt: string;
+  wasTruncated: boolean;
+  pagesIndexed: number;
+  pagesTotal: number;
+  chunkCount: number;
 }
 
 export interface VectorStoreStats {
@@ -69,7 +88,7 @@ export interface VectorStoreStats {
 // Database configuration
 const DB_NAME = 'zotseek';           // Schema name when attached
 const DB_FILE = 'zotseek.sqlite';    // Database filename
-const SCHEMA_VERSION = 6;            // Normalized: items + chunks tables
+const SCHEMA_VERSION = 7;            // Adds per-item indexing status (was_truncated, pages_indexed, pages_total)
 
 // Legacy table prefix (for migration from old schema)
 const LEGACY_TABLE_PREFIX = 'zs_';
@@ -179,6 +198,9 @@ export class VectorStoreSQLite {
 
       // Migrate to v6 (normalize: split embeddings into items + chunks) if needed
       await this.migrateToV6();
+
+      // Migrate to v7 (per-item indexing status columns) if needed
+      await this.migrateToV7();
 
       this.initialized = true;
       this.logger.info('SQLite store initialized successfully');
@@ -607,6 +629,69 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Migrate to schema v7: Add per-item indexing status columns
+   *
+   * Adds three columns to items so the UI can show whether a paper was
+   * fully or partially indexed and how many pages were covered:
+   * - was_truncated:  0/1 — true when maxChunksPerPaper cut off content
+   * - pages_indexed:  count of distinct PDF pages with at least one chunk
+   * - pages_total:    total pages in the PDF (0 when unknown)
+   */
+  private async migrateToV7(): Promise<void> {
+    // Detect v7 by checking for the columns directly, not by reading
+    // schema_version. createTables() unconditionally bumps the version
+    // even when it CREATE TABLE IF NOT EXISTS is a no-op, so the version
+    // marker can lie. The columns are the ground truth.
+    let existing: Set<string>;
+    try {
+      const itemsInfo: any[] = await Zotero.DB.queryAsync(`PRAGMA ${DB_NAME}.table_info(items)`);
+      existing = new Set((itemsInfo || []).map((r: any) => r.name));
+    } catch (e: any) {
+      this.logger.error(`Could not introspect items table for v7 migration: ${e?.message || e}`);
+      return;
+    }
+
+    if (
+      existing.has('was_truncated') &&
+      existing.has('pages_indexed') &&
+      existing.has('pages_total')
+    ) {
+      this.logger.debug('items table already has v7 columns, skipping migration');
+      return;
+    }
+
+    this.logger.info('Migrating items table to v7 (indexing status columns)...');
+
+    try {
+      if (!existing.has('was_truncated')) {
+        await Zotero.DB.queryAsync(
+          `ALTER TABLE ${DB_NAME}.items ADD COLUMN was_truncated INTEGER NOT NULL DEFAULT 0`
+        );
+      }
+      if (!existing.has('pages_indexed')) {
+        await Zotero.DB.queryAsync(
+          `ALTER TABLE ${DB_NAME}.items ADD COLUMN pages_indexed INTEGER NOT NULL DEFAULT 0`
+        );
+      }
+      if (!existing.has('pages_total')) {
+        await Zotero.DB.queryAsync(
+          `ALTER TABLE ${DB_NAME}.items ADD COLUMN pages_total INTEGER NOT NULL DEFAULT 0`
+        );
+      }
+
+      await Zotero.DB.queryAsync(
+        `INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value) VALUES ('schema_version', '7')`
+      );
+
+      this.logger.info('Schema migration to v7 completed');
+    } catch (error: any) {
+      this.logger.error(`Migration to v7 failed: ${error?.message || error}`);
+      // Non-fatal: if the columns can't be added, the column UI will fall back
+      // to chunk-count-only status and the rest of the plugin still works.
+    }
+  }
+
+  /**
    * Check if a table exists in the attached database
    */
   private async tableExists(tableName: string): Promise<boolean> {
@@ -642,7 +727,10 @@ export class VectorStoreSQLite {
         abstract TEXT,
         model_id TEXT NOT NULL,
         indexed_at TEXT NOT NULL,
-        content_hash TEXT NOT NULL
+        content_hash TEXT NOT NULL,
+        was_truncated INTEGER NOT NULL DEFAULT 0,
+        pages_indexed INTEGER NOT NULL DEFAULT 0,
+        pages_total INTEGER NOT NULL DEFAULT 0
       )
     `);
 
@@ -771,8 +859,9 @@ export class VectorStoreSQLite {
     // Write item-level data
     await Zotero.DB.queryAsync(`
       INSERT OR REPLACE INTO ${DB_NAME}.items
-      (item_id, item_key, library_id, title, abstract, model_id, indexed_at, content_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (item_id, item_key, library_id, title, abstract, model_id, indexed_at, content_hash,
+       was_truncated, pages_indexed, pages_total)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       embedding.itemId,
       embedding.itemKey,
@@ -782,6 +871,9 @@ export class VectorStoreSQLite {
       embedding.modelId,
       embedding.indexedAt,
       embedding.contentHash,
+      embedding.wasTruncated ? 1 : 0,
+      embedding.pagesIndexed ?? 0,
+      embedding.pagesTotal ?? 0,
     ]);
 
     // Write chunk-level data
@@ -836,8 +928,9 @@ export class VectorStoreSQLite {
         if (!insertedItems.has(embedding.itemId)) {
           await Zotero.DB.queryAsync(`
             INSERT OR REPLACE INTO ${DB_NAME}.items
-            (item_id, item_key, library_id, title, abstract, model_id, indexed_at, content_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (item_id, item_key, library_id, title, abstract, model_id, indexed_at, content_hash,
+             was_truncated, pages_indexed, pages_total)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
             embedding.itemId,
             embedding.itemKey,
@@ -847,6 +940,9 @@ export class VectorStoreSQLite {
             embedding.modelId,
             embedding.indexedAt,
             embedding.contentHash,
+            embedding.wasTruncated ? 1 : 0,
+            embedding.pagesIndexed ?? 0,
+            embedding.pagesTotal ?? 0,
           ]);
           insertedItems.add(embedding.itemId);
         }
@@ -1608,6 +1704,85 @@ export class VectorStoreSQLite {
     } catch (e) {
       return 0;
     }
+  }
+
+  /**
+   * Get per-item indexing status for a list of items.
+   *
+   * Returns a Map keyed by item_id with indexedAt / wasTruncated /
+   * pagesIndexed / pagesTotal / chunkCount. Items not in the index are
+   * absent from the map. Designed for the item-tree column which can be
+   * called with many ids at once.
+   */
+  async getIndexStatusMap(itemIds: number[]): Promise<Map<number, ItemIndexStatus>> {
+    const result = new Map<number, ItemIndexStatus>();
+    if (itemIds.length === 0) return result;
+    await this.ensureInit();
+
+    // Run several columnQueryAsync calls in parallel — same workaround used
+    // elsewhere in this file for the Zotero 8 DB wrapper that flakes on
+    // multi-column SELECTs.
+    try {
+      const placeholders = itemIds.map(() => '?').join(',');
+      const [ids, indexedAts, truncs, pIdx, pTot, chunkCounts] = await Promise.all([
+        Zotero.DB.columnQueryAsync(
+          `SELECT item_id FROM ${DB_NAME}.items WHERE item_id IN (${placeholders})`,
+          itemIds
+        ),
+        Zotero.DB.columnQueryAsync(
+          `SELECT indexed_at FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
+          itemIds
+        ),
+        Zotero.DB.columnQueryAsync(
+          `SELECT was_truncated FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
+          itemIds
+        ),
+        Zotero.DB.columnQueryAsync(
+          `SELECT pages_indexed FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
+          itemIds
+        ),
+        Zotero.DB.columnQueryAsync(
+          `SELECT pages_total FROM ${DB_NAME}.items WHERE item_id IN (${placeholders}) ORDER BY item_id`,
+          itemIds
+        ),
+        // Chunk counts joined by item_id, ordered by item_id to align with the
+        // other columns above.
+        Zotero.DB.queryAsync(
+          `SELECT item_id, COUNT(*) AS cnt FROM ${DB_NAME}.chunks
+           WHERE item_id IN (${placeholders})
+           GROUP BY item_id ORDER BY item_id`,
+          itemIds
+        ),
+      ]);
+
+      // Build sorted ids list as the anchor — other parallel queries are
+      // already ordered by item_id so positions align.
+      const sortedIds: number[] = (ids || [])
+        .map((v: any) => Number(v))
+        .sort((a: number, b: number) => a - b);
+
+      // Map chunk counts by id for easy lookup
+      const chunkCountMap = new Map<number, number>();
+      for (const row of (chunkCounts || [])) {
+        chunkCountMap.set(Number(row.item_id), Number(row.cnt) || 0);
+      }
+
+      for (let i = 0; i < sortedIds.length; i++) {
+        const id = sortedIds[i];
+        result.set(id, {
+          itemId: id,
+          indexedAt: String(indexedAts?.[i] ?? ''),
+          wasTruncated: Number(truncs?.[i] ?? 0) === 1,
+          pagesIndexed: Number(pIdx?.[i] ?? 0),
+          pagesTotal: Number(pTot?.[i] ?? 0),
+          chunkCount: chunkCountMap.get(id) ?? 0,
+        });
+      }
+    } catch (e) {
+      this.logger.error(`getIndexStatusMap(): ${e}`);
+    }
+
+    return result;
   }
 
   /**

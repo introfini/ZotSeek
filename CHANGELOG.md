@@ -2,6 +2,21 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Indexing status column** (#30) — Resolves silent truncation of long PDFs when the *Max Chunks per Paper* limit cut content from a paper without telling the user. Two surfaces:
+  - A new "ZotSeek" column in the item list shows whether each paper is fully indexed (`✓`), partially indexed (`◐`), out of date (`↻`), excluded (`⊘`), or not indexed (empty). The column appears automatically on first install; users can hide or move it like any other Zotero column.
+  - The indexing progress window now adds a summary line "⚠ Partial content: N item(s) hit the Max Chunks per Paper limit" whenever truncation happened, and the debug log gains one `[ZotSeek] ⚠ Truncated at chunk limit: "<title>" (<pages>/<total> pages)` line per affected paper.
+
+### Technical
+- `src/utils/chunker.ts` exposes new `chunkDocumentEx` / `chunkDocumentWithPagesEx` returning `{chunks, wasTruncated, pagesIndexed, pagesTotal}`. Every `break` hit by the `maxChunks` ceiling now flags `wasTruncated`, including the post-process safety net in `enforceCharLimitEx`.
+- Schema **v7** adds three columns to the `items` table: `was_truncated INTEGER`, `pages_indexed INTEGER`, `pages_total INTEGER`. Migration is defensive — it detects v7 by introspecting `PRAGMA table_info` rather than trusting `schema_version`, because `createTables()` could bump the version marker even when the underlying `CREATE TABLE IF NOT EXISTS` was a no-op on an existing v6 database.
+- New `VectorStoreSQLite.getIndexStatusMap(itemIds)` API returns `{itemId, indexedAt, wasTruncated, pagesIndexed, pagesTotal, chunkCount}` in a single batched call. Uses parallel `columnQueryAsync` calls per Zotero 8 workaround.
+- New module `src/ui/item-tree-column.ts` registers the column via `Zotero.ItemTreeManager.registerColumns`. Cell text is served from a per-item in-memory cache that is hydrated lazily in batches when the tree paints, and invalidated on every `putBatch`/`delete`. "Out of date" detection compares `item.dateModified > indexed_at` as a cheap proxy. First-run UX auto-shows the column once, guarded by `zotseek.indexStatusColumn.firstShown`.
+
+---
+
 ## [1.13.1] - 2026-04-24
 
 ### Fixed

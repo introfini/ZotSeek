@@ -18,6 +18,11 @@ pref("extensions.zotero.zotseek.indexingMode", "abstract");
 pref("extensions.zotero.zotseek.maxTokens", 800);
 pref("extensions.zotero.zotseek.maxChunksPerPaper", 100);
 
+// Has the index-status column been auto-shown once after installation?
+// Used to surface the column the first time the user installs this version
+// without re-showing it if they later choose to hide it.
+pref("extensions.zotero.zotseek.indexStatusColumn.firstShown", false);
+
 // Item type filtering
 // Exclude books from search results (books lack paper sections and are too long to index well)
 pref("extensions.zotero.zotseek.excludeBooks", true);

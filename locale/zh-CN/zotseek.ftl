@@ -279,6 +279,7 @@ zotseek-indexing-completeChunks = ✓ 总分块数：{ $count }
 zotseek-indexing-completeAvg = ✓ 平均分块/条目：{ $avg }
 zotseek-indexing-completeDuration = ✓ 时长：{ $duration }
 zotseek-indexing-completeNoContent = ⚠ 无内容：{ $count } 个条目
+zotseek-indexing-completeTruncated = ⚠ 部分内容：{ $count } 个条目达到每篇最大分块数限制。请提高限制或切换至摘要模式以索引完整文本。
 zotseek-indexing-completeSuccess = 索引已成功完成！
 zotseek-indexing-cancelled = 索引已取消
 zotseek-indexing-failed = 索引失败：{ $error }

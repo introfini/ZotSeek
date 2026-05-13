@@ -279,6 +279,7 @@ zotseek-indexing-completeChunks = ✓ Total chunks: { $count }
 zotseek-indexing-completeAvg = ✓ Avg chunks/item: { $avg }
 zotseek-indexing-completeDuration = ✓ Duration: { $duration }
 zotseek-indexing-completeNoContent = ⚠ No content: { $count } items
+zotseek-indexing-completeTruncated = ⚠ Partial content: { $count } item(s) hit the Max Chunks per Paper limit. Raise the limit or switch to Summary mode to index the full text.
 zotseek-indexing-completeSuccess = Indexing completed successfully!
 zotseek-indexing-cancelled = Indexing cancelled
 zotseek-indexing-failed = Indexing failed: { $error }

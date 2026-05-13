@@ -28,6 +28,7 @@ import { searchDialog } from './ui/search-dialog';
 import { searchDialogWithVTable } from './ui/search-dialog-with-vtable';
 import { similarDocumentsWrapper } from './ui/similar-documents-wrapper';
 import { toolbarButton } from './ui/toolbar-button';
+import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 
 interface PluginInfo {
@@ -137,6 +138,7 @@ class ZotSeekPlugin {
       'zotseek.maxChunksPerPaper': 100,
       'zotseek.excludeBooks': true,        // Exclude books from search/indexing by default
       'zotseek.excludeTag': 'zotseek-exclude', // Tag name to exclude items from indexing
+      'zotseek.indexStatusColumn.firstShown': false, // First-run flag for index-status column
     };
 
     for (const [key, defaultValue] of Object.entries(defaults)) {
@@ -208,6 +210,22 @@ class ZotSeekPlugin {
     // Initialize auto-index manager (monitors for new items)
     this.initAutoIndexManager();
 
+    // Register the item-tree index-status column.
+    // Needs the vector store to be initialised — do it lazily by ensuring
+    // the store is ready first, but only if the user opens it later. To keep
+    // startup snappy we register the column with a getter that will trigger
+    // lazy init on first lookup.
+    try {
+      // Lazy: pass a vector store wrapper that triggers ensureStoreReady on demand
+      await this.ensureStoreReady();
+      if (this.vectorStore) {
+        await itemTreeIndexColumn.register(this.vectorStore);
+        this.logger.info('Item-tree index-status column registered');
+      }
+    } catch (e: any) {
+      this.logger.warn(`Could not register item-tree column: ${e?.message || e}`);
+    }
+
     this.logger.info('=== Plugin Started Successfully ===');
   }
 
@@ -255,14 +273,17 @@ class ZotSeekPlugin {
             if (!this.vectorStore) return;
 
             let cleaned = 0;
+            const cleanedIds: number[] = [];
             for (const id of ids) {
               const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
               if (isNaN(numericId)) continue;
               await this.vectorStore.delete(numericId);
+              cleanedIds.push(numericId);
               cleaned++;
             }
 
             if (cleaned > 0) {
+              itemTreeIndexColumn.invalidate(cleanedIds);
               this.logger.info(`Cleaned up embeddings for ${cleaned} ${event === 'trash' ? 'trashed' : 'deleted'} items`);
             }
           } catch (error: any) {
@@ -945,6 +966,8 @@ class ZotSeekPlugin {
       let totalItemsIndexed = 0;
       let totalChunksIndexed = 0;
       let totalItemsSkipped = 0; // Items with no extractable content
+      let totalItemsTruncated = 0; // Items where maxChunksPerPaper cut content
+      const truncatedTitles: string[] = []; // For end-of-run summary log
 
       this.logger.info(`Processing ${itemsToIndex.length} items in ${totalBatches} batches of ${CHECKPOINT_BATCH_SIZE}`);
 
@@ -1055,6 +1078,18 @@ class ZotSeekPlugin {
           // Delete existing chunks for this item before adding new ones
           await this.vectorStore!.deleteItemChunks(extracted.itemId);
 
+          if (extracted.wasTruncated) {
+            totalItemsTruncated++;
+            truncatedTitles.push(extracted.title);
+            const coverage = extracted.pagesTotal > 0
+              ? `${extracted.pagesIndexed}/${extracted.pagesTotal} pages`
+              : `${extracted.chunks.length} chunks`;
+            this.logger.warn(
+              `⚠ Truncated at chunk limit: "${extracted.title}" (${coverage}). ` +
+              `Increase Max Chunks per Paper or switch to Summary mode to capture full content.`
+            );
+          }
+
           for (const chunk of extracted.chunks) {
             const embeddingKey = `${extracted.itemId}_${chunk.index}`;
             const embeddingResult = embeddingMap.get(embeddingKey);
@@ -1077,6 +1112,9 @@ class ZotSeekPlugin {
                 paragraphIndex: chunk.paragraphIndex,
                 startChar: chunk.startChar,
                 endChar: chunk.endChar,
+                wasTruncated: extracted.wasTruncated,
+                pagesIndexed: extracted.pagesIndexed,
+                pagesTotal: extracted.pagesTotal,
               });
             }
           }
@@ -1084,6 +1122,9 @@ class ZotSeekPlugin {
 
         // Save this batch to database
         await this.vectorStore!.putBatch(batchEmbeddings);
+
+        // Refresh the index-status column for the items we just touched
+        itemTreeIndexColumn.invalidate(extractedBatch.map(e => e.itemId));
 
         totalItemsIndexed += extractedBatch.length;
         totalChunksIndexed += batchEmbeddings.length;
@@ -1122,6 +1163,19 @@ class ZotSeekPlugin {
 
       if (totalItemsSkipped > 0) {
         progressWindow.addLine(getString('indexing-completeNoContent', { count: totalItemsSkipped }));
+      }
+
+      if (totalItemsTruncated > 0) {
+        // Show a prominent warning so users notice partial indexing
+        progressWindow.addLine(
+          getString('indexing-completeTruncated', { count: totalItemsTruncated }),
+          'chrome://zotero/skin/cross.png'
+        );
+        // Repeat to debug log so the warning survives the auto-close
+        this.logger.warn(
+          `Indexing summary: ${totalItemsTruncated} of ${totalItemsIndexed} items hit the Max Chunks per Paper limit. ` +
+          `Affected (first 5): ${truncatedTitles.slice(0, 5).join(' | ')}`
+        );
       }
 
       progressWindow.complete(getString('indexing-completeSuccess'), true);
@@ -1260,8 +1314,20 @@ class ZotSeekPlugin {
       // Store embeddings with chunk metadata
       itemRow.setText(getString('indexing-saving'));
       const paperEmbeddings: PaperEmbedding[] = [];
+      let autoTruncatedCount = 0;
 
       for (const extracted of extractedItems) {
+        if (extracted.wasTruncated) {
+          autoTruncatedCount++;
+          const coverage = extracted.pagesTotal > 0
+            ? `${extracted.pagesIndexed}/${extracted.pagesTotal} pages`
+            : `${extracted.chunks.length} chunks`;
+          this.logger.warn(
+            `⚠ Auto-index truncated: "${extracted.title}" (${coverage}). ` +
+            `Increase Max Chunks per Paper to capture full content.`
+          );
+        }
+
         for (const chunk of extracted.chunks) {
           const embeddingKey = `${extracted.itemId}_${chunk.index}`;
           const embeddingData = embeddingMap.get(embeddingKey);
@@ -1284,12 +1350,18 @@ class ZotSeekPlugin {
             paragraphIndex: chunk.paragraphIndex,
             startChar: chunk.startChar,
             endChar: chunk.endChar,
+            wasTruncated: extracted.wasTruncated,
+            pagesIndexed: extracted.pagesIndexed,
+            pagesTotal: extracted.pagesTotal,
           });
         }
       }
 
       // Store in vector store
       await this.vectorStore!.putBatch(paperEmbeddings);
+
+      // Refresh column status for the items we just indexed
+      itemTreeIndexColumn.invalidate(extractedItems.map(e => e.itemId));
 
       if (failedChunks > 0) {
         const itemList = Array.from(failedItems).join(', ');
@@ -1302,7 +1374,20 @@ class ZotSeekPlugin {
       itemRow.setText(failedChunks > 0
         ? getString('indexing-chunksIndexedWithFailed', { count: paperEmbeddings.length, failed: failedChunks })
         : getString('indexing-chunksIndexed', { count: paperEmbeddings.length }));
-      progressWin.startCloseTimer(3000);
+
+      if (autoTruncatedCount > 0) {
+        // Append a partial-content warning so the user sees it before the window auto-closes
+        try {
+          const warnRow = new progressWin.ItemProgress(
+            'chrome://zotero/skin/cross.png',
+            getString('indexing-completeTruncated', { count: autoTruncatedCount })
+          );
+          warnRow.setProgress(100);
+        } catch { /* ignore — progress row API can vary across Zotero versions */ }
+        progressWin.startCloseTimer(8000);
+      } else {
+        progressWin.startCloseTimer(3000);
+      }
 
     } catch (error: any) {
       this.logger.error(`Auto-indexing failed: ${error?.message || error}`);
@@ -1475,6 +1560,9 @@ class ZotSeekPlugin {
     // Unregister Tools menu and reader toolbar
     toolbarButton.unregisterToolsMenu();
     toolbarButton.unregisterReaderToolbar();
+
+    // Unregister item-tree column
+    await itemTreeIndexColumn.unregister();
 
     if (this.vectorStore) {
       await this.vectorStore.close();

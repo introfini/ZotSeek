@@ -39,6 +39,17 @@ export interface ChunkOptions {
   totalPages?: number;     // Total pages from Zotero.Fulltext.getPages() for calibrated estimation
 }
 
+/**
+ * Result of chunking a document, with metadata about whether the chunk
+ * limit was hit (causing partial indexing of large papers).
+ */
+export interface ChunkResult {
+  chunks: Chunk[];
+  wasTruncated: boolean;   // True if maxChunks limit was reached and there was more content
+  pagesIndexed: number;    // Number of pages with at least one chunk (0 in abstract mode)
+  pagesTotal: number;      // Total pages in the source document (0 if unknown)
+}
+
 // Two clear modes
 export type IndexingMode = 'abstract' | 'full';
 
@@ -133,19 +144,36 @@ function splitChunkByCharLimit(chunk: Chunk, maxChars: number): Chunk[] {
  * This catches chunks that slip through the token-based limits due to
  * the variable token-to-character ratio in academic text.
  */
-function enforceCharLimit(chunks: Chunk[], maxChars: number, maxChunks: number): Chunk[] {
+/**
+ * Post-process chunks to enforce a hard character limit and report whether
+ * the maxChunks ceiling was hit while there was still content to add.
+ */
+function enforceCharLimitEx(
+  chunks: Chunk[],
+  maxChars: number,
+  maxChunks: number,
+): { chunks: Chunk[]; truncatedByCharLimit: boolean } {
   const result: Chunk[] = [];
+  let truncatedByCharLimit = false;
 
-  for (const chunk of chunks) {
-    if (result.length >= maxChunks) break;
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    if (result.length >= maxChunks) {
+      truncatedByCharLimit = true;
+      break;
+    }
 
     if (chunk.text.length <= maxChars) {
       result.push(chunk);
     } else {
       const subChunks = splitChunkByCharLimit(chunk, maxChars);
-      for (const sub of subChunks) {
-        if (result.length >= maxChunks) break;
-        result.push(sub);
+      for (let j = 0; j < subChunks.length; j++) {
+        if (result.length >= maxChunks) {
+          // We dropped at least one sub-chunk of this oversized chunk
+          truncatedByCharLimit = true;
+          break;
+        }
+        result.push(subChunks[j]);
       }
     }
   }
@@ -155,7 +183,7 @@ function enforceCharLimit(chunks: Chunk[], maxChars: number, maxChunks: number):
     result[i].index = i;
   }
 
-  return result;
+  return { chunks: result, truncatedByCharLimit };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -472,8 +500,23 @@ export function chunkDocument(
   mode: IndexingMode,
   options: ChunkOptions = {}
 ): Chunk[] {
+  return chunkDocumentEx(title, abstract, fulltext, mode, options).chunks;
+}
+
+/**
+ * Extended version of chunkDocument that also reports whether the chunk
+ * limit was hit (so the caller can warn the user about partial indexing).
+ */
+export function chunkDocumentEx(
+  title: string,
+  abstract: string | null,
+  fulltext: string | null,
+  mode: IndexingMode,
+  options: ChunkOptions = {}
+): ChunkResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const chunks: Chunk[] = [];
+  let wasTruncated = false;
   
   // Prepare title prefix (truncate if extremely long)
   const titlePrefix = title.length > 300 
@@ -503,7 +546,13 @@ export function chunkDocument(
   
   // For abstract mode, we're done
   if (mode === 'abstract') {
-    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
+    const enforced = enforceCharLimitEx(chunks, opts.maxChars, opts.maxChunks);
+    return {
+      chunks: enforced.chunks,
+      wasTruncated: wasTruncated || enforced.truncatedByCharLimit,
+      pagesIndexed: 0,
+      pagesTotal: 0,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -511,7 +560,13 @@ export function chunkDocument(
   // ═══════════════════════════════════════════════════════════════════════
   if (!fulltext || fulltext.length < 500) {
     // No meaningful fulltext available
-    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
+    const enforced = enforceCharLimitEx(chunks, opts.maxChars, opts.maxChunks);
+    return {
+      chunks: enforced.chunks,
+      wasTruncated: wasTruncated || enforced.truncatedByCharLimit,
+      pagesIndexed: 0,
+      pagesTotal: opts.totalPages || 0,
+    };
   }
 
   // Create page estimation context for calibrated page numbers
@@ -541,10 +596,14 @@ export function chunkDocument(
         runningParagraphIdx,
         pageContext  // Pass calibrated page estimation context
       );
-      for (const chunk of methodChunks) {
-        if (chunks.length >= opts.maxChunks) break;
+      for (let i = 0; i < methodChunks.length; i++) {
+        if (chunks.length >= opts.maxChunks) {
+          // There were still method chunks to add when we hit the limit
+          if (i < methodChunks.length) wasTruncated = true;
+          break;
+        }
         chunks.push({
-          ...chunk,
+          ...methodChunks[i],
           index: chunks.length,
         });
       }
@@ -566,10 +625,13 @@ export function chunkDocument(
         runningParagraphIdx,
         pageContext  // Pass calibrated page estimation context
       );
-      for (const chunk of findingsChunks) {
-        if (chunks.length >= opts.maxChunks) break;
+      for (let i = 0; i < findingsChunks.length; i++) {
+        if (chunks.length >= opts.maxChunks) {
+          if (i < findingsChunks.length) wasTruncated = true;
+          break;
+        }
         chunks.push({
-          ...chunk,
+          ...findingsChunks[i],
           index: chunks.length,
         });
       }
@@ -587,17 +649,33 @@ export function chunkDocument(
       0,  // Start paragraph index at 0
       pageContext  // Pass calibrated page estimation context
     );
-    for (const chunk of contentChunks) {
-      if (chunks.length >= opts.maxChunks) break;
+    for (let i = 0; i < contentChunks.length; i++) {
+      if (chunks.length >= opts.maxChunks) {
+        if (i < contentChunks.length) wasTruncated = true;
+        break;
+      }
       chunks.push({
-        ...chunk,
+        ...contentChunks[i],
         index: chunks.length,
       });
     }
   }
-  
+
   // Enforce character limit as safety net (token estimates can undercount for dense text)
-  return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
+  const enforced = enforceCharLimitEx(chunks, opts.maxChars, opts.maxChunks);
+
+  // pagesIndexed: count distinct pages reflected in surviving chunks
+  const distinctPages = new Set<number>();
+  for (const c of enforced.chunks) {
+    if (c.pageNumber != null) distinctPages.add(c.pageNumber);
+  }
+
+  return {
+    chunks: enforced.chunks,
+    wasTruncated: wasTruncated || enforced.truncatedByCharLimit,
+    pagesIndexed: distinctPages.size,
+    pagesTotal: opts.totalPages || 0,
+  };
 }
 
 /**
@@ -761,8 +839,24 @@ export function chunkDocumentWithPages(
   mode: IndexingMode,
   options: ChunkOptions = {}
 ): Chunk[] {
+  return chunkDocumentWithPagesEx(title, abstract, pages, mode, options).chunks;
+}
+
+/**
+ * Extended version of chunkDocumentWithPages that also reports whether the
+ * chunk limit was hit (so the caller can warn the user about partial indexing).
+ */
+export function chunkDocumentWithPagesEx(
+  title: string,
+  abstract: string | null,
+  pages: PageText[] | null,
+  mode: IndexingMode,
+  options: ChunkOptions = {}
+): ChunkResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const chunks: Chunk[] = [];
+  let wasTruncated = false;
+  const totalPagesAvailable = pages ? pages.length : 0;
 
   // Prepare title prefix (shorter for paragraph chunks)
   const titlePrefix = title.length > 200
@@ -789,7 +883,13 @@ export function chunkDocumentWithPages(
 
   // For abstract mode, we're done
   if (mode === 'abstract') {
-    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
+    const enforced = enforceCharLimitEx(chunks, opts.maxChars, opts.maxChunks);
+    return {
+      chunks: enforced.chunks,
+      wasTruncated: wasTruncated || enforced.truncatedByCharLimit,
+      pagesIndexed: 0,
+      pagesTotal: 0,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -797,7 +897,13 @@ export function chunkDocumentWithPages(
   // Each meaningful paragraph gets its own embedding for precise retrieval
   // ═══════════════════════════════════════════════════════════════════════
   if (!pages || pages.length === 0) {
-    return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
+    const enforced = enforceCharLimitEx(chunks, opts.maxChars, opts.maxChunks);
+    return {
+      chunks: enforced.chunks,
+      wasTruncated: wasTruncated || enforced.truncatedByCharLimit,
+      pagesIndexed: 0,
+      pagesTotal: totalPagesAvailable,
+    };
   }
 
   // Minimum text to be indexed (lowered to capture more content)
@@ -846,7 +952,10 @@ export function chunkDocumentWithPages(
 
   // Process each page and extract paragraphs using robust extraction
   for (const page of pages) {
-    if (chunks.length >= opts.maxChunks) break;
+    if (chunks.length >= opts.maxChunks) {
+      wasTruncated = true;
+      break;
+    }
     if (inReferencesSection) break; // Stop processing if we've hit references
 
     // Skip pages with very little text
@@ -857,7 +966,10 @@ export function chunkDocumentWithPages(
 
     let paragraphIdx = 0;
     for (const para of paragraphs) {
-      if (chunks.length >= opts.maxChunks) break;
+      if (chunks.length >= opts.maxChunks) {
+        wasTruncated = true;
+        break;
+      }
 
       // Check if we've hit the references section
       if (!inReferencesSection && isReferencesHeader(para)) {
@@ -904,7 +1016,10 @@ export function chunkDocumentWithPages(
 
           if (currentTokens + sentTokens > availableTokens && currentText.trim()) {
             // Flush current chunk
-            if (chunks.length >= opts.maxChunks) break;
+            if (chunks.length >= opts.maxChunks) {
+              wasTruncated = true;
+              break;
+            }
             const sectionType = classifySection(currentText);
             chunks.push({
               index: chunks.length,
@@ -923,16 +1038,21 @@ export function chunkDocumentWithPages(
         }
 
         // Flush remaining text
-        if (currentText.trim() && chunks.length < opts.maxChunks) {
-          const sectionType = classifySection(currentText);
-          chunks.push({
-            index: chunks.length,
-            text: `${titlePrefix}\n\n${currentText.trim()}`,
-            type: sectionType,
-            tokenCount: currentTokens + titleTokens,
-            pageNumber: page.pageNumber,
-            paragraphIndex: paragraphIdx,
-          });
+        if (currentText.trim()) {
+          if (chunks.length < opts.maxChunks) {
+            const sectionType = classifySection(currentText);
+            chunks.push({
+              index: chunks.length,
+              text: `${titlePrefix}\n\n${currentText.trim()}`,
+              type: sectionType,
+              tokenCount: currentTokens + titleTokens,
+              pageNumber: page.pageNumber,
+              paragraphIndex: paragraphIdx,
+            });
+          } else {
+            // Had content to flush but no room - this is truncation
+            wasTruncated = true;
+          }
         }
       } else {
         // Normal-sized paragraph: one chunk
@@ -952,5 +1072,18 @@ export function chunkDocumentWithPages(
   }
 
   // Enforce character limit as safety net (token estimates can undercount for dense text)
-  return enforceCharLimit(chunks, opts.maxChars, opts.maxChunks);
+  const enforced = enforceCharLimitEx(chunks, opts.maxChars, opts.maxChunks);
+
+  // pagesIndexed: count distinct pages reflected in surviving chunks (excluding summary on p.1)
+  const distinctPages = new Set<number>();
+  for (const c of enforced.chunks) {
+    if (c.type !== 'summary' && c.pageNumber != null) distinctPages.add(c.pageNumber);
+  }
+
+  return {
+    chunks: enforced.chunks,
+    wasTruncated: wasTruncated || enforced.truncatedByCharLimit,
+    pagesIndexed: distinctPages.size,
+    pagesTotal: totalPagesAvailable,
+  };
 }

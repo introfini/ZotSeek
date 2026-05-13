@@ -9,10 +9,10 @@
  * - Uses separate database file (zotseek.sqlite) attached to Zotero's connection
  */
 
-import { VectorStoreSQLite, vectorStoreSQLite } from './vector-store-sqlite';
+import { vectorStoreSQLite } from './vector-store-sqlite';
 
 // Re-export types from SQLite store
-export type { PaperEmbedding, VectorStoreStats } from './vector-store-sqlite';
+export type { PaperEmbedding, VectorStoreStats, ItemIndexStatus } from './vector-store-sqlite';
 
 /**
  * Storage interface that the SQLite backend implements
@@ -27,6 +27,7 @@ export interface IVectorStore {
   getAll(): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
   getByLibrary(libraryId: number): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
   getUniqueItemIds(): Promise<number[]>;
+  getIndexStatusMap(itemIds: number[]): Promise<Map<number, import('./vector-store-sqlite').ItemIndexStatus>>;
   isIndexed(itemId: number): Promise<boolean>;
   needsReindex(itemId: number, contentHash: string): Promise<boolean>;
   delete(itemId: number): Promise<void>;

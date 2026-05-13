@@ -25,6 +25,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 🔄 **Auto-Index** - Automatically index new papers when you add them to your library
 - 🗑️ **Auto-Cleanup** - Embeddings automatically removed when items are deleted or trashed
 - 🚫 **Tag-Based Exclusion** - Tag items with `zotseek-exclude` to skip them during indexing
+- 📊 **Indexing Status Column** - "ZotSeek" column in the item list shows whether each paper is fully indexed, partially indexed (chunk limit hit), out of date, excluded, or not indexed
 - ⏸️ **Pause & Cancel** - Pause or cancel long-running indexing operations at any time
 - 💾 **Crash-Resilient** - Checkpoint saving every 25 items, resume after interruption, skips problematic chunks automatically
 - 🔌 **Plugin API** - Other Zotero plugins can [call ZotSeek's search programmatically](docs/API.md)
@@ -265,6 +266,20 @@ The `maxTokens` setting controls how text is split for embedding. It's a **ceili
 - Broad topic discovery: try 2000-3000
 
 For detailed chunking documentation, see [docs/SEARCH_ARCHITECTURE.md](docs/SEARCH_ARCHITECTURE.md#chunking-strategy).
+
+### Indexing Status Column
+
+ZotSeek adds a "ZotSeek" column to the Zotero item list so you can see at a glance how each paper has been indexed. The first time you install this version the column appears automatically; you can hide or reorder it from the column-header menu like any other Zotero column.
+
+| Glyph | Meaning |
+|-------|---------|
+| `✓` | Fully indexed |
+| `◐` | Partial — the paper hit the *Max Chunks per Paper* limit and only part of its content is in the index. Raise the limit or switch to Abstract mode to capture the full text. |
+| `↻` | Out of date — the item was modified after it was indexed. Re-index to refresh. |
+| `⊘` | Excluded — the item carries the `zotseek-exclude` tag. |
+| *(empty)* | Not indexed. |
+
+After indexing, a one-line summary in the progress window also warns when any paper hit the chunk limit, and the same warning is written to the debug log per affected paper.
 
 ---
 

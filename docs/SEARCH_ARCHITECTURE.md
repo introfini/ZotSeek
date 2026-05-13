@@ -19,6 +19,7 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
    - [Trade-offs: Chunk Size Selection](#trade-offs-chunk-size-selection)
    - [Version-Aware Defaults](#version-aware-defaults)
    - [Paragraph-Based Chunking](#paragraph-based-chunking)
+   - [Truncation Detection (Max Chunks per Paper)](#truncation-detection-max-chunks-per-paper)
    - [Token Estimation](#token-estimation)
    - [Chunk Overlap](#chunk-overlap)
 7. [Section-Aware Chunking](#section-aware-chunking)
@@ -557,6 +558,23 @@ Paragraph 4: 900 tokens  ─┐
 ```
 
 A chunk might be 400 tokens if that's where the paragraph ends naturally. Paragraphs larger than `maxTokens` are split at sentence boundaries into multiple chunks, preserving all content with correct page location data.
+
+### Truncation Detection (Max Chunks per Paper)
+
+Long papers can exceed `maxChunksPerPaper` (default 100). When that happens the chunker stops adding chunks at the ceiling — silently, in versions before this. The chunker now reports a `wasTruncated` flag alongside `pagesIndexed`/`pagesTotal`:
+
+```
+chunkDocumentWithPagesEx(...) → {
+  chunks:        [...],
+  wasTruncated:  true,
+  pagesIndexed:  18,
+  pagesTotal:    52,
+}
+```
+
+These three values are stored on the `items` table (schema v7 — `was_truncated`, `pages_indexed`, `pages_total`) so the index-status column and the indexing progress window can surface partial coverage to the user. See [README §Indexing Status Column](../README.md#indexing-status-column) for the user-facing glyphs.
+
+To capture the full content of long papers, raise *Max Chunks per Paper* in **Settings → ZotSeek** or switch the affected papers to Abstract mode (tag them with `zotseek-exclude` if you want only the abstract).
 
 ### Token Estimation
 

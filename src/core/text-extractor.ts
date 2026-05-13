@@ -12,9 +12,8 @@ import {
   Chunk,
   ChunkOptions,
   IndexingMode,
-  chunkDocument,
-  chunkDocumentWithPages,
-  PageText,
+  chunkDocumentEx,
+  chunkDocumentWithPagesEx,
   getChunkOptionsFromPrefs,
   getIndexingMode
 } from '../utils/chunker';
@@ -40,6 +39,12 @@ export interface ExtractedChunks {
   abstract: string | null;
   chunks: Chunk[];
   contentHash: string;
+
+  // Indexing status — populated from the chunker so callers can detect
+  // when the maxChunksPerPaper limit cut off content from a long paper.
+  wasTruncated: boolean;
+  pagesIndexed: number;
+  pagesTotal: number;
 }
 
 export interface ExtractionProgress {
@@ -112,6 +117,9 @@ export class TextExtractor {
       const chunkOptions = options ?? getChunkOptionsFromPrefs(Zotero);
 
       let chunks: Chunk[];
+      let wasTruncated = false;
+      let pagesIndexed = 0;
+      let pagesTotal = 0;
 
       if (indexingMode === 'full') {
         // Use page-by-page extraction for accurate page numbers
@@ -121,9 +129,13 @@ export class TextExtractor {
           // Use new page-aware chunker for accurate page numbers
           this.logger.debug(`Using page-by-page chunking for item ${item.id} (${pages.length} pages)`);
           try {
-            chunks = chunkDocumentWithPages(title, abstract, pages, indexingMode, chunkOptions);
+            const result = chunkDocumentWithPagesEx(title, abstract, pages, indexingMode, chunkOptions);
+            chunks = result.chunks;
+            wasTruncated = result.wasTruncated;
+            pagesIndexed = result.pagesIndexed;
+            pagesTotal = result.pagesTotal;
           } catch (chunkError: any) {
-            console.error(`[TextExtractor] chunkDocumentWithPages failed for item ${item.id}:`,
+            console.error(`[TextExtractor] chunkDocumentWithPagesEx failed for item ${item.id}:`,
               chunkError?.message || chunkError?.toString() || chunkError);
             console.error(`[TextExtractor] Stack:`, chunkError?.stack);
             throw chunkError;
@@ -136,11 +148,19 @@ export class TextExtractor {
           if (totalPages) {
             chunkOptions.totalPages = totalPages;
           }
-          chunks = chunkDocument(title, abstract, fulltext, indexingMode, chunkOptions);
+          const result = chunkDocumentEx(title, abstract, fulltext, indexingMode, chunkOptions);
+          chunks = result.chunks;
+          wasTruncated = result.wasTruncated;
+          pagesIndexed = result.pagesIndexed;
+          pagesTotal = result.pagesTotal || (totalPages || 0);
         }
       } else {
         // Abstract mode - no fulltext needed
-        chunks = chunkDocument(title, abstract, null, indexingMode, chunkOptions);
+        const result = chunkDocumentEx(title, abstract, null, indexingMode, chunkOptions);
+        chunks = result.chunks;
+        wasTruncated = result.wasTruncated;
+        pagesIndexed = result.pagesIndexed;
+        pagesTotal = result.pagesTotal;
       }
 
       if (chunks.length === 0) {
@@ -172,6 +192,9 @@ export class TextExtractor {
         abstract,
         chunks,
         contentHash,
+        wasTruncated,
+        pagesIndexed,
+        pagesTotal,
       };
     } catch (error: any) {
       // Better error logging - Error objects don't serialize well
