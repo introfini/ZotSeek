@@ -12,6 +12,7 @@
  */
 
 import { Logger } from '../utils/logger';
+import { identityFromItem } from './identity-resolver';
 
 declare const Zotero: any;
 
@@ -286,7 +287,7 @@ export class AutoIndexManager {
   /**
    * Check if item is already indexed
    */
-  private async isAlreadyIndexed(itemId: number): Promise<boolean> {
+  private async isAlreadyIndexedItem(item: any): Promise<boolean> {
     if (!this.vectorStore) {
       return false;
     }
@@ -297,8 +298,11 @@ export class AutoIndexManager {
     }
 
     try {
-      return await this.vectorStore.isIndexed(itemId);
-    } catch {
+      const identity = identityFromItem(item);
+      if (!identity) return false;
+      return await this.vectorStore.isIndexedByIdentity(identity.libraryKey, identity.itemKey);
+    } catch (e: any) {
+      this.logger.error(`isAlreadyIndexedItem(${item?.id}): ${e?.message || e}`);
       return false;
     }
   }
@@ -315,7 +319,7 @@ export class AutoIndexManager {
     }
 
     // Already indexed
-    if (await this.isAlreadyIndexed(itemId)) {
+    if (await this.isAlreadyIndexedItem(item)) {
       this.clearWaitingState(itemId);
       return;
     }
