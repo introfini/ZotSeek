@@ -45,8 +45,9 @@ export function libraryKeyFromLocalID(libraryID: number): string | null {
     }
     // 'feed' libraries and any future types are ignored
     return null;
-  } catch (e) {
-    logger.error(`libraryKeyFromLocalID(${libraryID}): ${e}`);
+  } catch (e: any) {
+    logger.error(`libraryKeyFromLocalID(${libraryID}): ${e?.message || e}`);
+    if (e?.stack) Zotero.debug(e.stack);
     return null;
   }
 }
@@ -68,8 +69,9 @@ export function localLibraryIDFromKey(libraryKey: string): number | null {
       return group ? group.libraryID : null;
     }
     return null;
-  } catch (e) {
-    logger.error(`localLibraryIDFromKey(${libraryKey}): ${e}`);
+  } catch (e: any) {
+    logger.error(`localLibraryIDFromKey(${libraryKey}): ${e?.message || e}`);
+    if (e?.stack) Zotero.debug(e.stack);
     return null;
   }
 }
@@ -80,6 +82,7 @@ export function localLibraryIDFromKey(libraryKey: string): number | null {
  */
 export function identityFromItem(item: any): StableIdentity | null {
   if (!item) return null;
+  if (item.libraryID == null) return null;
   const libraryKey = libraryKeyFromLocalID(item.libraryID);
   if (!libraryKey) return null;
   if (!item.key) return null;
@@ -97,8 +100,9 @@ export function localItemIDFromIdentity(identity: StableIdentity): number | null
   try {
     const id = Zotero.Items.getIDFromLibraryAndKey(libraryID, identity.itemKey);
     return id || null;
-  } catch (e) {
-    logger.error(`localItemIDFromIdentity(${identity.libraryKey}, ${identity.itemKey}): ${e}`);
+  } catch (e: any) {
+    logger.error(`localItemIDFromIdentity(${identity.libraryKey}, ${identity.itemKey}): ${e?.message || e}`);
+    if (e?.stack) Zotero.debug(e.stack);
     return null;
   }
 }
@@ -129,25 +133,31 @@ export function findIdentityByItemKey(
 ): StableIdentity | null {
   if (!itemKey) return null;
 
-  const libs: any[] = Zotero.Libraries.getAll();
-  // Order: hinted library first, then user, then groups.
-  const ordered = [...libs].sort((a, b) => {
-    if (preferLibraryID !== undefined) {
-      if (a.libraryID === preferLibraryID) return -1;
-      if (b.libraryID === preferLibraryID) return 1;
-    }
-    if (a.libraryType === 'user' && b.libraryType !== 'user') return -1;
-    if (b.libraryType === 'user' && a.libraryType !== 'user') return 1;
-    return 0;
-  });
+  try {
+    const libs: any[] = Zotero.Libraries.getAll();
+    // Order: hinted library first, then user, then groups.
+    const ordered = [...libs].sort((a, b) => {
+      if (preferLibraryID !== undefined) {
+        if (a.libraryID === preferLibraryID) return -1;
+        if (b.libraryID === preferLibraryID) return 1;
+      }
+      if (a.libraryType === 'user' && b.libraryType !== 'user') return -1;
+      if (b.libraryType === 'user' && a.libraryType !== 'user') return 1;
+      return 0;
+    });
 
-  for (const lib of ordered) {
-    if (lib.libraryType !== 'user' && lib.libraryType !== 'group') continue;
-    const id = Zotero.Items.getIDFromLibraryAndKey(lib.libraryID, itemKey);
-    if (id) {
-      const libraryKey = libraryKeyFromLocalID(lib.libraryID);
-      if (libraryKey) return { libraryKey, itemKey };
+    for (const lib of ordered) {
+      if (lib.libraryType !== 'user' && lib.libraryType !== 'group') continue;
+      const id = Zotero.Items.getIDFromLibraryAndKey(lib.libraryID, itemKey);
+      if (id) {
+        const libraryKey = libraryKeyFromLocalID(lib.libraryID);
+        if (libraryKey) return { libraryKey, itemKey };
+      }
     }
+    return null;
+  } catch (e: any) {
+    logger.error(`findIdentityByItemKey(${itemKey}): ${e?.message || e}`);
+    if (e?.stack) Zotero.debug(e.stack);
+    return null;
   }
-  return null;
 }
