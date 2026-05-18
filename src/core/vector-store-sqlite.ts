@@ -894,6 +894,54 @@ export class VectorStoreSQLite {
 
     this.logger.info(`migrateToV8: ${matchedCount} matched, ${orphanCount} orphans`);
 
+    // === 2b. Deduplicate by (library_key, item_key) ===
+    // v6/v7 items had `item_id INTEGER PRIMARY KEY` and NO uniqueness on
+    // item_key. Two rows can share the same item_key when an item was deleted
+    // and re-added locally (Zotero regenerates item_id but keeps the synced
+    // item_key) or after a local DB restore. v8's UNIQUE(library_key, item_key)
+    // would reject the second INSERT and roll back the whole transaction.
+    //
+    // Strategy: pick one canonical row per (library_key, item_key) — the one
+    // with the most recent indexed_at (tiebreaker: largest item_id). Map the
+    // other old item_ids to the canonical's new item_pk so their chunks still
+    // get re-homed, but only the canonical row is inserted into items.
+    type CanonicalRow = ResolvedRow & { duplicateOldIds: number[] };
+    const dedupKey = (r: ResolvedRow) =>
+      `${r.library_key || 'orphan'}|${r.item_key}`;
+    const groups = new Map<string, ResolvedRow[]>();
+    for (const r of resolved) {
+      const k = dedupKey(r);
+      const arr = groups.get(k);
+      if (arr) arr.push(r);
+      else groups.set(k, [r]);
+    }
+
+    const canonicals: CanonicalRow[] = [];
+    let duplicateCount = 0;
+    for (const [, rows] of groups) {
+      if (rows.length === 1) {
+        canonicals.push({ ...rows[0], duplicateOldIds: [] });
+        continue;
+      }
+      // Pick canonical: newest indexed_at first, then largest item_id.
+      rows.sort((a, b) => {
+        const ta = a.indexed_at || '';
+        const tb = b.indexed_at || '';
+        if (tb !== ta) return tb < ta ? -1 : 1;
+        return b.item_id - a.item_id;
+      });
+      const [head, ...rest] = rows;
+      duplicateCount += rest.length;
+      canonicals.push({ ...head, duplicateOldIds: rest.map(r => r.item_id) });
+    }
+
+    if (duplicateCount > 0) {
+      this.logger.warn(
+        `migrateToV8: collapsed ${duplicateCount} duplicate items ` +
+        `into ${canonicals.length} unique (library_key, item_key) rows`
+      );
+    }
+
     // === 3. Build the new tables inside a transaction ===
     try {
       await Zotero.DB.executeTransaction(async () => {
@@ -946,19 +994,18 @@ export class VectorStoreSQLite {
           )
         `);
 
-        // === 4. Copy data using the resolution map ===
-        // We insert items in old item_id order so the mapping old_item_id -> new item_pk
-        // can be reconstructed if needed. Since SQLite assigns AUTOINCREMENT
-        // values sequentially in insert order, we capture each new item_pk
-        // via last_insert_rowid().
+        // === 4. Copy data using the deduplicated canonical list ===
+        // Insert one row per (library_key, item_key) group. Any duplicate
+        // old item_ids are remapped to the canonical row's new item_pk so
+        // their chunks survive (with canonical winning on chunk_index ties).
 
         const oldIdToNewPk = new Map<number, number>();
+        const canonicalOldIds = new Set<number>();
         const nowIso = new Date().toISOString();
 
-        for (const r of resolved) {
+        for (const r of canonicals) {
           const libraryKey = r.library_key || 'orphan';
 
-          // INSERT into items (active) or orphan_items (unresolved)
           if (r.resolved) {
             await Zotero.DB.queryAsync(`
               INSERT INTO ${DB_NAME}.items
@@ -969,8 +1016,6 @@ export class VectorStoreSQLite {
               libraryKey, r.item_key, r.title, r.abstract, r.model_id, r.indexed_at,
               r.content_hash, r.was_truncated, r.pages_indexed, r.pages_total
             ]);
-            const newPk = await Zotero.DB.valueQueryAsync('SELECT last_insert_rowid()');
-            oldIdToNewPk.set(r.item_id, Number(newPk));
           } else {
             // Orphan path: still insert into items so chunks can point at it,
             // but with a placeholder library_key. We also log to orphan_items
@@ -984,28 +1029,42 @@ export class VectorStoreSQLite {
               'orphan', r.item_key, r.title, r.abstract, r.model_id, r.indexed_at,
               r.content_hash, r.was_truncated, r.pages_indexed, r.pages_total
             ]);
-            const newPk = await Zotero.DB.valueQueryAsync('SELECT last_insert_rowid()');
-            oldIdToNewPk.set(r.item_id, Number(newPk));
+          }
+          const newPk = Number(await Zotero.DB.valueQueryAsync('SELECT last_insert_rowid()'));
+          oldIdToNewPk.set(r.item_id, newPk);
+          canonicalOldIds.add(r.item_id);
+          for (const dupOldId of r.duplicateOldIds) {
+            oldIdToNewPk.set(dupOldId, newPk);
+          }
+
+          if (!r.resolved) {
             await Zotero.DB.queryAsync(`
               INSERT INTO ${DB_NAME}.orphan_items
                 (item_pk, library_key, item_key, detected_at, reason)
               VALUES (?, ?, ?, ?, ?)
-            `, [Number(newPk), 'orphan', r.item_key, nowIso, 'item_key not found in any current Zotero library']);
+            `, [newPk, 'orphan', r.item_key, nowIso, 'item_key not found in any current Zotero library']);
           }
         }
 
         // === 5. Copy chunks, remapping item_id -> item_pk ===
-        // We do this in bulk via INSERT ... SELECT joining a temp mapping table.
+        // Two-pass copy so the canonical row's chunks win on chunk_index
+        // collisions with chunks from collapsed duplicates.
         await Zotero.DB.queryAsync(`
-          CREATE TEMPORARY TABLE _id_map (old_id INTEGER PRIMARY KEY, new_pk INTEGER NOT NULL)
+          CREATE TEMPORARY TABLE _id_map (
+            old_id INTEGER PRIMARY KEY,
+            new_pk INTEGER NOT NULL,
+            is_canonical INTEGER NOT NULL
+          )
         `);
         for (const [oldId, newPk] of oldIdToNewPk.entries()) {
           await Zotero.DB.queryAsync(
-            `INSERT INTO _id_map (old_id, new_pk) VALUES (?, ?)`,
-            [oldId, newPk]
+            `INSERT INTO _id_map (old_id, new_pk, is_canonical) VALUES (?, ?, ?)`,
+            [oldId, newPk, canonicalOldIds.has(oldId) ? 1 : 0]
           );
         }
 
+        // Pass 1: canonical chunks (no possible (item_pk, chunk_index) conflict
+        // because every canonical maps to a unique new_pk).
         await Zotero.DB.queryAsync(`
           INSERT INTO ${DB_NAME}.chunks
             (item_pk, chunk_index, chunk_text, text_source, embedding,
@@ -1014,6 +1073,20 @@ export class VectorStoreSQLite {
                  c.page_number, c.paragraph_index, c.start_char, c.end_char, c.bbox
           FROM ${DB_NAME}.chunks_v7_old c
           INNER JOIN _id_map m ON m.old_id = c.item_id
+          WHERE m.is_canonical = 1
+        `);
+
+        // Pass 2: duplicate chunks fill in any chunk_index slots the canonical
+        // didn't cover. OR IGNORE keeps the canonical's row on conflict.
+        await Zotero.DB.queryAsync(`
+          INSERT OR IGNORE INTO ${DB_NAME}.chunks
+            (item_pk, chunk_index, chunk_text, text_source, embedding,
+             page_number, paragraph_index, start_char, end_char, bbox)
+          SELECT m.new_pk, c.chunk_index, c.chunk_text, c.text_source, c.embedding,
+                 c.page_number, c.paragraph_index, c.start_char, c.end_char, c.bbox
+          FROM ${DB_NAME}.chunks_v7_old c
+          INNER JOIN _id_map m ON m.old_id = c.item_id
+          WHERE m.is_canonical = 0
         `);
 
         await Zotero.DB.queryAsync('DROP TABLE _id_map');

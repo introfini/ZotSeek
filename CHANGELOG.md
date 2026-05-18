@@ -2,6 +2,17 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.14.1] - 2026-05-18
+
+### Fixed
+- **v8 migration aborts on libraries with duplicate `item_key` rows** (#33) — Upgrading from 1.13.1 → 1.14.0 could fail with `UNIQUE constraint failed: items.library_key, items.item_key`, leaving the database stuck in a rollback loop: the UI showed 0 indexed papers, storage size errored, and every indexing attempt died with `SQLite init failed`. The v6/v7 schema allowed two rows in `items` with the same `item_key` (e.g. when a Zotero item had been deleted and re-added locally), but v8's `UNIQUE(library_key, item_key)` rejected the second INSERT. The migration now deduplicates rows by `(library_key, item_key)` before insertion: it keeps the canonical row (newest `indexed_at`) and remaps the collapsed duplicates' chunks to the canonical `item_pk`. No data is lost — chunks from collapsed duplicates are merged in on `chunk_index` slots the canonical didn't cover.
+
+### Technical
+- `migrateToV8` (`src/core/vector-store-sqlite.ts`) groups resolved rows by `(library_key, item_key)` before inserting into the new `items` table. Each group elects a canonical via `indexed_at DESC, item_id DESC`; non-canonical `item_id`s are still added to `_id_map` so their chunks survive. Chunk copy is split into two passes — canonical first (plain INSERT, no possible conflict), then non-canonical with `INSERT OR IGNORE` so the canonical's chunk always wins on `(item_pk, chunk_index)` collisions.
+- Affected users with a stuck install can restore `zotseek.sqlite.v7.bak` (written automatically before the migration started) over `zotseek.sqlite` and re-upgrade.
+
+---
+
 ## [1.14.0] - 2026-05-13
 
 ### Added
