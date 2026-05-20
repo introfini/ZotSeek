@@ -2,6 +2,18 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.14.2] - 2026-05-19
+
+### Changed
+- **Compact Database button now shows reclaimable space** (#33 follow-up) — the button label in Preferences > Database Stats updates dynamically to "Compact Database (reclaim 754 MB)" when SQLite is holding onto significant free pages, so it's obvious when compaction is worth running. After the v8 migration finished, SQLite kept the dropped v7 tables' space as internal free pages, causing the `zotseek.sqlite` file to roughly double in size on disk despite holding the same data. The Compact action (which uses `VACUUM INTO` to rewrite a fresh file) reclaims that space, but until now there was no visual cue that there was anything to reclaim. The hint hides below ~10 MB so it doesn't nag for trivial gains.
+
+### Technical
+- New `VectorStoreSQLite.getReclaimableBytes()` reads `PRAGMA zotseek.freelist_count * PRAGMA zotseek.page_size` — both O(1) header reads, no scanning.
+- Exposed on `Zotero.ZotSeek.api.getReclaimableBytes` so preferences can poll it.
+- `PreferencesManager.loadCompactionInfo()` runs on pane init alongside `loadHealthStats()`, formats the value (MB up to 1024, GB above), and overrides the button's Fluent label. After a successful compaction the info reloads so the hint disappears.
+
+---
+
 ## [1.14.1] - 2026-05-18
 
 ### Fixed

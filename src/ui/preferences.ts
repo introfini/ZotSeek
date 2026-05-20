@@ -45,6 +45,9 @@ class PreferencesManager {
       // Auto-load database health stats (orphan count)
       await this.loadHealthStats();
 
+      // Auto-load reclaimable space info for the Compact Database button
+      await this.loadCompactionInfo();
+
       this.logger.info('Preference pane initialized successfully');
     } catch (error) {
       this.logger.error(`Failed to initialize preferences: ${error}`);
@@ -497,14 +500,58 @@ class PreferencesManager {
       pw.addDescription(result);
       pw.show();
       pw.startCloseTimer(4000);
-      // Refresh stats to show new size
+      // Refresh stats to show new size and clear the "reclaim X MB" hint
       await this.loadStatsAndCheckMismatch();
+      await this.loadCompactionInfo();
     } catch (e: any) {
       const pw = new Z.ProgressWindow({ closeOnClick: true });
       pw.changeHeadline(getString('pref-compactionFailed'));
       pw.addDescription(e?.message || String(e));
       pw.show();
       pw.startCloseTimer(4000);
+    }
+  }
+
+  /**
+   * Update the Compact Database button label with the current reclaimable
+   * space, so users can see when compaction is worthwhile without clicking.
+   * SQLite leaves freed pages inside the file after DROP/DELETE — those
+   * pages accumulate after migrations and orphan purges, then go away on
+   * VACUUM.
+   */
+  async loadCompactionInfo(): Promise<void> {
+    if (!this.window) return;
+    const Z = (this.window as any).Zotero;
+    const btn = this.window.document.getElementById('zotseek-compact-db') as any;
+    if (!btn) return;
+    const baseLabel = 'Compact Database';
+
+    if (!Z?.ZotSeek?.getReclaimableBytes) {
+      btn.setAttribute('label', baseLabel);
+      return;
+    }
+
+    try {
+      const bytes = Number(await Z.ZotSeek.getReclaimableBytes()) || 0;
+      // Below ~10 MB: keep the plain label; the cost of running VACUUM isn't
+      // worth a single-digit-MB win, and the noisy "reclaim 2 MB" hint just
+      // trains people to ignore it.
+      if (bytes < 10 * 1024 * 1024) {
+        btn.setAttribute('label', baseLabel);
+        btn.removeAttribute('data-l10n-id');
+        return;
+      }
+      const mb = bytes / (1024 * 1024);
+      const display = mb >= 1024
+        ? `${(mb / 1024).toFixed(1)} GB`
+        : `${mb.toFixed(0)} MB`;
+      btn.setAttribute('label', `${baseLabel} (reclaim ${display})`);
+      // Override Fluent so our dynamic label isn't replaced at next pass.
+      btn.removeAttribute('data-l10n-id');
+      this.logger.debug(`Reclaimable space: ${display}`);
+    } catch (e: any) {
+      this.logger.warn(`loadCompactionInfo failed: ${e?.message || e}`);
+      btn.setAttribute('label', baseLabel);
     }
   }
 

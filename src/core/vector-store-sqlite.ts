@@ -2681,6 +2681,23 @@ export class VectorStoreSQLite {
   getDatabasePath(): string {
     return this.getDbPath();
   }
+
+  /**
+   * Bytes that would be reclaimed by VACUUM. Reads the SQLite freelist
+   * (pages marked free by DROP/DELETE that the file still holds onto until
+   * VACUUM rewrites the database).
+   */
+  async getReclaimableBytes(): Promise<number> {
+    await this.ensureInit();
+    try {
+      const pageSize = await Zotero.DB.valueQueryAsync(`PRAGMA ${DB_NAME}.page_size`);
+      const freelistCount = await Zotero.DB.valueQueryAsync(`PRAGMA ${DB_NAME}.freelist_count`);
+      return Number(pageSize) * Number(freelistCount);
+    } catch (e: any) {
+      this.logger.warn(`getReclaimableBytes failed: ${e?.message || e}`);
+      return 0;
+    }
+  }
 }
 
 // Export singleton

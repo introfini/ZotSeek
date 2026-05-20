@@ -1783,6 +1783,7 @@ class ZotSeekPlugin {
     indexItems: (items: any[]) => this.indexItems(items),
     getStats: () => this.vectorStore?.getStats() ?? Promise.resolve({ totalPapers: 0, indexedPapers: 0, modelId: 'none', lastIndexed: null, storageUsedBytes: 0 }),
     compactDatabase: () => this.compactDatabase(),
+    getReclaimableBytes: () => (this.vectorStore as any)?.getReclaimableBytes?.() ?? Promise.resolve(0),
     isReady: () => this.initialized && embeddingPipeline.isReady(),
   };
 }
