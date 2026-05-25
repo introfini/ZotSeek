@@ -899,6 +899,32 @@ Maximum: 1.00 (100%)
 | `maxTokens` | `2000` | Max tokens per chunk |
 | `maxChunksPerPaper` | `100` | Max chunks per paper |
 
+### Chunk Size Trade-offs (Empirical Analysis)
+
+A retrieval evaluation comparing maxTokens=512 vs maxTokens=2000 was conducted using 486 citation-pair queries across 646 papers. Citation pairs (A cites B) served as ground truth: when searching with paper A's abstract, cited paper B should appear in the top results.
+
+**Quality results (no meaningful difference):**
+
+| Metric | 512 tokens | 2000 tokens | Delta |
+|--------|-----------|-------------|-------|
+| MRR | 0.2514 | 0.2550 | -0.4% |
+| Recall@10 | 0.3014 | 0.3095 | -0.8% |
+| NDCG@10 | 0.2177 | 0.2236 | -0.6% |
+
+**Indexing speed in Zotero (WASM, 50 papers):**
+
+| | 512 tokens | 2000 tokens |
+|--|-----------|-------------|
+| Chunks/paper | 99.0 | 93.9 |
+| Total time | 22.1 min | 23.9 min |
+| Per item | 26.5s | 28.7s |
+
+Both strategies produce similar chunk counts because most papers hit the `maxChunksPerPaper` ceiling. The per-chunk embedding time is lower for 512 tokens (~0.4s vs ~0.9s in WASM), but the higher chunk count negates the advantage.
+
+**Conclusion:** `maxTokens` has negligible impact on both quality and speed in practice. The effective bottleneck is `maxChunksPerPaper`, not chunk granularity.
+
+Full eval framework: `eval/` directory. Raw results: `eval/data/eval-results.json`.
+
 ---
 
 ## Summary
