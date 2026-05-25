@@ -258,6 +258,7 @@ async function generateEmbedding(jobId: string, text: string, isQuery: boolean =
     });
 
     const embedding = Array.from(output.data as Float32Array);  // 768 dimensions
+    if (typeof output.dispose === 'function') output.dispose();
     const processingTimeMs = Date.now() - startTime;
 
     postMessage({
