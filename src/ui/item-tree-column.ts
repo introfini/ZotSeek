@@ -55,6 +55,7 @@ export class ItemTreeIndexColumn {
   private pending = new Map<number, Promise<void>>();
   private registeredKey: string | null = null;
   private vectorStore: IVectorStore | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Register the column with Zotero's ItemTreeManager.
@@ -136,6 +137,10 @@ export class ItemTreeIndexColumn {
     this.registeredKey = null;
     this.cache.clear();
     this.pending.clear();
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
   }
 
   /**
@@ -225,14 +230,18 @@ export class ItemTreeIndexColumn {
     const placeholder = new Promise<void>((resolve) => {
       // Microtask defer — batches up everything Zotero asks for in this paint
       Promise.resolve().then(async () => {
+        let hydrated = false;
         try {
           // Drain all ids that ended up pending during the same microtask
           const ids = Array.from(this.pending.keys()).slice(0, BATCH_HYDRATE_SIZE);
-          await this.hydrateBatch(ids);
+          if (ids.length > 0) {
+            await this.hydrateBatch(ids);
+            hydrated = true;
+          }
         } finally {
           for (const id of this.pending.keys()) this.pending.delete(id);
           resolve();
-          this.refreshTree();
+          if (hydrated) this.refreshTree();
         }
       });
     });
@@ -308,20 +317,32 @@ export class ItemTreeIndexColumn {
 
   /**
    * Ask Zotero to repaint the item tree(s) so newly hydrated rows show
-   * the right value.
+   * the right value.  Debounced to avoid scroll-jumping when many calls
+   * arrive in quick succession (hydration batches, indexing checkpoints).
+   *
+   * Uses tree.invalidate() instead of refreshAndMaintainSelection() so
+   * scroll position is preserved — fixes #34.
    */
   private refreshTree(): void {
-    try {
-      const win = Zotero.getMainWindow();
-      const panes = win?.ZoteroPane;
-      // ZoteroPane.itemsView exists on Zotero 7/8 — refreshAndMaintainSelection()
-      // forces the tree to re-query cell text without losing selection state.
-      if (panes?.itemsView?.refreshAndMaintainSelection) {
-        panes.itemsView.refreshAndMaintainSelection();
+    if (this.refreshTimer) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      try {
+        const win = Zotero.getMainWindow();
+        const itemsView = win?.ZoteroPane?.itemsView;
+        const tree = itemsView?.tree;
+        if (tree && typeof tree.invalidate === 'function') {
+          // Clear Zotero's internal row cache so dataProvider is re-called
+          // for visible rows. Without this, invalidate() re-renders from
+          // stale cached cell text. This is the same pattern Zotero uses
+          // internally for preference-driven repaints.
+          if (itemsView._rowCache) itemsView._rowCache = {};
+          tree.invalidate();
+        }
+      } catch {
+        // Non-critical — the next user interaction will repaint anyway.
       }
-    } catch {
-      // Non-critical — the next user interaction will repaint anyway.
-    }
+    }, 500);
   }
 }
 
