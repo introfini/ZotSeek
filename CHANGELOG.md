@@ -12,6 +12,26 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 
 ---
 
+## [1.14.4] - 2026-05-26
+
+### Fixed
+- **Item list scroll jumps to the selected row during indexing** (#34) — While ZotSeek's column repainted (as items got indexed or the cache hydrated), the list would snap your scroll position back to the selected item, making it hard to browse a large library while indexing ran. The column now repaints in place without disturbing scroll position.
+
+### Technical
+- `src/ui/item-tree-column.ts` replaces `refreshAndMaintainSelection()` with `tree.invalidate()` for column repaints: the former rebuilt the whole tree and snapped scroll to the selection, the latter only re-renders visible rows in place. Repaints are debounced over a 500ms window to coalesce the rapid updates during indexing/hydration, Zotero's `_rowCache` is cleared before `invalidate()` so `dataProvider` is re-called for visible rows, empty hydration batches skip the refresh, and the debounce timer is cleaned up on shutdown.
+
+---
+
+## [1.14.3] - 2026-05-25
+
+### Fixed
+- **Zotero crashes when indexing large collections** — Indexing could exhaust memory and crash Zotero after only a handful of papers, especially with small chunk sizes (which produce many chunks per paper). Each embedding left an ONNX Runtime tensor allocated in the worker's WASM heap; at ~100 chunks/paper this accumulated hundreds of MB within 3-5 papers. Tensors are now released after each embedding, so indexing stays within a stable memory budget regardless of collection size.
+
+### Technical
+- `src/worker/embedding-worker.ts` calls `output.dispose()` after `Array.from(output.data)` extracts the embedding (guarded with a `typeof === 'function'` check for compatibility). Any Transformers.js pipeline tensor must be disposed after use, or the WASM heap leaks ~3KB per embedding until the worker crashes.
+
+---
+
 ## [1.14.2] - 2026-05-19
 
 ### Changed
