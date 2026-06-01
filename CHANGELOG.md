@@ -2,6 +2,16 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Indexing fails part-way through on large libraries with `no such table: zotseek.items`** (#35) — The `zotseek.sqlite` database is ATTACHed to Zotero's main SQLite connection, an attachment that lives only as long as that connection. On a long indexing run (e.g. ~5,900 items) Zotero can recycle its connection mid-run (sync, lock recovery, or a backup), silently dropping the attachment while ZotSeek's internal `attached`/`initialized` flags stay true. Every subsequent query then failed with `no such table: zotseek.items`, so indexing stalled and flooded the Error Console. ZotSeek now verifies the attachment is still live before each operation and transparently re-attaches (recreating the schema if needed) when Zotero has dropped it, so indexing survives connection recycling.
+
+### Technical
+- `VectorStoreSQLite.ensureInit()` (`src/core/vector-store-sqlite.ts`) now checks `PRAGMA database_list` for the `zotseek` schema and calls a new `reattachAfterConnectionLoss()` when it's missing. The check is skipped inside a Zotero transaction (ATTACH/DETACH is illegal there, and `ensureInit()` always runs before a transaction opens). New helpers: `isAttachmentLive()` and `reattachAfterConnectionLoss()`.
+
+---
+
 ## [1.14.2] - 2026-05-19
 
 ### Changed

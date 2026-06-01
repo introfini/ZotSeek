@@ -289,6 +289,41 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Whether the zotseek schema is still attached to Zotero's connection.
+   *
+   * The ATTACH is bound to Zotero's underlying SQLite connection, which can be
+   * recycled mid-session (a sync, a `database is locked` recovery, a backup).
+   * When that happens the attachment is silently dropped while our `attached`
+   * flag stays true, so every later query fails with `no such table:
+   * zotseek.items`. On a large library the indexing run is long enough that
+   * this happens reliably part-way through (issue #35).
+   */
+  private async isAttachmentLive(): Promise<boolean> {
+    try {
+      const databases = await Zotero.DB.queryAsync('PRAGMA database_list');
+      return !!databases?.some((db: any) => db.name === DB_NAME);
+    } catch (e) {
+      this.logger.debug(`isAttachmentLive() check failed: ${e}`);
+      return false;
+    }
+  }
+
+  /**
+   * Re-establish the ATTACH after Zotero recycled its connection and dropped
+   * our attached database. Clears the stale flag, re-attaches, and ensures the
+   * schema exists (createTables is idempotent). Does not re-run migrations: the
+   * file is already at the current schema version from the original init().
+   */
+  private async reattachAfterConnectionLoss(): Promise<void> {
+    this.logger.warn('zotseek database attachment was lost; re-attaching...');
+    this.attached = false;
+    await this.attachDatabase();
+    await this.createTables();
+    this.invalidateCache();
+    this.logger.info('zotseek database re-attached successfully');
+  }
+
+  /**
    * Migrate data from old schema (zs_ tables in Zotero's main database)
    * to the new separate database
    */
@@ -2583,6 +2618,22 @@ export class VectorStoreSQLite {
   private async ensureInit(): Promise<void> {
     if (!this.initialized) {
       await this.init();
+      return;
+    }
+
+    // Already initialized, but Zotero may have recycled its DB connection
+    // mid-session and silently dropped our ATTACHed database. Verify the
+    // attachment is still live and re-establish it if not, so a long indexing
+    // run survives connection recycling instead of failing on every remaining
+    // item with `no such table: zotseek.items` (issue #35).
+    //
+    // Skip while inside a Zotero transaction: ATTACH/DETACH is illegal there,
+    // and public methods always call ensureInit() before opening one, so the
+    // attachment is already verified for the duration of the transaction.
+    if (Zotero.DB.inTransaction && Zotero.DB.inTransaction()) return;
+
+    if (!(await this.isAttachmentLive())) {
+      await this.reattachAfterConnectionLoss();
     }
   }
 
