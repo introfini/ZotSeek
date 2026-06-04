@@ -45,6 +45,9 @@ export interface HybridSearchResult {
   // Chunk identification (for all-chunks mode)
   chunkIndex?: number;        // Chunk index within the item
 
+  // Text of the matched chunk (top results only) — for snippet display on hover
+  chunkText?: string;
+
   // Location information from matched chunk
   pageNumber?: number;        // 1-based page number
   paragraphIndex?: number;    // 0-based paragraph index within page
@@ -170,6 +173,7 @@ export class HybridSearchEngine {
       source: 'semantic' as const,
       textSource: r.textSource,
       chunkIndex: r.chunkIndex,
+      chunkText: r.chunkText,
       pageNumber: r.pageNumber,
       paragraphIndex: r.paragraphIndex,
     }));
@@ -211,7 +215,7 @@ export class HybridSearchEngine {
   private async semanticSearchQuery(
     query: string,
     opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>> & HybridSearchOptions
-  ): Promise<Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; pageNumber?: number; paragraphIndex?: number }>> {
+  ): Promise<Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; chunkText?: string; pageNumber?: number; paragraphIndex?: number }>> {
     try {
       // Initialize search engine if needed
       if (!this.semanticSearch.isReady()) {
@@ -254,6 +258,7 @@ export class HybridSearchEngine {
         score: r.similarity,
         textSource: r.textSource,
         chunkIndex: r.chunkIndex,
+        chunkText: r.chunkText,
         pageNumber: r.pageNumber,
         paragraphIndex: r.paragraphIndex,
       }));
@@ -393,7 +398,7 @@ export class HybridSearchEngine {
    * @param opts - Options including rrfK and semanticWeight
    */
   private reciprocalRankFusion(
-    semanticResults: Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; pageNumber?: number; paragraphIndex?: number }>,
+    semanticResults: Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; chunkText?: string; pageNumber?: number; paragraphIndex?: number }>,
     keywordResults: Array<{ itemId: number; score: number }>,
     opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>>
   ): HybridSearchResult[] {
@@ -407,7 +412,7 @@ export class HybridSearchEngine {
 
     // Build maps for quick lookup
     // Key is either "itemId" or "itemId-chunkIndex" depending on mode
-    const semanticMap = new Map<string, { itemId: number; chunkIndex?: number; rank: number; score: number; textSource?: TextSourceType; pageNumber?: number; paragraphIndex?: number }>();
+    const semanticMap = new Map<string, { itemId: number; chunkIndex?: number; chunkText?: string; rank: number; score: number; textSource?: TextSourceType; pageNumber?: number; paragraphIndex?: number }>();
     semanticResults.forEach((r, index) => {
       const key = useChunkKey ? `${r.itemId}-${r.chunkIndex ?? 0}` : String(r.itemId);
       // In all-chunks mode, keep all entries; in MaxSim mode, keep only first (best) per item
@@ -415,6 +420,7 @@ export class HybridSearchEngine {
         semanticMap.set(key, {
           itemId: r.itemId,
           chunkIndex: r.chunkIndex,
+          chunkText: r.chunkText,
           rank: index + 1,
           score: r.score,
           textSource: r.textSource,
@@ -481,6 +487,7 @@ export class HybridSearchEngine {
         source,
         textSource: semantic?.textSource,
         chunkIndex: semantic?.chunkIndex,
+        chunkText: semantic?.chunkText,
         pageNumber: semantic?.pageNumber,
         paragraphIndex: semantic?.paragraphIndex,
       });

@@ -19,6 +19,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 🔗 **Hybrid Search** - Combines AI + keyword search for best results
 - ⚡ **Lightning Fast** - Searches complete in <100ms
 - 📑 **Section-Aware** - See which section matched (Abstract, Methods, Results)
+- 📄 **Matched-Passage Preview** - Hover a result to read the exact passage that matched, with query terms highlighted
 - 📍 **Passage-Level Location** - Jump to exact page & paragraph in Full Document mode
 - ✅ **Multi-Select in Results** - Select multiple search results, right-click to add to collections
 - 📁 **Save Results as Collection** - One click saves the full result set into a new Zotero collection so you can revisit the list later without re-running the search
@@ -173,16 +174,20 @@ The **Source** column shows which section of the paper matched your query:
 | Results | Results, Discussion, Conclusions |
 | Content | Generic (sections not detected) |
 
+### Matched-Passage Preview
+
+Hover any result row to see a tooltip with the exact passage that matched your query, along with its location (page & paragraph), section type, and match score. This lets you judge whether a result is relevant without opening the paper. In **Keyword** and **Hybrid** searches the query terms are highlighted inside the passage, and the preview is centered on the first match so the relevant text is always in view. (Pure semantic search has no literal terms to highlight, so the passage is shown without highlighting.)
+
 ### Result Granularity (Full Document Mode)
 
 When using **Full Document** indexing mode, you can toggle between two result views:
 
 | Mode | Results | Best For |
 |------|---------|----------|
-| **By Section** (default) | 1 result per paper, best matching section | Overview of matching papers |
-| **By Location** | All matching paragraphs with exact page & paragraph | Finding specific passages |
+| **By Section** (default) | 1 result per paper, best matching section, with the location of that match | Overview of matching papers |
+| **By Location** | Every matching paragraph with exact page & paragraph | Finding specific passages |
 
-**By Section** - Aggregates all chunks per paper, shows the highest-scoring match:
+**By Section** - Aggregates all chunks per paper and shows the highest-scoring match. The **Location** column shows where that best match was found (page & paragraph), so you get one diverse result per paper without losing the exact location:
 
 ![By Section Mode](docs/images/search-dialog-by-section.png)
 

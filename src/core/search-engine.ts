@@ -30,6 +30,7 @@ export interface SearchResult {
   textSource: TextSourceType;  // Section type: summary, methods, findings, content
   matchedChunkIndex?: number;  // Which chunk had the highest similarity
   chunkIndex?: number;         // Chunk index (when returnAllChunks=true)
+  chunkText?: string;          // Text of the matched chunk (populated for top results only, for snippet display)
   authors?: string[];          // Optional: author names for display
   year?: number;               // Optional: publication year for display
   pageNumber?: number;         // 1-based page number of matched chunk
@@ -220,6 +221,12 @@ export class SearchEngine {
     // Sort by similarity (descending) and take top K
     results.sort((a, b) => b.similarity - a.similarity);
     const topResults = results.slice(0, opts.topK);
+
+    // Enrich the visible results with the matched chunk's text (for snippet display).
+    // Only the top K rows need it, so this is a small, bounded batch fetch — we
+    // deliberately keep chunk_text out of the in-memory embedding cache to avoid
+    // bloating RAM on large libraries.
+    await this.populateChunkText(topResults);
 
     const searchTime = Date.now() - startTime;
     this.logger.info(`Found ${topResults.length} results in ${searchTime}ms`);
@@ -713,6 +720,34 @@ export class SearchEngine {
     }
 
     return results;
+  }
+
+  /**
+   * Fill in `chunkText` on the given results by batch-fetching the matched
+   * chunk's text from the store. Best-effort: failures leave chunkText
+   * undefined (the UI simply shows no snippet for that row).
+   */
+  private async populateChunkText(results: SearchResult[]): Promise<void> {
+    if (results.length === 0) return;
+
+    const store = this.getStore();
+    if (typeof (store as VectorStoreSQLite).getChunkTexts !== 'function') return;
+
+    const pairs = results
+      .map(r => ({ itemPk: r.itemPk, chunkIndex: r.matchedChunkIndex }))
+      .filter((p): p is { itemPk: number; chunkIndex: number } => p.chunkIndex !== undefined);
+    if (pairs.length === 0) return;
+
+    try {
+      const texts = await (store as VectorStoreSQLite).getChunkTexts(pairs);
+      for (const r of results) {
+        if (r.matchedChunkIndex === undefined) continue;
+        const text = texts.get(`${r.itemPk}:${r.matchedChunkIndex}`);
+        if (text) r.chunkText = text;
+      }
+    } catch (e) {
+      this.logger.debug(`populateChunkText failed (non-fatal): ${e}`);
+    }
   }
 
   /**

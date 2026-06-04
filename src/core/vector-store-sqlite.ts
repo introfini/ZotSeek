@@ -1881,6 +1881,46 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Batch-fetch chunk text for a set of (item_pk, chunk_index) pairs.
+   *
+   * Returns a map keyed by `${itemPk}:${chunkIndex}` -> chunk_text. Used to
+   * enrich the small set of visible search results with a snippet, without
+   * loading chunk text into the global embedding cache. Missing/empty chunks
+   * are simply absent from the returned map.
+   */
+  async getChunkTexts(
+    pairs: Array<{ itemPk: number; chunkIndex: number }>
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (pairs.length === 0) return out;
+    await this.ensureInit();
+
+    // De-duplicate pairs (same chunk can back several results in some modes).
+    const unique = new Map<string, { itemPk: number; chunkIndex: number }>();
+    for (const p of pairs) unique.set(`${p.itemPk}:${p.chunkIndex}`, p);
+
+    // Parallel single-value queries dodge the Zotero 8 multi-column SELECT quirk
+    // (see CLAUDE.md). The batch is bounded by topK (~20-50), so this is cheap.
+    const entries = Array.from(unique.values());
+    const texts = await Promise.all(
+      entries.map(p =>
+        Zotero.DB.valueQueryAsync(
+          `SELECT chunk_text FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`,
+          [p.itemPk, p.chunkIndex]
+        ).catch(() => null)
+      )
+    );
+
+    entries.forEach((p, i) => {
+      const t = texts[i];
+      if (typeof t === 'string' && t.length > 0) {
+        out.set(`${p.itemPk}:${p.chunkIndex}`, t);
+      }
+    });
+    return out;
+  }
+
+  /**
    * Get all embeddings with in-memory caching
    * Returns cached data if available, otherwise fetches from DB and caches
    */

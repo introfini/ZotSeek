@@ -399,6 +399,14 @@ export class ZotSeekDialogVTable {
       this.displayedResults = this.applyGranularity(this.rawResults);
       this.setSaveCollectionButtonEnabled(this.displayedResults.length > 0);
 
+      // Highlight query terms inside snippet tooltips only when a literal-term
+      // mode is active (keyword/hybrid). Pure-semantic queries have no literal
+      // term to mark, so we pass none.
+      const highlightTerms = this.searchMode === 'semantic'
+        ? []
+        : activeQueries.flatMap(q => q.split(/\s+/)).filter(Boolean);
+      this.resultsTable?.setQueryTerms(highlightTerms);
+
       // Update table with results
       await this.resultsTable?.setHybridResults(this.displayedResults);
 

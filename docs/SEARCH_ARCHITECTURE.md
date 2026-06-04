@@ -445,6 +445,25 @@ When a paper has multiple chunks, we use **MaxSim** (Maximum Similarity):
 
 This ensures that if *any* part of a paper matches your query, the paper ranks highly.
 
+### Snippet Enrichment (Matched-Passage Preview)
+
+The scoring loop deliberately works on vectors only: the in-memory embedding cache (`getAllCached()`) holds vectors plus light metadata (item identity, chunk index, page/paragraph, section), **not** chunk text. Keeping `chunk_text` out of the cache avoids hundreds of MB of RAM on large libraries.
+
+The matched passage is fetched lazily, only for the rows the user will actually see:
+
+```
+    1. Score all chunks → MaxSim per item → sort by similarity
+    2. slice(0, topK)                ← typically 20-50 rows
+    3. populateChunkText(topResults) ← batch-fetch chunk_text for the
+                                        matchedChunkIndex of each visible row
+                                        (VectorStoreSQLite.getChunkTexts)
+    4. result.chunkText is now set → UI shows it on hover
+```
+
+`getChunkTexts()` issues one `valueQueryAsync` per `(item_pk, chunk_index)` pair in parallel (bounded by `topK`), following the Zotero 8 single-column query convention. No schema change is involved: `chunk_text` has been stored in the `chunks` table since the v6 normalization.
+
+The UI (`SearchResultsTable`) renders `chunkText` as a floating tooltip on row hover, windowed around the first matched query term and with those terms highlighted (keyword/hybrid modes only).
+
 ### Parent-Child Retrieval Pattern
 
 ZotSeek implements a **parent-child retrieval pattern** that supports two granularity modes:
@@ -489,7 +508,7 @@ ZotSeek implements a **parent-child retrieval pattern** that supports two granul
 
 - **Aggregation**: MaxSim - returns highest similarity across all chunks
 - **Results**: 1 result per paper
-- **Display**: Shows which section matched (Abstract, Methods, Results)
+- **Display**: Shows which section matched (Abstract, Methods, Results) **and the location of that best-matching chunk** (page & paragraph). The MaxSim result already carries the best chunk's `pageNumber`/`paragraphIndex`, so the Location column is populated here too — one diverse result per paper without losing the exact location. Falls back to "—" for keyword-only matches or abstract-only indexing.
 - **Use case**: Overview of matching papers
 
 #### By Location Mode

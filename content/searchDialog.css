@@ -621,3 +621,72 @@
     background: rgba(244, 67, 54, 0.2);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Snippet hover tooltip (issue #36): shows the matched chunk text on row hover
+   --------------------------------------------------------------------------- */
+.zotseek-snippet-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 380px;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border: 1px solid var(--fill-quinary, #d8dade);
+  border-radius: 7px;
+  background: var(--material-toolbar, #ffffff);
+  color: var(--fill-primary, #1a1a1a);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+  line-height: 1.5;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.09s ease, transform 0.09s ease;
+}
+
+.zotseek-snippet-tooltip.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.zotseek-snippet-tooltip .zotseek-snippet-meta {
+  margin-bottom: 5px;
+  font-size: 11px;
+  color: var(--fill-secondary, #6b7280);
+  white-space: nowrap;
+}
+
+.zotseek-snippet-tooltip .zotseek-snippet-meta .sep {
+  margin: 0 6px;
+  opacity: 0.6;
+}
+
+.zotseek-snippet-tooltip .zotseek-snippet-body {
+  border-left: 3px solid var(--color-accent, #2f6fed);
+  padding-left: 9px;
+}
+
+.zotseek-snippet-tooltip mark {
+  background: #fff3bf;
+  color: #7a5c00;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .zotseek-snippet-tooltip {
+    border-color: #3a3d42;
+    background: var(--material-toolbar, #2a2c30);
+    color: #e6e6e6;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  }
+
+  .zotseek-snippet-tooltip .zotseek-snippet-meta {
+    color: #9aa0a6;
+  }
+
+  .zotseek-snippet-tooltip mark {
+    background: #5a4a12;
+    color: #ffe48a;
+  }
+}

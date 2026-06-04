@@ -2,6 +2,21 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.15.0] - 2026-06-04
+
+### Added
+- **Matched-passage preview on hover** (#36) — Hovering a search result now shows a floating tooltip with the actual text of the passage that matched your query, alongside its location (page & paragraph), section type, and match score. This makes it easy to judge relevance without opening each paper. In keyword and hybrid searches, the query terms are highlighted inside the snippet; the snippet is windowed around the first matched term so the relevant part is always visible.
+
+### Changed
+- **"By Section" results now show the match location** — The Location column (page & paragraph) is now populated in "By Section" mode, showing where the best-matching passage was found. Previously the location was only shown in "By Location" mode. You now get one diverse result per paper *and* the exact location of its strongest match, without the list being dominated by many passages from a single long paper.
+
+### Technical
+- The matched chunk's text is now surfaced to the UI. `SearchResult` and `HybridSearchResult` carry an optional `chunkText`, populated only for the visible top-K results: `SearchEngine.search()` batch-fetches the text for the matched chunks after slicing (`populateChunkText()` + new `VectorStoreSQLite.getChunkTexts()`), so `chunk_text` stays out of the in-memory embedding cache and RAM use is unaffected on large libraries. No schema change or re-indexing required (`chunk_text` was already stored).
+- `SearchResultsTable` (`src/ui/results-table.ts`) renders the snippet as a custom floating tooltip. It uses `mousemove` delegation on the table container (resolving the row via the `zotseek-results-table-row-<index>` id that `VirtualizedTable` assigns), so it survives row-DOM recycling during scroll. The tooltip is hidden on scroll/re-render/clear and torn down on destroy. Snippet text and query terms are HTML-escaped before any `<mark>` wrapping. `search-dialog-vtable.ts` passes query terms via `setQueryTerms()` only for keyword/hybrid mode (no literal terms exist in pure-semantic search).
+- `getRowData()` no longer gates the Location column on `granularity === 'location'`; it formats `pageNumber`/`paragraphIndex` whenever present (the MaxSim result already carries the best chunk's location), falling back to "—" for keyword-only matches or abstract-only indexing.
+
+---
+
 ## [1.14.5] - 2026-06-01
 
 ### Fixed

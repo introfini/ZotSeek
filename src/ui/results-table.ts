@@ -34,6 +34,14 @@ export interface ResultsTableOptions {
   onContextMenu?: (event: MouseEvent, indices: number[]) => void;  // Right-click
 }
 
+// Common words not worth highlighting in snippets (English query stopwords).
+const SNIPPET_STOPWORDS = new Set<string>([
+  'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'by', 'for',
+  'with', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 'it', 'its', 'this',
+  'that', 'these', 'those', 'from', 'how', 'do', 'does', 'did', 'can', 'we',
+  'they', 'their', 'them', 'about', 'into', 'than', 'then', 'but', 'not',
+]);
+
 const DEFAULT_COLUMNS: ResultsTableColumn[] = [
   {
     dataKey: 'indicator',
@@ -95,6 +103,13 @@ export class SearchResultsTable {
   private container: HTMLElement | null = null;
   private isHybridMode: boolean = false;  // Track if showing hybrid results
 
+  // Snippet hover tooltip state
+  private doc: Document | null = null;
+  private snippetTooltip: HTMLElement | null = null;
+  private highlightTerms: string[] = [];  // Query terms to <mark> in the snippet (keyword/hybrid only)
+  private boundOnTableMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundHideTooltip: (() => void) | null = null;
+
   // Granularity mode: 'section' (aggregated) or 'location' (exact page/paragraph)
   private granularity: 'section' | 'location' = 'section';
 
@@ -117,8 +132,9 @@ export class SearchResultsTable {
     this.logger.debug('Initializing SearchResultsTable...');
     
     const doc = win.document;
+    this.doc = doc;
     this.container = doc.getElementById(this.options.containerId);
-    
+
     if (!this.container) {
       const error = `Container element not found: ${this.options.containerId}`;
       this.logger.error(error);
@@ -208,6 +224,10 @@ export class SearchResultsTable {
       this.logger.debug('VirtualizedTableHelper created, rendering...');
       // Render the table
       await this.tableHelper.render();
+
+      // Set up the snippet hover tooltip (issue #36)
+      this.setupSnippetTooltip();
+
       this.logger.info('Results table initialized');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -295,17 +315,21 @@ export class SearchResultsTable {
     // Get source indicator for hybrid results
     const indicator = isHybrid ? HybridSearchEngine.getSourceIndicator(result as HybridSearchResult) : '';
     
-    // Get page and paragraph number from hybrid result
-    // Format depends on granularity mode:
-    // - 'section': Show "—" (location hidden for cleaner view)
-    // - 'location': Show "p. 8, ¶3" = page 8, paragraph 3 (1-based for display)
+    // Location of the matched chunk, e.g. "p. 8, ¶3" (page 8, paragraph 3, 1-based).
+    // Shown in BOTH granularity modes: in 'section' mode it's the location of the
+    // single best-matching chunk (MaxSim) for that paper, in 'location' mode it's
+    // the location of each individual chunk. Falls back to "—" when no page is
+    // known (e.g. keyword-only matches, or abstract-only indexing).
     let formattedPage = '—';
-    if (this.granularity === 'location' && isHybrid) {
-      const hybridResult = result as HybridSearchResult;
-      if (hybridResult.pageNumber) {
-        const paraNum = (hybridResult.paragraphIndex ?? 0) + 1;  // Convert to 1-based
-        formattedPage = `p. ${hybridResult.pageNumber}, ¶${paraNum}`;
-      }
+    const pageNumber = isHybrid
+      ? (result as HybridSearchResult).pageNumber
+      : (result as SearchResult).pageNumber;
+    const paragraphIndex = isHybrid
+      ? (result as HybridSearchResult).paragraphIndex
+      : (result as SearchResult).paragraphIndex;
+    if (pageNumber) {
+      const paraNum = (paragraphIndex ?? 0) + 1;  // Convert to 1-based
+      formattedPage = `p. ${pageNumber}, ¶${paraNum}`;
     }
 
     // Create the row data object with EXACT column dataKey names
@@ -380,6 +404,7 @@ export class SearchResultsTable {
     this.enrichedResults = enrichedData || new Map();
     this.exactPages.clear();  // Clear exact pages when results change
     this.isHybridMode = false;
+    this.hideSnippetTooltip();
 
     if (this.tableHelper) {
       // Refresh the table to show new data
@@ -397,6 +422,7 @@ export class SearchResultsTable {
     this.enrichedResults.clear();  // Not needed for hybrid results
     this.exactPages.clear();  // Clear exact pages when results change
     this.isHybridMode = true;
+    this.hideSnippetTooltip();
 
     if (this.tableHelper) {
       // Refresh the table to show new data
@@ -456,6 +482,7 @@ export class SearchResultsTable {
    * Force a re-render of the table
    */
   async render(): Promise<void> {
+    this.hideSnippetTooltip();
     if (this.tableHelper) {
       await this.tableHelper.render();
       this.logger.debug('Table re-rendered');
@@ -523,6 +550,7 @@ export class SearchResultsTable {
     this.exactPages.clear();
     this.currentSortColumn = null;
     this.currentSortAscending = true;
+    this.hideSnippetTooltip();
     if (this.tableHelper) {
       await this.tableHelper.render();
       this.updateSortIndicator();  // Clear sort indicator
@@ -729,9 +757,221 @@ export class SearchResultsTable {
   }
 
   /**
+   * Set the query terms to highlight inside the snippet tooltip.
+   * Pass an empty array for pure-semantic searches (no literal terms to mark).
+   */
+  setQueryTerms(terms: string[]): void {
+    // Strip surrounding punctuation, lowercase, de-duplicate, and drop common
+    // stopwords + very short tokens — highlighting "in"/"of"/"the" is just noise.
+    const seen = new Set<string>();
+    this.highlightTerms = [];
+    for (const t of terms) {
+      const tok = (t || '').toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+      if (tok.length < 2 || seen.has(tok) || SNIPPET_STOPWORDS.has(tok)) continue;
+      seen.add(tok);
+      this.highlightTerms.push(tok);
+    }
+  }
+
+  /**
+   * Create the floating snippet tooltip element and wire hover/scroll handlers.
+   * Uses event delegation on the table container so it survives the
+   * VirtualizedTable recycling row DOM nodes during scroll.
+   */
+  private setupSnippetTooltip(): void {
+    if (!this.doc || !this.container || this.snippetTooltip) return;
+
+    const tip = this.doc.createElement('div');
+    tip.className = 'zotseek-snippet-tooltip';
+    tip.setAttribute('role', 'tooltip');
+    tip.setAttribute('aria-hidden', 'true');
+    // The table lives inside a XUL/XHTML dialog; appending to <html> keeps the
+    // tooltip above the table and free of the container's overflow clipping.
+    (this.doc.documentElement || this.doc.body).appendChild(tip);
+    this.snippetTooltip = tip;
+
+    this.boundOnTableMouseMove = (e: MouseEvent) => this.onTableMouseMove(e);
+    this.boundHideTooltip = () => this.hideSnippetTooltip();
+
+    this.container.addEventListener('mousemove', this.boundOnTableMouseMove);
+    this.container.addEventListener('mouseleave', this.boundHideTooltip);
+    // Hide while scrolling: the row under the cursor changes without a mousemove.
+    this.container.addEventListener('scroll', this.boundHideTooltip, true);
+  }
+
+  /**
+   * Resolve the result row under the cursor and show/hide its snippet tooltip.
+   */
+  private onTableMouseMove(e: MouseEvent): void {
+    if (!this.snippetTooltip) return;
+
+    const target = e.target as HTMLElement | null;
+    const rowEl = target?.closest('[id^="zotseek-results-table-row-"]') as HTMLElement | null;
+    if (!rowEl) {
+      this.hideSnippetTooltip();
+      return;
+    }
+
+    const idx = parseInt(rowEl.id.slice('zotseek-results-table-row-'.length), 10);
+    if (Number.isNaN(idx)) {
+      this.hideSnippetTooltip();
+      return;
+    }
+
+    const result = this.results[idx];
+    const html = result ? this.buildSnippetHtml(result) : null;
+    if (!html) {
+      this.hideSnippetTooltip();
+      return;
+    }
+
+    this.snippetTooltip.innerHTML = html;
+    this.snippetTooltip.classList.add('show');
+    this.snippetTooltip.setAttribute('aria-hidden', 'false');
+    this.positionTooltip(e.clientX, e.clientY);
+  }
+
+  /**
+   * Position the tooltip near the cursor, flipping away from viewport edges.
+   */
+  private positionTooltip(x: number, y: number): void {
+    const tip = this.snippetTooltip;
+    const win = this.doc?.defaultView;
+    if (!tip || !win) return;
+
+    const pad = 16;
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    let left = x + pad;
+    let top = y + pad;
+    if (left + w > win.innerWidth - 8) left = x - w - pad;
+    if (top + h > win.innerHeight - 8) top = y - h - pad;
+    tip.style.left = `${Math.max(8, left)}px`;
+    tip.style.top = `${Math.max(8, top)}px`;
+  }
+
+  /**
+   * Hide the snippet tooltip.
+   */
+  private hideSnippetTooltip(): void {
+    if (!this.snippetTooltip) return;
+    this.snippetTooltip.classList.remove('show');
+    this.snippetTooltip.setAttribute('aria-hidden', 'true');
+  }
+
+  /**
+   * Build the inner HTML of the snippet tooltip for a result, or null if the
+   * result has no matched chunk text to show.
+   */
+  private buildSnippetHtml(result: AnySearchResult): string | null {
+    const chunkText = (result as any).chunkText as string | undefined;
+    if (!chunkText || !chunkText.trim()) return null;
+
+    const snippet = this.windowSnippet(chunkText, 360);
+    const body = this.highlightSnippet(snippet);
+
+    // Metadata line: location, section, score
+    const meta: string[] = [];
+    const isHybrid = this.isHybridSearchResult(result);
+    const pageNumber = (result as any).pageNumber as number | undefined;
+    const paragraphIndex = (result as any).paragraphIndex as number | undefined;
+    if (pageNumber) {
+      const para = (paragraphIndex ?? 0) + 1;
+      meta.push(`📍 ${getString('column-location')}: p. ${pageNumber}, ¶${para}`);
+    }
+    const sectionLabel = this.formatSource(
+      isHybrid ? (result as HybridSearchResult).textSource : (result as SearchResult).textSource
+    );
+    if (sectionLabel) meta.push(`🏷️ ${sectionLabel}`);
+
+    let score: number | null = null;
+    if (isHybrid) {
+      const h = result as HybridSearchResult;
+      score = h.semanticScore ?? h.keywordScore;
+    } else {
+      score = (result as SearchResult).similarity;
+    }
+    if (score !== null && !Number.isNaN(score)) {
+      meta.push(`🎯 ${Math.round(score * 100)}%`);
+    }
+
+    const head = meta.length
+      ? `<div class="zotseek-snippet-meta">${meta.map(m => this.escapeHtml(m)).join('<span class="sep">·</span>')}</div>`
+      : '';
+    return `${head}<div class="zotseek-snippet-body">${body}</div>`;
+  }
+
+  /**
+   * Trim a long chunk to a readable window. If there is a highlight term,
+   * center the window on its first occurrence; otherwise take the start.
+   */
+  private windowSnippet(text: string, maxLen: number): string {
+    const clean = text.replace(/\s+/g, ' ').trim();
+    if (clean.length <= maxLen) return clean;
+
+    let start = 0;
+    if (this.highlightTerms.length > 0) {
+      const lower = clean.toLowerCase();
+      let firstHit = -1;
+      for (const term of this.highlightTerms) {
+        const i = lower.indexOf(term);
+        if (i !== -1 && (firstHit === -1 || i < firstHit)) firstHit = i;
+      }
+      if (firstHit > maxLen / 2) start = firstHit - Math.floor(maxLen / 2);
+    }
+
+    let end = start + maxLen;
+    let slice = clean.slice(start, end);
+    if (start > 0) slice = `…${slice}`;
+    if (end < clean.length) slice = `${slice}…`;
+    return slice;
+  }
+
+  /**
+   * Escape a snippet and wrap any highlight terms in <mark>.
+   */
+  private highlightSnippet(text: string): string {
+    let out = this.escapeHtml(text);
+    if (this.highlightTerms.length === 0) return out;
+
+    // Longest terms first so compound terms aren't broken by shorter ones.
+    const sorted = [...this.highlightTerms].sort((a, b) => b.length - a.length);
+    for (const term of sorted) {
+      const escaped = this.escapeHtml(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (!escaped) continue;
+      // Word-boundary match so "in" doesn't light up inside "examining".
+      const re = new RegExp(`\\b(${escaped})\\b`, 'gi');
+      out = out.replace(re, '<mark>$1</mark>');
+    }
+    return out;
+  }
+
+  /**
+   * Escape HTML special characters.
+   */
+  private escapeHtml(s: string): string {
+    return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+  }
+
+  /**
    * Cleanup
    */
   destroy(): void {
+    // Tear down the snippet tooltip and its listeners
+    if (this.container) {
+      if (this.boundOnTableMouseMove) this.container.removeEventListener('mousemove', this.boundOnTableMouseMove);
+      if (this.boundHideTooltip) {
+        this.container.removeEventListener('mouseleave', this.boundHideTooltip);
+        this.container.removeEventListener('scroll', this.boundHideTooltip, true);
+      }
+    }
+    this.snippetTooltip?.remove();
+    this.snippetTooltip = null;
+    this.boundOnTableMouseMove = null;
+    this.boundHideTooltip = null;
+    this.highlightTerms = [];
+    this.doc = null;
+
     // VirtualizedTableHelper doesn't have an unregister method
     // The React components are cleaned up automatically when the window closes
     this.tableHelper = null;
