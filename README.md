@@ -4,7 +4,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 
 > **Status:** ✅ Stable release with Transformers.js running locally in Zotero 8 and 9
 
-![ZotSeek Search Dialog](docs/images/search-dialog-by-section.png)
+![ZotSeek Search Dialog](docs/images/search-dialog-by-section-hover.png)
 
 ---
 
@@ -189,7 +189,7 @@ When using **Full Document** indexing mode, you can toggle between two result vi
 
 **By Section** - Aggregates all chunks per paper and shows the highest-scoring match. The **Location** column shows where that best match was found (page & paragraph), so you get one diverse result per paper without losing the exact location:
 
-![By Section Mode](docs/images/search-dialog-by-section.png)
+![By Section Mode](docs/images/search-dialog-by-section-hover.png)
 
 **By Location** - Returns every matching paragraph individually with its own score:
 
