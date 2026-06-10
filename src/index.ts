@@ -1795,6 +1795,8 @@ const addon = new ZotSeekPlugin();
 const Z = getZotero();
 if (Z) {
   Z.ZotSeek = addon;
+  // Exposed for runtime diagnostics/testing via execute_js
+  Z.ZotSeek.StableProgressWindow = StableProgressWindow;
 }
 
 // Also expose on _globalThis for bootstrap access

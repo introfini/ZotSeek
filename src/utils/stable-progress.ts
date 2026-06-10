@@ -20,6 +20,12 @@ export interface StableProgressOptions {
   cancelCallback?: () => void;
 }
 
+// Cap on visible checkpoint lines. Every createLine makes Zotero's _move()
+// sizeToContent + bottom-anchor the popup, while our resizeTo keeps the top
+// edge fixed, so unbounded line growth ratchets the window upward off-screen
+// (issue #14). Older checkpoints rotate out instead of adding lines.
+const MAX_CHECKPOINT_LINES = 4;
+
 /**
  * Stable progress window with dynamic height sizing
  */
@@ -43,6 +49,7 @@ export class StableProgressWindow {
   // Track checkpoint lines for reverse-order display (newest first)
   private checkpointTexts: string[] = [];
   private checkpointStartIndex: number = -1; // Index of first checkpoint line in toolkit's lines array
+  private checkpointLineCount = 0; // Lines actually created (capped at MAX_CHECKPOINT_LINES)
   
   constructor(options: StableProgressOptions) {
     this.logger = new Logger('StableProgress');
@@ -179,40 +186,31 @@ export class StableProgressWindow {
         return;
       }
 
-      // Add the new checkpoint text to our tracking array
+      // Keep only the texts that can still be displayed
       this.checkpointTexts.push(text);
+      if (this.checkpointTexts.length > MAX_CHECKPOINT_LINES) {
+        this.checkpointTexts.shift();
+      }
 
-      // First checkpoint: just create a line and record its index
-      if (this.checkpointTexts.length === 1) {
+      // Create a new line only while under the cap; afterwards texts rotate
+      // through the existing lines so the window height stays bounded
+      if (this.checkpointLineCount === 0) {
         this.checkpointStartIndex = this.progressWindow.lines?.length || 0;
+      }
+      if (this.checkpointLineCount < MAX_CHECKPOINT_LINES) {
         this.progressWindow.createLine({
-          text,
+          text: '', // Will be filled by the update below
           type: 'success',
           progress: 100,
         });
-        this.ensureSize();
-        return;
+        this.checkpointLineCount++;
       }
 
-      // Subsequent checkpoints: create new line, then shift all checkpoint texts
-      // so newest appears first
-      this.progressWindow.createLine({
-        text: '', // Will be filled by the update below
-        type: 'success',
-        progress: 100,
-      });
-
-      // Update all checkpoint lines with texts in reverse order (newest first)
-      const numCheckpoints = this.checkpointTexts.length;
-      for (let i = 0; i < numCheckpoints; i++) {
-        // Line index in toolkit's array
-        const lineIdx = this.checkpointStartIndex + i;
-        // Text index: reverse order (newest first)
-        const textIdx = numCheckpoints - 1 - i;
-
+      // Update the visible checkpoint lines in reverse order (newest first)
+      for (let i = 0; i < this.checkpointLineCount; i++) {
         this.progressWindow.changeLine({
-          idx: lineIdx,
-          text: this.checkpointTexts[textIdx],
+          idx: this.checkpointStartIndex + i,
+          text: this.checkpointTexts[this.checkpointTexts.length - 1 - i] ?? '',
           type: 'success',
           progress: 100,
         });
@@ -442,6 +440,7 @@ export class StableProgressWindow {
       const mainWindow = Z?.getMainWindow?.();
 
       // Calculate actual content height
+      let targetHeight = win.outerHeight;
       const textBox = doc.getElementById('zotero-progress-text-box');
       if (textBox) {
         // Get all child item boxes and sum their heights
@@ -454,26 +453,30 @@ export class StableProgressWindow {
         });
 
         // Add padding
-        let targetHeight = Math.ceil(contentHeight) + 40; // 40px padding for margins
+        targetHeight = Math.ceil(contentHeight) + 40; // 40px padding for margins
 
         // Clamp between min and max height
         targetHeight = Math.max(this.minHeight, Math.min(this.maxHeight, targetHeight));
 
-        // Resize if different
-        if (win.outerHeight !== targetHeight) {
+        // ±2px tolerance: under Windows display scaling outerHeight rarely
+        // round-trips resizeTo exactly, and resizing on every update feeds
+        // the position drift
+        if (Math.abs(win.outerHeight - targetHeight) > 2) {
           win.resizeTo(win.outerWidth, targetHeight);
         }
       }
 
-      // Ensure window stays within main Zotero window bounds
+      // Re-anchor the bottom edge to the main window bottom. Zotero's own
+      // _move() bottom-anchors after sizeToContent while resizeTo above keeps
+      // the top edge fixed; correcting in one direction only lets the window
+      // ratchet upward off-screen (issue #14), so always re-anchor
       if (mainWindow) {
         const mainBottom = mainWindow.screenY + mainWindow.outerHeight;
-        const winBottom = win.screenY + win.outerHeight;
-
-        // If progress window extends below main window, move it up
-        if (winBottom > mainBottom) {
-          const newY = mainBottom - win.outerHeight - 10; // 10px padding from bottom
-          win.moveTo(win.screenX, Math.max(mainWindow.screenY, newY));
+        let newY = mainBottom - targetHeight - 10; // 10px padding from bottom
+        const availTop = win.screen?.availTop ?? 0;
+        if (newY < availTop) newY = availTop;
+        if (Math.abs(win.screenY - newY) > 2) {
+          win.moveTo(win.screenX, newY);
         }
       }
 

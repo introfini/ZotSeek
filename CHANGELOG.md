@@ -2,6 +2,17 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Indexing progress window drifts upward off-screen** (#14) — During long indexing runs, the progress popup crept upward with each checkpoint until it disappeared above the screen (reported on Windows, mechanism present on all platforms). Two interacting causes: checkpoint lines accumulated without limit, so Zotero's own bottom-anchored repositioning kept pushing the window's top edge higher, while ZotSeek's height clamp resized from the top edge and only ever corrected the position upward. Checkpoint history now rotates through at most 4 visible lines (newest first), and the window is deterministically re-anchored to the bottom of the main Zotero window on every update.
+
+### Technical
+- `StableProgressWindow.addCheckpointLine()` (`src/utils/stable-progress.ts`) caps created lines at `MAX_CHECKPOINT_LINES` (4) and rotates checkpoint texts through the existing lines instead of growing the popup. `ensureSize()` now always re-anchors the window bottom to `mainWindow` bottom (clamped to `screen.availTop`) instead of only moving up on overflow, and uses a ±2px tolerance on height/position comparisons so Windows display-scaling rounding can't trigger a resize/move on every update.
+- `StableProgressWindow` is exposed as `Zotero.ZotSeek.StableProgressWindow` for runtime diagnostics via the dev console.
+
+---
+
 ## [1.15.0] - 2026-06-04
 
 ### Added
