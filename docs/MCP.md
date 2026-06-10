@@ -36,9 +36,11 @@ Any MCP client that supports the HTTP transport works the same way (for example,
 |------|-----------|---------|
 | `search` | `query` *(required)*; `max_results` (1–100, default 10); `mode` (`hybrid` \| `semantic` \| `keyword`, default `hybrid`); `granularity` (`papers` \| `passages`, default `papers`) | Ranked results from a semantic/keyword search over the library |
 | `find_similar` | `item_key` *(required, 8-character Zotero key)*; `library_key` (`user` or `group:<groupID>`, default `user`); `max_results` (1–100, default 10) | Papers similar to a known library item, by its stored embeddings |
-| `index_status` | *(none)* | `{ready, indexedPapers, totalChunks, modelId, lastIndexed, storageUsedBytes}` |
+| `index_status` | *(none)* | `{ready, modelLoaded, indexedPapers, totalChunks, modelId, lastIndexed, storageUsedBytes}` |
 
 `mode` mirrors the ZotSeek UI: **hybrid** fuses semantic and keyword results with RRF, **semantic** uses embeddings only, **keyword** uses Zotero's keyword search only. `granularity` controls whether you get one result per paper (`papers`, best-matching chunk) or every matching chunk as its own result (`passages`).
+
+For `index_status`, `ready` is `true` when the index contains papers; the embedding model itself lazy-loads on the first search, adding ~30s to that first call when `modelLoaded` is `false`. `modelLoaded` reports whether that pipeline is already warm. A `ready: true, modelLoaded: false` status means searches will work but the first one will be slow.
 
 ### Result shape
 
@@ -68,6 +70,7 @@ Any MCP client that supports the HTTP transport works the same way (for example,
 Notes on the shape:
 
 - `source` (`"both"` | `"semantic"` | `"keyword"`) is present on `search` results only — it reports which engine found the item.
+- `libraryKey` is `"user"` or `"group:<groupID>"`, or `null` for items that can no longer be resolved locally (e.g. indexed on another machine and not present in this library); a `null` `libraryKey` also means no `links` are emitted.
 - `authors` is a formatted string for `search` results and an array of strings for `find_similar` results.
 - `matchedChunk` is `null` when no excerpt or page is available; `page` and `textSource` may be absent within it.
 - `score` is a relevance score (RRF score for `search`, cosine similarity for `find_similar`), rounded to three decimals. RRF scores are small by construction (typically 0.005-0.03) and only meaningful for ranking within a single result set; don't read them as percentages. Cosine scores (semantic mode, `find_similar`) range 0-1.
@@ -121,7 +124,7 @@ curl 'http://localhost:23119/zotseek/search?q=transformer+attention&topK=2&mode=
 
 | Status | When |
 |--------|------|
-| `400` | Bad input (e.g. missing `q` / `itemKey`), with `{"error": "..."}` |
+| `400` | Invalid input, or the search failed (e.g. missing `q` / `itemKey`, or an item not indexed), with `{"error": "..."}` |
 | `403` | Request presents a forged non-local `Origin` header |
 | `404` | AI Agent Access is disabled (the endpoints are not registered) |
 | `500` | Unexpected internal failure on `GET /zotseek/stats`, with `{"error": "..."}` |

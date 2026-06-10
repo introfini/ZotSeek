@@ -26,6 +26,10 @@ export const MCP_PATH = '/zotseek/mcp';
 // requests an unknown/invalid version.
 const LATEST_PROTOCOL_VERSION = '2025-06-18';
 
+// Protocol revisions this server will echo back verbatim. A client asking
+// for anything outside this set is answered with LATEST_PROTOCOL_VERSION.
+const SUPPORTED_PROTOCOL_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18'];
+
 const TOOL_DEFINITIONS = [
   {
     name: 'search',
@@ -168,7 +172,7 @@ export async function handleMcpRequest(requestData: any): Promise<EndpointRespon
       case 'initialize': {
         const requested = params?.protocolVersion;
         const protocolVersion =
-          typeof requested === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(requested)
+          typeof requested === 'string' && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
             ? requested
             : LATEST_PROTOCOL_VERSION;
         return ok(id, {

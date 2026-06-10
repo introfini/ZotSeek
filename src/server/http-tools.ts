@@ -188,7 +188,10 @@ export async function runIndexStatusTool(): Promise<object> {
   }
   const stats = await store.getStats();
   return {
-    ready: Zotero.ZotSeek?.api?.isReady?.() ?? false,
+    // "Will searches return meaningful results?" — the embedding pipeline
+    // lazy-loads on first search, so readiness is about the index itself.
+    ready: stats.indexedPapers > 0,
+    modelLoaded: Zotero.ZotSeek?.api?.isReady?.() ?? false,
     indexedPapers: stats.indexedPapers,
     totalChunks: stats.totalChunks,
     modelId: stats.modelId,

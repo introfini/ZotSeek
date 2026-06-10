@@ -43,6 +43,10 @@ export class EmbeddingPipeline {
   private workerReady = false;
   private pendingJobs = new Map<string, { resolve: Function; reject: Function }>();
   private ready = false;
+  // In-flight init() promise so N concurrent cold-start callers share a single
+  // worker creation instead of each spawning (and leaking) their own. Cleared
+  // on failure so a later call can retry.
+  private initPromise: Promise<void> | null = null;
   // Bounded recovery attempts so a permanently-broken worker doesn't loop forever
   // within a single embed() call. Resets on every successful embed.
   private consecutiveRecoveries = 0;
@@ -57,12 +61,22 @@ export class EmbeddingPipeline {
    */
   async init(): Promise<void> {
     if (this.ready) return;
+    if (this.initPromise) return this.initPromise;
 
-    this.logger.info('Initializing embedding pipeline with Transformers.js');
-    await this.initWorker();  // Will throw on failure
-    this.logger.info('Using Transformers.js via ChromeWorker');
+    this.initPromise = (async () => {
+      this.logger.info('Initializing embedding pipeline with Transformers.js');
+      await this.initWorker();  // Will throw on failure
+      this.logger.info('Using Transformers.js via ChromeWorker');
+      this.ready = true;
+    })();
 
-    this.ready = true;
+    try {
+      await this.initPromise;
+    } catch (e) {
+      // Reset so a later call can retry; a failed init must not poison retries.
+      this.initPromise = null;
+      throw e;
+    }
   }
 
   /**
@@ -239,6 +253,7 @@ export class EmbeddingPipeline {
     }
     this.workerReady = false;
     this.ready = false;
+    this.initPromise = null;
     this.pendingJobs.clear();
     await this.init();
   }
@@ -330,6 +345,7 @@ export class EmbeddingPipeline {
     }
     this.workerReady = false;
     this.ready = false;
+    this.initPromise = null;
     this.pendingJobs.clear();
   }
 

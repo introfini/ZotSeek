@@ -10,7 +10,7 @@
 import { selfTest, scenario, assertEq, assertTrue, Scenario } from '../self-test';
 import { handleMcpRequest } from '../../server/mcp-endpoint';
 import { handleSearchRequest, handleStatsRequest } from '../../server/rest-endpoints';
-import { registerEndpoints } from '../../server/server-manager';
+import { registerEndpoints, isRegistered, unregisterEndpoints } from '../../server/server-manager';
 
 declare const Zotero: any;
 
@@ -87,6 +87,8 @@ selfTest.register('mcp-server', async () => {
     const payload = parseToolPayload(json);
     assertTrue(typeof payload.indexedPapers === 'number', 'indexedPapers is a number');
     assertTrue(typeof payload.modelId === 'string', 'modelId is a string');
+    assertTrue(typeof payload.ready === 'boolean', 'ready is a boolean');
+    assertTrue(typeof payload.modelLoaded === 'boolean', 'modelLoaded is a boolean');
   }));
 
   scenarios.push(await scenario('tools/call search returns ranked results', async () => {
@@ -156,32 +158,42 @@ selfTest.register('mcp-server', async () => {
   scenarios.push(await scenario('end-to-end: HTTP initialize + tools/list', async () => {
     const port = Zotero.Server?.port;
     if (!port) return; // HTTP server disabled — covered by handler-level scenarios
+    const wasRegistered = isRegistered();
     registerEndpoints();
-    // In-Zotero fetch has a Mozilla/ UA, so Zotero's browser-traffic gate
-    // would cancel it without the Zotero-Allowed-Request header.
-    const resp = await fetch(`http://127.0.0.1:${port}/zotseek/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Zotero-Allowed-Request': '1',
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
-    });
-    assertEq(resp.status, 200, 'HTTP status');
-    const json = await resp.json();
-    assertEq(json.result.tools.length, 3, 'three tools over HTTP');
+    try {
+      // In-Zotero fetch has a Mozilla/ UA, so Zotero's browser-traffic gate
+      // would cancel it without the Zotero-Allowed-Request header.
+      const resp = await fetch(`http://127.0.0.1:${port}/zotseek/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Zotero-Allowed-Request': '1',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      });
+      assertEq(resp.status, 200, 'HTTP status');
+      const json = await resp.json();
+      assertEq(json.result.tools.length, 3, 'three tools over HTTP');
+    } finally {
+      if (!wasRegistered) unregisterEndpoints();
+    }
   }));
 
   scenarios.push(await scenario('end-to-end: REST /zotseek/stats over HTTP', async () => {
     const port = Zotero.Server?.port;
     if (!port) return;
+    const wasRegistered = isRegistered();
     registerEndpoints();
-    const resp = await fetch(`http://127.0.0.1:${port}/zotseek/stats`, {
-      headers: { 'Zotero-Allowed-Request': '1' },
-    });
-    assertEq(resp.status, 200, 'HTTP status');
-    const json = await resp.json();
-    assertTrue(typeof json.indexedPapers === 'number', 'indexedPapers present');
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/zotseek/stats`, {
+        headers: { 'Zotero-Allowed-Request': '1' },
+      });
+      assertEq(resp.status, 200, 'HTTP status');
+      const json = await resp.json();
+      assertTrue(typeof json.indexedPapers === 'number', 'indexedPapers present');
+    } finally {
+      if (!wasRegistered) unregisterEndpoints();
+    }
   }));
 
   return scenarios;
