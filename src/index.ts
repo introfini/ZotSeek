@@ -42,6 +42,7 @@ import './dev/suites/task-8-reads';
 import './dev/suites/task-9-status-map';
 import './dev/suites/task-10-housekeeping';
 import './dev/suites/task-13-search';
+import './dev/suites/mcp-server';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
