@@ -51,7 +51,7 @@ Any MCP client that supports the HTTP transport works the same way (for example,
   "title": "Attention Is All You Need",
   "authors": "Vaswani et al.",
   "year": 2017,
-  "score": 0.842,
+  "score": 0.016,
   "source": "both",
   "matchedChunk": {
     "snippet": "The Transformer relies entirely on self-attention to compute representations...",
@@ -70,7 +70,7 @@ Notes on the shape:
 - `source` (`"both"` | `"semantic"` | `"keyword"`) is present on `search` results only — it reports which engine found the item.
 - `authors` is a formatted string for `search` results and an array of strings for `find_similar` results.
 - `matchedChunk` is `null` when no excerpt or page is available; `page` and `textSource` may be absent within it.
-- `score` is a relevance score (RRF score for `search`, cosine similarity for `find_similar`), rounded to three decimals.
+- `score` is a relevance score (RRF score for `search`, cosine similarity for `find_similar`), rounded to three decimals. RRF scores are small by construction (typically 0.005-0.03) and only meaningful for ranking within a single result set; don't read them as percentages. Cosine scores (semantic mode, `find_similar`) range 0-1.
 
 ### Deep links
 
@@ -108,7 +108,7 @@ curl 'http://localhost:23119/zotseek/search?q=transformer+attention&topK=2&mode=
       "title": "Attention Is All You Need",
       "authors": "Vaswani et al.",
       "year": 2017,
-      "score": 0.842,
+      "score": 0.016,
       "source": "both",
       "matchedChunk": { "snippet": "The Transformer relies entirely on self-attention...", "page": 3, "textSource": "methods" },
       "links": { "select": "zotero://select/library/items/ABCD2345", "openPdf": "zotero://open-pdf/library/items/WXYZ6789?page=3" }

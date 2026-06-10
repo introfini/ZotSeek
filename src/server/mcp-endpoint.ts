@@ -35,7 +35,8 @@ const TOOL_DEFINITIONS = [
       'excerpts and page numbers where available. Each result carries ' +
       'zotero:// deep links: links.select opens the item in Zotero, ' +
       'links.openPdf opens the PDF at the matched page — include them when ' +
-      'citing results to the user. 100% local; no data leaves the machine.',
+      'citing results to the user. 100% local; no data leaves the machine. ' +
+      'Hybrid-mode scores are RRF values (small numbers, ~0.005-0.03) meaningful only for ranking within one result set; semantic-mode scores are 0-1 cosine similarities.',
     inputSchema: {
       type: 'object',
       properties: {
