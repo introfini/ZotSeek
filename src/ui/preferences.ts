@@ -74,6 +74,7 @@ class PreferencesManager {
       excludeTag: Z.Prefs.get('zotseek.excludeTag', true) || 'zotseek-exclude',
       autoIndex: Z.Prefs.get('zotseek.autoIndex', true) ?? false,
       autoIndexDelay: Z.Prefs.get('zotseek.autoIndexDelay', true) ?? 10,
+      mcpServer: Z.Prefs.get('zotseek.mcpServer.enabled', true) ?? false,
     };
 
     this.logger.debug(`Loaded preferences: ${JSON.stringify(prefs)}`);
@@ -90,11 +91,15 @@ class PreferencesManager {
     // Set checkbox values
     this.setCheckboxValue('zotseek-pref-excludeBooks', prefs.excludeBooks);
     this.setCheckboxValue('zotseek-pref-autoIndex', prefs.autoIndex);
+    this.setCheckboxValue('zotseek-pref-mcpServer', prefs.mcpServer);
 
     this.setInputValue('zotseek-pref-autoIndexDelay', prefs.autoIndexDelay);
 
     // Show/hide delay row based on auto-index state
     this.updateAutoIndexDelayVisibility(prefs.autoIndex);
+
+    // Show/hide MCP server info/warning based on pref and Zotero.Server state
+    this.updateMcpServerVisibility(prefs.mcpServer);
 
     // Set text input values
     this.setInputValue('zotseek-pref-excludeTag', prefs.excludeTag);
@@ -229,6 +234,16 @@ class PreferencesManager {
         // Reload auto-index manager to apply new setting
         autoIndexManager.reload();
         this.updateAutoIndexDelayVisibility(checked);
+      });
+    }
+
+    const mcpServerCheckbox = doc.getElementById('zotseek-pref-mcpServer') as any;
+    if (mcpServerCheckbox) {
+      mcpServerCheckbox.addEventListener('command', () => {
+        const checked = mcpServerCheckbox.checked;
+        Z.Prefs.set('zotseek.mcpServer.enabled', checked, true);
+        this.logger.info(`MCP server enabled changed to: ${checked}`);
+        this.updateMcpServerVisibility(checked);
       });
     }
 
@@ -608,6 +623,42 @@ class PreferencesManager {
       (delayRow as HTMLElement).style.opacity = enabled ? '1' : '0.4';
       const input = this.window.document.getElementById('zotseek-pref-autoIndexDelay') as HTMLInputElement;
       if (input) input.disabled = !enabled;
+    }
+  }
+
+  /**
+   * Show/hide the MCP server info box and warning based on enabled state
+   * and whether Zotero's local HTTP server is active.
+   */
+  private updateMcpServerVisibility(enabled: boolean): void {
+    if (!this.window) return;
+    const doc = this.window.document;
+    const infoDiv = doc.getElementById('zotseek-mcpserver-info') as HTMLElement | null;
+    const warningEl = doc.getElementById('zotseek-mcpserver-warning') as HTMLElement | null;
+    const cmdEl = doc.getElementById('zotseek-mcpserver-command') as HTMLElement | null;
+
+    if (!enabled) {
+      if (infoDiv) infoDiv.style.display = 'none';
+      if (warningEl) warningEl.style.display = 'none';
+      return;
+    }
+
+    // Check if Zotero's local HTTP server is running
+    const Z = getZotero();
+    const port = (Z as any)?.Server?.port;
+
+    if (port) {
+      if (infoDiv) infoDiv.style.display = 'block';
+      if (warningEl) warningEl.style.display = 'none';
+      // Update command with actual port if it differs from the default
+      if (cmdEl && port !== 23119) {
+        cmdEl.textContent = `claude mcp add --transport http zotseek http://localhost:${port}/zotseek/mcp`;
+      } else if (cmdEl) {
+        cmdEl.textContent = 'claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp';
+      }
+    } else {
+      if (infoDiv) infoDiv.style.display = 'none';
+      if (warningEl) warningEl.style.display = 'block';
     }
   }
 

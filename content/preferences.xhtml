@@ -209,6 +209,34 @@
 
 </groupbox>
 
+<!-- AI Agent Access (local MCP server) -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-pref-mcpServer">AI Agent Access</html:h2></label>
+
+  <checkbox id="zotseek-pref-mcpServer"
+            label="Allow AI agents to search your library (local MCP server)"
+            data-l10n-id="zotseek-pref-mcpServerLabel"
+            native="true"
+            checked="false" />
+  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    <html:span data-l10n-id="zotseek-pref-mcpServerDesc">Lets MCP clients such as Claude Code run read-only semantic searches over your library. Everything stays on this computer (localhost only).</html:span>
+  </html:p>
+
+  <html:div id="zotseek-mcpserver-info" style="margin: 8px 0 0 24px; display: none;">
+    <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 0;">
+      <html:span data-l10n-id="zotseek-pref-mcpServerUrl">Connect with:</html:span>
+    </html:p>
+    <html:code id="zotseek-mcpserver-command"
+               style="display: block; font-size: 11px; padding: 4px 8px; margin-top: 4px; background: var(--zotseek-bg-secondary); border: 1px solid var(--zotseek-border); border-radius: 4px; user-select: all;">
+      claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp
+    </html:code>
+  </html:div>
+  <html:p id="zotseek-mcpserver-warning"
+          style="color: var(--zotseek-orange); font-size: 11px; margin: 4px 0 0 24px; display: none;">
+    <html:span data-l10n-id="zotseek-pref-mcpServerWarning">Zotero&apos;s local HTTP server is disabled. Enable &quot;Allow other applications on this computer to communicate with Zotero&quot; in Settings, Advanced.</html:span>
+  </html:p>
+</groupbox>
+
 <!-- Auto-Indexing -->
 <groupbox>
   <label><html:h2 data-l10n-id="zotseek-pref-autoIndexing">Auto-Indexing</html:h2></label>
