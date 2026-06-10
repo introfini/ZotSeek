@@ -101,7 +101,7 @@ function rpcError(id: any, code: number, message: string): object {
 }
 
 function ok(id: any, result: any): EndpointResponse {
-  return [200, 'application/json', JSON.stringify({ jsonrpc: '2.0', id, result })];
+  return [200, 'application/json', JSON.stringify({ jsonrpc: '2.0', id: id ?? null, result })];
 }
 
 function err(status: number, id: any, code: number, message: string): EndpointResponse {
@@ -155,6 +155,9 @@ export async function handleMcpRequest(requestData: any): Promise<EndpointRespon
   const { id, method, params } = msg;
 
   // Notifications (no response body expected). 202 per the MCP spec.
+  // Zotero's responseCodes table has no 202 entry, so the status line's
+  // reason phrase comes out as "undefined" — harmless; clients ignore
+  // reason phrases, and the status code itself is correct.
   if (method.startsWith('notifications/')) {
     return [202, 'text/plain', ''];
   }

@@ -147,10 +147,12 @@ async function mapSearchResult(r: SearchResult): Promise<ToolResultItem> {
 }
 
 /**
- * Reject browser-originated cross-site requests (DNS-rebinding defence).
- * Zotero validates the Host header but NOT Origin; a malicious web page can
- * fetch() http://localhost:23119 with a valid Host. Native MCP clients and
- * curl send no Origin header — those pass.
+ * Defence-in-depth Origin check. Zotero's server already cancels browser
+ * traffic (Mozilla/ User-Agent) before plugin endpoints run unless it
+ * carries a Zotero-Allowed-Request or connector header, and it validates
+ * the Host header. This check additionally rejects non-browser clients
+ * that present a forged non-localhost Origin. Requests without an Origin
+ * header (curl, native MCP clients) pass.
  */
 export function isAllowedOrigin(origin: string | null | undefined): boolean {
   if (!origin) return true;
