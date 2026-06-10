@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.15.1] - 2026-06-10
 
 ### Fixed
 - **Indexing progress window drifts upward off-screen** (#14) — During long indexing runs, the progress popup crept upward with each checkpoint until it disappeared above the screen (reported on Windows, mechanism present on all platforms). Two interacting causes: checkpoint lines accumulated without limit, so Zotero's own bottom-anchored repositioning kept pushing the window's top edge higher, while ZotSeek's height clamp resized from the top edge and only ever corrected the position upward. Checkpoint history now rotates through at most 4 visible lines (newest first), and the window is deterministically re-anchored to the bottom of the main Zotero window on every update.
