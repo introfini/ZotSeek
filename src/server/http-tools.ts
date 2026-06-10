@@ -1,0 +1,196 @@
+/**
+ * Shared tool layer for ZotSeek's local HTTP interfaces (MCP + REST).
+ *
+ * Module-level functions, not class methods (CLAUDE.md pitfall #6: class
+ * methods in the esbuild IIFE bundle may not land on the runtime prototype).
+ * Uses the `Zotero` global directly.
+ *
+ * All operations are read-only adapters over the existing search engines.
+ */
+import { searchEngine, SearchResult } from '../core/search-engine';
+import { HybridSearchEngine, HybridSearchResult, SearchMode } from '../core/hybrid-search';
+import { getVectorStore } from '../core/storage-factory';
+import { identityFromItem } from '../core/identity-resolver';
+
+declare const Zotero: any;
+
+// One engine instance for all HTTP-facing searches (same wrapping the UI uses)
+const hybridEngine = new HybridSearchEngine(searchEngine);
+
+export interface MatchedChunk {
+  snippet?: string;
+  page?: number;
+  textSource?: string;
+}
+
+export interface ResultLinks {
+  /** Selects the item in the Zotero main pane */
+  select: string;
+  /** Opens the PDF in Zotero's reader, at the matched page when known */
+  openPdf?: string;
+}
+
+export interface ToolResultItem {
+  itemKey: string;
+  libraryKey: string | null; // 'user' | 'group:<id>' | null when unresolvable
+  title: string;
+  authors?: string[] | string;
+  year?: number;
+  score: number;
+  source?: 'both' | 'semantic' | 'keyword';
+  matchedChunk: MatchedChunk | null;
+  links?: ResultLinks;
+}
+
+export interface SearchToolArgs {
+  query: string;
+  max_results?: number;
+  mode?: SearchMode;
+  granularity?: 'papers' | 'passages';
+}
+
+export interface FindSimilarToolArgs {
+  item_key: string;
+  library_key?: string;
+  max_results?: number;
+}
+
+const VALID_MODES: SearchMode[] = ['hybrid', 'semantic', 'keyword'];
+
+function clampInt(value: any, min: number, max: number, fallback: number): number {
+  const n = typeof value === 'string' ? parseInt(value, 10) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+function chunkOf(r: { chunkText?: string; pageNumber?: number; textSource?: string }): MatchedChunk | null {
+  if (!r.chunkText && r.pageNumber === undefined) return null;
+  return {
+    snippet: r.chunkText || undefined,
+    page: r.pageNumber,
+    textSource: r.textSource || undefined,
+  };
+}
+
+function libraryKeyForItemId(itemId: number | undefined): string | null {
+  if (!itemId) return null;
+  try {
+    const item = Zotero.Items.get(itemId);
+    return item ? (identityFromItem(item)?.libraryKey ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * zotero:// deep links for a result. `select` always works; `openPdf` is
+ * added when the item has a PDF attachment, pointing at the matched page
+ * when known. Note: open-pdf needs the ATTACHMENT key, not the parent
+ * item key — resolved via getBestAttachment().
+ */
+async function buildLinks(
+  libraryKey: string | null,
+  itemKey: string,
+  page?: number
+): Promise<ResultLinks | undefined> {
+  if (!itemKey) return undefined;
+  const isGroup = !!libraryKey && libraryKey.startsWith('group:');
+  if (libraryKey !== 'user' && !isGroup) return undefined; // orphan/unknown: no stable link
+  const prefix = isGroup ? `groups/${libraryKey!.slice('group:'.length)}` : 'library';
+  const links: ResultLinks = { select: `zotero://select/${prefix}/items/${itemKey}` };
+  try {
+    const libraryId = isGroup
+      ? Zotero.Groups.getLibraryIDFromGroupID(Number(libraryKey!.slice('group:'.length)))
+      : Zotero.Libraries.userLibraryID;
+    const item = Zotero.Items.getByLibraryAndKey(libraryId, itemKey);
+    const att = item ? await item.getBestAttachment() : null;
+    if (att && (typeof att.isPDFAttachment !== 'function' || att.isPDFAttachment())) {
+      links.openPdf =
+        `zotero://open-pdf/${prefix}/items/${att.key}` + (page ? `?page=${page}` : '');
+    }
+  } catch {
+    // keep the select link only
+  }
+  return links;
+}
+
+async function mapHybridResult(r: HybridSearchResult): Promise<ToolResultItem> {
+  const libraryKey = libraryKeyForItemId(r.itemId);
+  return {
+    itemKey: r.itemKey,
+    libraryKey,
+    title: r.title,
+    authors: r.creators || undefined,
+    year: r.year || undefined,
+    score: round3(r.rrfScore),
+    source: r.source,
+    matchedChunk: chunkOf(r),
+    links: await buildLinks(libraryKey, r.itemKey, r.pageNumber),
+  };
+}
+
+async function mapSearchResult(r: SearchResult): Promise<ToolResultItem> {
+  return {
+    itemKey: r.itemKey,
+    libraryKey: r.libraryKey || null,
+    title: r.title,
+    authors: r.authors && r.authors.length ? r.authors : undefined,
+    year: r.year,
+    score: round3(r.similarity),
+    matchedChunk: chunkOf(r),
+    links: await buildLinks(r.libraryKey || null, r.itemKey, r.pageNumber),
+  };
+}
+
+/**
+ * Reject browser-originated cross-site requests (DNS-rebinding defence).
+ * Zotero validates the Host header but NOT Origin; a malicious web page can
+ * fetch() http://localhost:23119 with a valid Host. Native MCP clients and
+ * curl send no Origin header — those pass.
+ */
+export function isAllowedOrigin(origin: string | null | undefined): boolean {
+  if (!origin) return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin);
+}
+
+export async function runSearchTool(args: SearchToolArgs): Promise<{ results: ToolResultItem[] }> {
+  if (!args || typeof args.query !== 'string' || !args.query.trim()) {
+    throw new Error('search: "query" is required and must be a non-empty string');
+  }
+  const finalTopK = clampInt(args.max_results, 1, 100, 10);
+  const mode: SearchMode = args.mode && VALID_MODES.includes(args.mode) ? args.mode : 'hybrid';
+  const returnAllChunks = args.granularity === 'passages';
+  const results = await hybridEngine.search(args.query.trim(), { mode, finalTopK, returnAllChunks });
+  return { results: await Promise.all(results.map(mapHybridResult)) };
+}
+
+export async function runFindSimilarTool(args: FindSimilarToolArgs): Promise<{ results: ToolResultItem[] }> {
+  const key = typeof args?.item_key === 'string' ? args.item_key.trim().toUpperCase() : '';
+  if (!/^[A-Z0-9]{8}$/.test(key)) {
+    throw new Error('find_similar: "item_key" must be an 8-character Zotero item key');
+  }
+  const libraryKey = typeof args.library_key === 'string' && args.library_key.trim() ? args.library_key.trim() : 'user';
+  const topK = clampInt(args.max_results, 1, 100, 10);
+  const results = await searchEngine.findSimilarByIdentity(libraryKey, key, { topK });
+  return { results: await Promise.all(results.map(mapSearchResult)) };
+}
+
+export async function runIndexStatusTool(): Promise<object> {
+  const store = getVectorStore();
+  if (!store.isReady()) {
+    await store.init();
+  }
+  const stats = await store.getStats();
+  return {
+    ready: Zotero.ZotSeek?.api?.isReady?.() ?? false,
+    indexedPapers: stats.indexedPapers,
+    totalChunks: stats.totalChunks,
+    modelId: stats.modelId,
+    lastIndexed: stats.lastIndexed,
+    storageUsedBytes: stats.storageUsedBytes,
+  };
+}
