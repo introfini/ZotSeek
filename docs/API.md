@@ -4,6 +4,8 @@ ZotSeek exposes a JavaScript API at `Zotero.ZotSeek.api` that other Zotero plugi
 
 All operations are local — embeddings are generated via Transformers.js (ONNX Runtime, WASM) and stored in a local SQLite file. No network calls are made.
 
+> Looking for access from *outside* Zotero (CLI scripts, AI agents, MCP clients)? See [MCP.md](MCP.md) for the local MCP server and REST endpoints.
+
 ## Checking availability
 
 ```js

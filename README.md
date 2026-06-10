@@ -30,6 +30,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - ⏸️ **Pause & Cancel** - Pause or cancel long-running indexing operations at any time
 - 💾 **Crash-Resilient** - Checkpoint saving every 10 items, **auto-resume on next startup** if a bulk run was interrupted, worker recovery on sleep/wake, skips problematic chunks automatically
 - 🔌 **Plugin API** - Other Zotero plugins can [call ZotSeek's search programmatically](docs/API.md)
+- 🤖 **AI Agent Access (MCP)** - Let Claude Code and other MCP clients search your library, fully local and opt-in ([docs](docs/MCP.md))
 - ⚙️ **Configurable** - Customize via Zotero Settings → ZotSeek (also accessible from search dialog)
 - 🌐 **Localized** - UI available in English and Chinese (zh-CN)
 
@@ -406,6 +407,20 @@ Where:
 - 0.7-0.9 = Related topics
 - 0.5-0.7 = Loosely related
 - <0.5 = Different topics
+
+---
+
+## Use with AI Agents (MCP)
+
+ZotSeek can let **Claude Code** and other MCP clients search your library semantically, so an agent can find relevant papers and cite them with links that open straight to the right page in Zotero. Each result carries `zotero://` deep links: one opens the item, one opens its PDF at the exact page that matched your query.
+
+It runs entirely on your machine and is **opt-in** (off by default). Enable it in **Settings → ZotSeek → AI Agent Access**, make sure Zotero's local HTTP server is allowed (**Settings → Advanced**), then connect Claude Code with:
+
+```bash
+claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp
+```
+
+The same searches are also available as plain REST endpoints for scripts. Everything is read-only — nothing can modify your library or index. See [docs/MCP.md](docs/MCP.md) for the full setup, tool reference, REST API, and security notes.
 
 ---
 
