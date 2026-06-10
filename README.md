@@ -730,6 +730,7 @@ See the [docs/](docs/) folder for detailed documentation:
 - [**SEARCH_ARCHITECTURE.md**](docs/SEARCH_ARCHITECTURE.md) - Hybrid search, RRF fusion, chunking strategy
 - [**DEVELOPMENT.md**](docs/DEVELOPMENT.md) - Development guide, ChromeWorker + Transformers.js implementation
 - [**ROADMAP.md**](docs/ROADMAP.md) - Planned features and improvements
+- [**MCP.md**](docs/MCP.md) - Local MCP server and REST API for AI agents and scripts
 
 ---
 

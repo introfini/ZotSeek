@@ -124,6 +124,7 @@ curl 'http://localhost:23119/zotseek/search?q=transformer+attention&topK=2&mode=
 | `400` | Bad input (e.g. missing `q` / `itemKey`), with `{"error": "..."}` |
 | `403` | Request presents a forged non-local `Origin` header |
 | `404` | AI Agent Access is disabled (the endpoints are not registered) |
+| `500` | Unexpected internal failure on `GET /zotseek/stats`, with `{"error": "..."}` |
 
 ## Security
 
