@@ -31,6 +31,7 @@ import { toolbarButton } from './ui/toolbar-button';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 import { identityFromItem, libraryKeyFromLocalID } from './core/identity-resolver';
+import { initServerManager, shutdownServerManager } from './server/server-manager';
 // Self-test harness (mounted only when extensions.zotseek.devMode = true)
 import { selfTest as zotseekSelfTest } from './dev/self-test';
 // Task suites: imported for registration side effects only.
@@ -158,6 +159,7 @@ class ZotSeekPlugin {
       'zotseek.excludeBooks': true,        // Exclude books from search/indexing by default
       'zotseek.excludeTag': 'zotseek-exclude', // Tag name to exclude items from indexing
       'zotseek.indexStatusColumn.firstShown': false, // First-run flag for index-status column
+      'zotseek.mcpServer.enabled': false, // Opt-in local MCP/REST endpoints for AI agents
     };
 
     for (const [key, defaultValue] of Object.entries(defaults)) {
@@ -209,6 +211,9 @@ class ZotSeekPlugin {
 
     // Register preference pane
     this.registerPreferencePane();
+
+    // Local MCP/REST endpoints for AI agents (opt-in via preferences)
+    initServerManager();
 
     // Add toolbar button for semantic search
     const win = Z.getMainWindow();
@@ -1734,6 +1739,9 @@ class ZotSeekPlugin {
 
     // Stop auto-index manager
     autoIndexManager.stop();
+
+    // Unregister local MCP/REST endpoints and pref observer
+    shutdownServerManager();
 
     // Remove XUL-injected menu elements and toolbar button
     const Z = getZotero();

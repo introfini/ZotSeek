@@ -43,3 +43,7 @@ pref("extensions.zotero.zotseek.hybridSearch.autoAdjustWeights", true);
 // Dev mode: when true, mounts the self-test harness under Zotero.ZotSeek._selfTest
 // Used for autonomous verification via MCP. End users should leave this false.
 pref("extensions.zotero.zotseek.devMode", false);
+
+// Local MCP/REST endpoints for AI agents (Claude Code etc.). Opt-in:
+// exposes read-only semantic search on Zotero's local HTTP server (23119).
+pref("extensions.zotero.zotseek.mcpServer.enabled", false);
