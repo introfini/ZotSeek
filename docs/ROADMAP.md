@@ -22,6 +22,8 @@ Features that have shipped. Kept here for reference.
 | Resilient embedding (skip failed chunks with retry) | next | [#19](https://github.com/introfini/ZotSeek/issues/19) |
 | WebGPU detection with automatic CPU fallback | -- | [#2](https://github.com/introfini/ZotSeek/issues/2) |
 | JavaScript API on `Zotero.ZotSeek.api` (search, findSimilar, indexItems, getStats) | -- | [#13](https://github.com/introfini/ZotSeek/issues/13) |
+| Local MCP server for AI agents (`/zotseek/mcp`, opt-in, zotero:// deep links) | next | [#38](https://github.com/introfini/ZotSeek/issues/38) |
+| Native REST endpoints (`/zotseek/search`, `/similar`, `/stats`) | next | [#32](https://github.com/introfini/ZotSeek/issues/32) |
 
 ## Performance & Indexing
 

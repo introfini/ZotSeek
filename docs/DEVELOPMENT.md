@@ -309,6 +309,11 @@ zotseek/
 │   │   ├── storage-factory.ts
 │   │   ├── text-extractor.ts
 │   │   └── vector-store-sqlite.ts
+│   ├── server/               # Local MCP + REST endpoints (opt-in)
+│   │   ├── http-tools.ts     # Shared read-only tool layer
+│   │   ├── mcp-endpoint.ts   # MCP (JSON-RPC 2.0) endpoint
+│   │   ├── rest-endpoints.ts # GET /zotseek/search|similar|stats
+│   │   └── server-manager.ts # Registration + pref observer
 │   └── utils/                # Utilities
 │       ├── logger.ts
 │       └── zotero-api.ts
@@ -588,6 +593,16 @@ Common Zotero APIs:
 - `Zotero.Collections.get(id)` - Get collection
 - `Zotero.Fulltext.getItemContent(id)` - Get indexed full-text
 - `Zotero.Prefs.get/set(key, value)` - Plugin preferences
+
+### 6. Local HTTP Endpoints (`src/server/`)
+
+Opt-in MCP and REST endpoints registered on Zotero's built-in HTTP server (`Zotero.Server.Endpoints`, port 23119, loopback only), gated by the `zotseek.mcpServer.enabled` pref with a live observer (no restart needed). Three layers:
+
+- `http-tools.ts` — read-only adapters over `SearchEngine`/`HybridSearchEngine`, shared by both transports so result shapes cannot drift. Builds `zotero://` deep links per result.
+- `mcp-endpoint.ts` — stateless JSON-RPC 2.0 (MCP Streamable HTTP) endpoint exposing `search`, `find_similar`, `index_status` tools.
+- `rest-endpoints.ts` — plain `GET` endpoints for curl/scripts.
+
+Endpoint contracts and security notes live in [MCP.md](MCP.md). A 16-scenario self-test suite covers the protocol layer (`src/dev/suites/mcp-server.ts`, run via `Zotero.ZotSeek._selfTest.runSelfTest('mcp-server')` with the `devMode` pref enabled).
 
 ---
 

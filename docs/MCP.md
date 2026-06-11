@@ -28,7 +28,14 @@ For **Claude Code**, add it with:
 claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp
 ```
 
-Any MCP client that supports the HTTP transport works the same way (for example, a Claude Desktop custom connector). Point it at the URL above.
+For **OpenAI Codex**, add this to `~/.codex/config.toml` (or a project-scoped `.codex/config.toml`):
+
+```toml
+[mcp_servers.zotseek]
+url = "http://localhost:23119/zotseek/mcp"
+```
+
+Any other MCP client that supports the HTTP transport works the same way (for example, a Claude Desktop custom connector). Point it at the URL above.
 
 ## MCP Tools
 
