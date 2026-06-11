@@ -28,7 +28,13 @@ For **Claude Code**, add it with:
 claude mcp add --transport http --scope user zotseek http://localhost:23119/zotseek/mcp
 ```
 
-For **OpenAI Codex**, add this to `~/.codex/config.toml` (or a project-scoped `.codex/config.toml`):
+For **OpenAI Codex**, add it with (registers globally for your user):
+
+```bash
+codex mcp add zotseek --url http://localhost:23119/zotseek/mcp
+```
+
+or equivalently in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.zotseek]
