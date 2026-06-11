@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.16.0] - 2026-06-11
 
 ### Added
 - **Local MCP server for AI agents (opt-in)** (#38) — ZotSeek now speaks the Model Context Protocol on Zotero's local HTTP server, so MCP clients like Claude Code can run semantic searches over your library with no extra software. Results include `zotero://` deep links that open papers (or the exact matched PDF page) directly in Zotero, plus `http://localhost` launcher variants for chat clients that only render `http(s)` links as clickable. Enable it in **Settings → ZotSeek → AI Agent Access**.
