@@ -1,8 +1,10 @@
 # ZotSeek | AI-Powered Semantic Search for Zotero
 
-Find similar papers by **meaning**, not just keywords. 100% local, no data leaves your machine.
+Find similar papers by **meaning**, not just keywords. 100% local, no data leaves your machine. Now with a built-in **MCP server** for AI agents.
 
-> **Status:** ✅ Stable release with Transformers.js running locally in Zotero 8 and 9
+> **Status:** ✅ Stable release · Zotero 8 & 9 · Transformers.js running locally
+>
+> **New:** 🤖 **MCP server built in** — Claude Code, Codex, and any MCP client can search your library and cite papers with links that open straight to the matched PDF page. Fully local, read-only, opt-in. [Set it up in one line →](docs/MCP.md)
 
 ![ZotSeek Search Dialog](docs/images/search-dialog-by-section-hover.png)
 
@@ -413,6 +415,12 @@ Where:
 ## Use with AI Agents (MCP)
 
 ZotSeek can let **Claude Code** and other MCP clients search your library semantically, so an agent can find relevant papers and cite them with links that open straight to the right page in Zotero. Each result carries `zotero://` deep links: one opens the item, one opens its PDF at the exact page that matched your query.
+
+**What this enables** — real workflows from a thesis-writing session:
+
+- *"Find me a citable definition of human-AI collaboration"* → the agent searches the library, proposes three candidate papers with the matched passages, and links each one so it opens in Zotero at the relevant page.
+- Mark claims in a draft with `[citation needed]` → the agent hunts your library for sources that actually support each claim and flags the ones nothing supports.
+- *"A reviewer says these statements are too strong — what evidence do I have?"* → the agent cross-checks the argument against what you have actually collected, paper by paper.
 
 It runs entirely on your machine and is **opt-in** (off by default). Enable it in **Settings → ZotSeek → AI Agent Access**, make sure Zotero's local HTTP server is allowed (**Settings → Advanced**), then connect Claude Code with:
 
