@@ -652,9 +652,9 @@ class PreferencesManager {
       if (warningEl) warningEl.style.display = 'none';
       // Update command with actual port if it differs from the default
       if (cmdEl && port !== 23119) {
-        cmdEl.textContent = `claude mcp add --transport http zotseek http://localhost:${port}/zotseek/mcp`;
+        cmdEl.textContent = `claude mcp add --transport http --scope user zotseek http://localhost:${port}/zotseek/mcp`;
       } else if (cmdEl) {
-        cmdEl.textContent = 'claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp';
+        cmdEl.textContent = 'claude mcp add --transport http --scope user zotseek http://localhost:23119/zotseek/mcp';
       }
     } else {
       if (infoDiv) infoDiv.style.display = 'none';

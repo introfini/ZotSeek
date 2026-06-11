@@ -7,7 +7,7 @@
  * Zotero's DB connection can recycle mid-session, so the less state the
  * better; see CLAUDE.md pitfall #11).
  *
- * Connect with: claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp
+ * Connect with: claude mcp add --transport http --scope user zotseek http://localhost:23119/zotseek/mcp
  *
  * Module-level functions + plain-constructor endpoint (pitfall #6).
  */

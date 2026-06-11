@@ -417,7 +417,7 @@ ZotSeek can let **Claude Code** and other MCP clients search your library semant
 It runs entirely on your machine and is **opt-in** (off by default). Enable it in **Settings → ZotSeek → AI Agent Access**, make sure Zotero's local HTTP server is allowed (**Settings → Advanced**), then connect Claude Code with:
 
 ```bash
-claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp
+claude mcp add --transport http --scope user zotseek http://localhost:23119/zotseek/mcp
 ```
 
 The same searches are also available as plain REST endpoints for scripts. Everything is read-only — nothing can modify your library or index. See [docs/MCP.md](docs/MCP.md) for the full setup, tool reference, REST API, and security notes.

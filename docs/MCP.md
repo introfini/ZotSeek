@@ -25,7 +25,7 @@ The MCP endpoint is at `http://localhost:23119/zotseek/mcp` (Streamable HTTP tra
 For **Claude Code**, add it with:
 
 ```bash
-claude mcp add --transport http zotseek http://localhost:23119/zotseek/mcp
+claude mcp add --transport http --scope user zotseek http://localhost:23119/zotseek/mcp
 ```
 
 For **OpenAI Codex**, add this to `~/.codex/config.toml` (or a project-scoped `.codex/config.toml`):
