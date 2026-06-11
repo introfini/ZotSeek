@@ -14,6 +14,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 
 - 🔒 **100% Local** - No data sent to cloud, works completely offline
 - 🧠 **True Semantic Search** - Find papers by meaning, not just keywords
+- 🤖 **AI Agent Access (MCP)** - Let Claude Code and other MCP clients search your library, fully local and opt-in ([docs](docs/MCP.md))
 - 🔍 **Find Similar Documents** - Right-click any paper → discover related research
 - 📖 **Search from PDF Selection** - Select text while reading → right-click → find documents about that concept
 - 🔎 **Natural Language Search** - Search with queries like "machine learning in healthcare"
@@ -32,7 +33,6 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - ⏸️ **Pause & Cancel** - Pause or cancel long-running indexing operations at any time
 - 💾 **Crash-Resilient** - Checkpoint saving every 10 items, **auto-resume on next startup** if a bulk run was interrupted, worker recovery on sleep/wake, skips problematic chunks automatically
 - 🔌 **Plugin API** - Other Zotero plugins can [call ZotSeek's search programmatically](docs/API.md)
-- 🤖 **AI Agent Access (MCP)** - Let Claude Code and other MCP clients search your library, fully local and opt-in ([docs](docs/MCP.md))
 - ⚙️ **Configurable** - Customize via Zotero Settings → ZotSeek (also accessible from search dialog)
 - 🌐 **Localized** - UI available in English and Chinese (zh-CN)
 
