@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "ZotSeek | AI-Powered Semantic Search & MCP Server",
-  "version": "1.16.0",
+  "version": "1.16.1",
   "description": "AI-powered semantic search for your Zotero library, with a built-in MCP server for AI agents. Find similar papers by meaning, not just keywords.",
   "author": "José Fernandes",
   "homepage_url": "https://github.com/introfini/zotseek",
