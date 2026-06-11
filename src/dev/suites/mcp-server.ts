@@ -12,6 +12,7 @@ import { handleMcpRequest } from '../../server/mcp-endpoint';
 import { handleSearchRequest, handleStatsRequest } from '../../server/rest-endpoints';
 import { handleOpenRequest, parseOpenParams, buildZoteroUri } from '../../server/open-endpoint';
 import { registerEndpoints, isRegistered, unregisterEndpoints } from '../../server/server-manager';
+import { searchEngine } from '../../core/search-engine';
 
 declare const Zotero: any;
 
@@ -126,6 +127,44 @@ selfTest.register('mcp-server', async () => {
         'links.openPdfHttp is a local http launcher link'
       );
     }
+  }));
+
+  scenarios.push(await scenario('mode=semantic matches the JS API ordering (#38 parity)', async () => {
+    const q = 'collaboration methods analysis';
+    const apiResults = await searchEngine.search(q, { topK: 5, minSimilarity: 0.3 });
+    if (!apiResults.length) return; // empty index — nothing to compare
+    const { json } = await callMcp('tools/call', {
+      name: 'search',
+      arguments: { query: q, max_results: 5, mode: 'semantic', min_similarity: 0.3 },
+    });
+    const payload = parseToolPayload(json);
+    assertEq(
+      JSON.stringify(payload.results.map((r: any) => r.itemKey)),
+      JSON.stringify(apiResults.map(r => r.itemKey)),
+      'same items in the same order as Zotero.ZotSeek.api.search'
+    );
+  }));
+
+  scenarios.push(await scenario('mode=hybrid runs the auto-adjusted path without errors', async () => {
+    const { json } = await callMcp('tools/call', {
+      name: 'search',
+      arguments: { query: 'what influences trust in automated decisions', max_results: 3, mode: 'hybrid' },
+    });
+    assertTrue(!json.result.isError, 'no tool error');
+    assertTrue(Array.isArray(parseToolPayload(json).results), 'results array');
+  }));
+
+  scenarios.push(await scenario('min_similarity filters results monotonically', async () => {
+    const args = (min: number) => ({
+      name: 'search',
+      arguments: { query: 'analysis', max_results: 50, mode: 'semantic', min_similarity: min },
+    });
+    const loose = parseToolPayload((await callMcp('tools/call', args(0.1))).json);
+    const strict = parseToolPayload((await callMcp('tools/call', args(0.99))).json);
+    assertTrue(
+      strict.results.length <= loose.results.length,
+      `strict (${strict.results.length}) should return no more than loose (${loose.results.length})`
+    );
   }));
 
   scenarios.push(await scenario('tools/call search without query returns isError', async () => {

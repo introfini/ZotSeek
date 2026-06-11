@@ -52,6 +52,8 @@ export interface SearchToolArgs {
   max_results?: number;
   mode?: SearchMode;
   granularity?: 'papers' | 'passages';
+  /** 0-1; defaults to the user's minSimilarityPercent preference */
+  min_similarity?: number;
 }
 
 export interface FindSimilarToolArgs {
@@ -66,6 +68,32 @@ function clampInt(value: any, min: number, max: number, fallback: number): numbe
   const n = typeof value === 'string' ? parseInt(value, 10) : value;
   if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function clampFloat(value: any, min: number, max: number, fallback: number): number {
+  const n = typeof value === 'string' ? parseFloat(value) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+/** The user's minimum-similarity preference, as the UI reads it. */
+function prefMinSimilarity(): number {
+  try {
+    const pct = Zotero.Prefs.get('zotseek.minSimilarityPercent', true);
+    if (typeof pct === 'number' && pct >= 0 && pct <= 100) return pct / 100;
+  } catch {
+    // fall through to default
+  }
+  return 0.3;
+}
+
+/** The auto-adjust-weights preference, as the UI reads it (default true). */
+function prefAutoAdjustWeights(): boolean {
+  try {
+    return Zotero.Prefs.get('extensions.zotero.zotseek.hybridSearch.autoAdjustWeights', true) !== false;
+  } catch {
+    return true;
+  }
 }
 
 function round3(n: number): number {
@@ -180,7 +208,20 @@ export async function runSearchTool(args: SearchToolArgs): Promise<{ results: To
   const finalTopK = clampInt(args.max_results, 1, 100, 10);
   const mode: SearchMode = args.mode && VALID_MODES.includes(args.mode) ? args.mode : 'hybrid';
   const returnAllChunks = args.granularity === 'passages';
-  const results = await hybridEngine.search(args.query.trim(), { mode, finalTopK, returnAllChunks });
+  const minSimilarity =
+    args.min_similarity !== undefined
+      ? clampFloat(args.min_similarity, 0, 1, prefMinSimilarity())
+      : prefMinSimilarity();
+  const options = { mode, finalTopK, returnAllChunks, minSimilarity };
+  // Mirror the UI (search-dialog-vtable): hybrid mode with the auto-adjust
+  // pref uses smartSearch, which analyzes the query and tunes the
+  // semantic/keyword weight. Without this, MCP/REST hybrid ran a fixed
+  // 50/50 fusion and ranked differently from the ZotSeek dialog (#38).
+  const query = args.query.trim();
+  const results =
+    mode === 'hybrid' && prefAutoAdjustWeights()
+      ? await hybridEngine.smartSearch(query, options)
+      : await hybridEngine.search(query, options);
   return { results: await Promise.all(results.map(mapHybridResult)) };
 }
 

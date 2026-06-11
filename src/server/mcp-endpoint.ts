@@ -54,8 +54,18 @@ const TOOL_DEFINITIONS = [
           enum: ['hybrid', 'semantic', 'keyword'],
           default: 'hybrid',
           description:
-            'hybrid = semantic + keyword fused with RRF (same as the ZotSeek UI); ' +
-            'semantic = embeddings only; keyword = Zotero keyword search only',
+            'hybrid = semantic + keyword fused with RRF, honoring the user\'s ' +
+            'ZotSeek preferences including automatic weight adjustment (same ' +
+            'results as the ZotSeek dialog); semantic = embeddings only; ' +
+            'keyword = Zotero keyword search only',
+        },
+        min_similarity: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description:
+            'Minimum semantic similarity (0-1). Defaults to the user\'s ' +
+            'ZotSeek preference (typically 0.3).',
         },
         granularity: {
           type: 'string',

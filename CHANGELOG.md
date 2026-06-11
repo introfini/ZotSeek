@@ -2,6 +2,16 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `mode=hybrid` over MCP/REST now returns the same ranking as the ZotSeek dialog: it honors the hybrid-search preferences, including automatic weight adjustment and the user's minimum-similarity setting. Previously it ran a fixed 50/50 fusion, producing a different order than the UI for the same query. Reported in #38.
+
+### Added
+- `min_similarity` parameter (0–1) on the MCP `search` tool and `minSimilarity` on `GET /zotseek/search`, defaulting to the user's ZotSeek preference.
+
+---
+
 ## [1.16.0] - 2026-06-11
 
 ### Added

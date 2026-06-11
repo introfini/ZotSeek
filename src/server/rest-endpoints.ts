@@ -44,6 +44,9 @@ export async function handleSearchRequest(requestData: any): Promise<EndpointRes
       max_results: sp.get('topK') ? parseInt(sp.get('topK') as string, 10) : undefined,
       mode: (sp.get('mode') as any) || undefined,
       granularity: (sp.get('granularity') as any) || undefined,
+      min_similarity: sp.get('minSimilarity')
+        ? parseFloat(sp.get('minSimilarity') as string)
+        : undefined,
     });
     return json(200, payload);
   } catch (e: any) {
