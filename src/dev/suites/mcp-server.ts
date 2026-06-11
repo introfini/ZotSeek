@@ -10,7 +10,7 @@
 import { selfTest, scenario, assertEq, assertTrue, Scenario } from '../self-test';
 import { handleMcpRequest } from '../../server/mcp-endpoint';
 import { handleSearchRequest, handleStatsRequest } from '../../server/rest-endpoints';
-import { handleOpenRequest } from '../../server/open-endpoint';
+import { handleOpenRequest, parseOpenParams, buildZoteroUri } from '../../server/open-endpoint';
 import { registerEndpoints, isRegistered, unregisterEndpoints } from '../../server/server-manager';
 
 declare const Zotero: any;
@@ -165,26 +165,59 @@ selfTest.register('mcp-server', async () => {
     assertTrue(typeof JSON.parse(body).indexedPapers === 'number', 'indexedPapers present');
   }));
 
-  scenarios.push(await scenario('open launcher returns redirect HTML for a valid select', async () => {
+  scenarios.push(await scenario('open launcher parses and formats URIs correctly', async () => {
+    const sel = parseOpenParams(new URLSearchParams('target=select&key=abcd2345'));
+    assertTrue(!!sel, 'select params parse (key uppercased)');
+    assertEq(buildZoteroUri(sel!), 'zotero://select/library/items/ABCD2345', 'select URI');
+    const pdf = parseOpenParams(new URLSearchParams('target=pdf&key=WXYZ6789&library=group:123&page=11'));
+    assertTrue(!!pdf, 'group pdf params parse');
+    assertEq(
+      buildZoteroUri(pdf!),
+      'zotero://open-pdf/groups/123/items/WXYZ6789?page=11',
+      'group pdf URI with page'
+    );
+  }));
+
+  scenarios.push(await scenario('open launcher returns 404 for unknown item or group', async () => {
+    const [missingItem] = await handleOpenRequest({
+      headers: {},
+      searchParams: new URLSearchParams('target=select&key=ZZZZZZZZ'),
+    });
+    assertEq(missingItem, 404, 'unknown item key');
+    const [missingGroup] = await handleOpenRequest({
+      headers: {},
+      searchParams: new URLSearchParams('target=select&key=ABCD2345&library=group:999999999'),
+    });
+    assertEq(missingGroup, 404, 'unknown group library');
+  }));
+
+  scenarios.push(await scenario('open launcher ignores prefetch requests', async () => {
+    const [status] = await handleOpenRequest({
+      headers: { 'sec-purpose': 'prefetch' },
+      searchParams: new URLSearchParams('target=select&key=ZZZZZZZZ'),
+    });
+    assertEq(status, 204, 'prefetch gets 204 and no action');
+  }));
+
+  scenarios.push(await scenario('open launcher selects a real item end to end', async () => {
+    const keys = await Zotero.DB.columnQueryAsync(
+      "SELECT item_key FROM zotseek.items WHERE library_key = 'user' LIMIT 5"
+    ).then((r: any) => r || []);
+    let realKey: string | null = null;
+    for (const k of keys) {
+      if (Zotero.Items.getIDFromLibraryAndKey(Zotero.Libraries.userLibraryID, String(k))) {
+        realKey = String(k);
+        break;
+      }
+    }
+    if (!realKey) return; // nothing indexed/resolvable — covered by the 404 scenario
     const [status, contentType, body] = await handleOpenRequest({
       headers: {},
-      searchParams: new URLSearchParams('target=select&key=ABCD2345'),
+      searchParams: new URLSearchParams(`target=select&key=${realKey}`),
     });
     assertEq(status, 200, 'status');
     assertEq(contentType, 'text/html', 'content type');
-    assertTrue(body.includes('zotero://select/library/items/ABCD2345'), 'contains the zotero:// URI');
-  }));
-
-  scenarios.push(await scenario('open launcher builds group pdf URI with page', async () => {
-    const [status, , body] = await handleOpenRequest({
-      headers: {},
-      searchParams: new URLSearchParams('target=pdf&key=WXYZ6789&library=group:123&page=11'),
-    });
-    assertEq(status, 200, 'status');
-    assertTrue(
-      body.includes('zotero://open-pdf/groups/123/items/WXYZ6789?page=11'),
-      'contains the group pdf URI with page'
-    );
+    assertTrue(body.includes('Opened in Zotero'), 'confirmation page');
   }));
 
   scenarios.push(await scenario('open launcher rejects invalid input', async () => {

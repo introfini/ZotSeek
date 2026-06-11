@@ -9,7 +9,7 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 - **Native REST endpoints for scripts and CLI tools** (#32) — `GET /zotseek/search`, `GET /zotseek/similar`, and `GET /zotseek/stats` on `localhost:23119`, sharing the same read-only tool layer and result shapes as the MCP server.
 
 ### Technical
-- New `src/server/` module: a shared read-only tool layer over the existing search engines (`http-tools.ts`), a stateless JSON-RPC 2.0 endpoint implementing the MCP Streamable HTTP transport (`mcp-endpoint.ts`), REST endpoints (`rest-endpoints.ts`), a link launcher that forwards `http://localhost:23119/zotseek/open` clicks to `zotero://` deep links (`open-endpoint.ts`), and pref-observed registration on `Zotero.Server.Endpoints` gated by `zotseek.mcpServer.enabled` (`server-manager.ts`, default off, toggles live). Covered by a 19-scenario self-test suite. See [docs/MCP.md](docs/MCP.md).
+- New `src/server/` module: a shared read-only tool layer over the existing search engines (`http-tools.ts`), a stateless JSON-RPC 2.0 endpoint implementing the MCP Streamable HTTP transport (`mcp-endpoint.ts`), REST endpoints (`rest-endpoints.ts`), a link launcher (`open-endpoint.ts`) that performs select/open-PDF actions directly inside Zotero when `http://localhost:23119/zotseek/open` links are clicked (works even from embedded webviews that block `zotero://` handoff; prefetch-safe), and pref-observed registration on `Zotero.Server.Endpoints` gated by `zotseek.mcpServer.enabled` (`server-manager.ts`, default off, toggles live). Covered by a 21-scenario self-test suite. See [docs/MCP.md](docs/MCP.md).
 
 ---
 

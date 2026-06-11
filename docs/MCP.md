@@ -103,7 +103,7 @@ Each result carries `zotero://` deep links so an agent can cite a paper with a l
 
 These links work only on the machine where this Zotero instance is running. Used together with `matchedChunk.page`, they give an agent page-precise grounding: it can quote the matched passage and hand the user a link that opens the PDF right at that page.
 
-**Which form to use:** some chat clients only turn `http(s)://` URLs into clickable links and leave custom schemes like `zotero://` as plain text. The `*Http` variants exist for those clients: they point at `GET /zotseek/open` on the local server, which returns a tiny page that immediately forwards to the corresponding `zotero://` URI (the browser flashes open for a moment, then Zotero takes over). Clients that render `zotero://` links directly (Claude Code, for example) get a smoother jump with the plain `select`/`openPdf` forms.
+**Which form to use:** some chat clients only turn `http(s)://` URLs into clickable links and leave custom schemes like `zotero://` as plain text — and embedded webviews often block the protocol handoff even when the link is clicked. The `*Http` variants exist for those clients: they point at `GET /zotseek/open` on the local server, and since that request is answered by Zotero itself, the action happens directly inside Zotero (the item is selected, or the PDF opens at the page) — no `zotero://` handoff involved. The page that loads just confirms it. Clients that render `zotero://` links directly (Claude Code, for example) get a smoother jump with the plain `select`/`openPdf` forms.
 
 ## REST API
 
@@ -114,7 +114,7 @@ The same operations and result shapes are available as plain `GET` endpoints for
 | `GET /zotseek/search` | `q` *(required)*, `topK`, `mode`, `granularity` |
 | `GET /zotseek/similar` | `itemKey` *(required)*, `libraryKey` (`user` or `group:N`), `topK` |
 | `GET /zotseek/stats` | *(none)* |
-| `GET /zotseek/open` | `target` (`select` \| `pdf`) *(required)*, `key` *(required)*, `library` (`user` or `group:N`), `page` (pdf only) — returns an HTML page that forwards to the matching `zotero://` deep link |
+| `GET /zotseek/open` | `target` (`select` \| `pdf`) *(required)*, `key` *(required)*, `library` (`user` or `group:N`), `page` (pdf only) — selects the item or opens the PDF directly in Zotero and returns a confirmation page (`404` if the item isn't in this library) |
 
 Example:
 
@@ -156,7 +156,7 @@ curl 'http://localhost:23119/zotseek/search?q=transformer+attention&topK=2&mode=
 | **Opt-in** | Off by default; you enable it explicitly in ZotSeek settings |
 | **Read-only** | Nothing exposed here can modify your library or the index — search and stats only |
 | **Localhost only** | Endpoints bind to the loopback interface; not reachable from the network |
-| **Not reachable from web pages** | Zotero's server blocks browser-originated requests to the search and stats endpoints before they reach ZotSeek, and ZotSeek additionally validates the `Origin` header. The one deliberate exception is the `GET /zotseek/open` link launcher, which browsers can reach by design — it exposes no data and can only forward to a strictly validated `zotero://` deep link |
+| **Not reachable from web pages** | Zotero's server blocks browser-originated requests to the search and stats endpoints before they reach ZotSeek, and ZotSeek additionally validates the `Origin` header. The one deliberate exception is the `GET /zotseek/open` link launcher, which browsers can reach by design — it exposes no data and can only select an item or open a PDF in Zotero (strictly validated input, prefetch requests ignored) |
 | **100% local** | All search and inference run on your machine; no data leaves it |
 
 ## See also
