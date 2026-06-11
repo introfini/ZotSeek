@@ -1,4 +1,4 @@
-# ZotSeek | AI-Powered Semantic Search for Zotero
+# ZotSeek | AI-Powered Semantic Search & MCP Server for Zotero
 
 Find similar papers by **meaning**, not just keywords. 100% local, no data leaves your machine. Now with a built-in **MCP server** for AI agents.
 
