@@ -10,6 +10,7 @@
 import { selfTest, scenario, assertEq, assertTrue, Scenario } from '../self-test';
 import { handleMcpRequest } from '../../server/mcp-endpoint';
 import { handleSearchRequest, handleStatsRequest } from '../../server/rest-endpoints';
+import { handleOpenRequest } from '../../server/open-endpoint';
 import { registerEndpoints, isRegistered, unregisterEndpoints } from '../../server/server-manager';
 
 declare const Zotero: any;
@@ -115,6 +116,15 @@ selfTest.register('mcp-server', async () => {
         !r.links?.openPdf || r.links.openPdf.startsWith('zotero://open-pdf/'),
         'links.openPdf is a zotero://open-pdf link'
       );
+      assertTrue(
+        !r.links || /^http:\/\/localhost:\d+\/zotseek\/open\?target=select/.test(r.links.selectHttp),
+        'links.selectHttp is a local http launcher link'
+      );
+      assertTrue(
+        !r.links?.openPdfHttp ||
+          /^http:\/\/localhost:\d+\/zotseek\/open\?target=pdf/.test(r.links.openPdfHttp),
+        'links.openPdfHttp is a local http launcher link'
+      );
     }
   }));
 
@@ -153,6 +163,42 @@ selfTest.register('mcp-server', async () => {
     assertEq(status, 200, 'status');
     assertEq(contentType, 'application/json', 'content type');
     assertTrue(typeof JSON.parse(body).indexedPapers === 'number', 'indexedPapers present');
+  }));
+
+  scenarios.push(await scenario('open launcher returns redirect HTML for a valid select', async () => {
+    const [status, contentType, body] = await handleOpenRequest({
+      headers: {},
+      searchParams: new URLSearchParams('target=select&key=ABCD2345'),
+    });
+    assertEq(status, 200, 'status');
+    assertEq(contentType, 'text/html', 'content type');
+    assertTrue(body.includes('zotero://select/library/items/ABCD2345'), 'contains the zotero:// URI');
+  }));
+
+  scenarios.push(await scenario('open launcher builds group pdf URI with page', async () => {
+    const [status, , body] = await handleOpenRequest({
+      headers: {},
+      searchParams: new URLSearchParams('target=pdf&key=WXYZ6789&library=group:123&page=11'),
+    });
+    assertEq(status, 200, 'status');
+    assertTrue(
+      body.includes('zotero://open-pdf/groups/123/items/WXYZ6789?page=11'),
+      'contains the group pdf URI with page'
+    );
+  }));
+
+  scenarios.push(await scenario('open launcher rejects invalid input', async () => {
+    const bad = [
+      'target=select&key=../etc/passwd',
+      'target=select&key=ABCD234', // 7 chars
+      'target=nope&key=ABCD2345',
+      'target=pdf&key=ABCD2345&library=evil',
+      '',
+    ];
+    for (const qs of bad) {
+      const [status] = await handleOpenRequest({ headers: {}, searchParams: new URLSearchParams(qs) });
+      assertEq(status, 400, `status for "${qs}"`);
+    }
   }));
 
   scenarios.push(await scenario('end-to-end: HTTP initialize + tools/list', async () => {

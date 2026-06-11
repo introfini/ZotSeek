@@ -75,7 +75,9 @@ For `index_status`, `ready` is `true` when the index contains papers; the embedd
   },
   "links": {
     "select": "zotero://select/library/items/ABCD2345",
-    "openPdf": "zotero://open-pdf/library/items/WXYZ6789?page=3"
+    "selectHttp": "http://localhost:23119/zotseek/open?target=select&key=ABCD2345",
+    "openPdf": "zotero://open-pdf/library/items/WXYZ6789?page=3",
+    "openPdfHttp": "http://localhost:23119/zotseek/open?target=pdf&key=WXYZ6789&page=3"
   }
 }
 ```
@@ -96,8 +98,12 @@ Each result carries `zotero://` deep links so an agent can cite a paper with a l
 |-------|-------|-------|
 | `links.select` | The item in the Zotero main pane | Always present for a resolvable item |
 | `links.openPdf` | The item's PDF in Zotero's reader, at the matched page | Present only when the item has a PDF; the `?page=N` lands you on the exact page that matched |
+| `links.selectHttp` | Same as `select`, via a local http launcher | For clients that only linkify `http(s)` URLs |
+| `links.openPdfHttp` | Same as `openPdf`, via a local http launcher | Present whenever `openPdf` is |
 
 These links work only on the machine where this Zotero instance is running. Used together with `matchedChunk.page`, they give an agent page-precise grounding: it can quote the matched passage and hand the user a link that opens the PDF right at that page.
+
+**Which form to use:** some chat clients only turn `http(s)://` URLs into clickable links and leave custom schemes like `zotero://` as plain text. The `*Http` variants exist for those clients: they point at `GET /zotseek/open` on the local server, which returns a tiny page that immediately forwards to the corresponding `zotero://` URI (the browser flashes open for a moment, then Zotero takes over). Clients that render `zotero://` links directly (Claude Code, for example) get a smoother jump with the plain `select`/`openPdf` forms.
 
 ## REST API
 
@@ -108,6 +114,7 @@ The same operations and result shapes are available as plain `GET` endpoints for
 | `GET /zotseek/search` | `q` *(required)*, `topK`, `mode`, `granularity` |
 | `GET /zotseek/similar` | `itemKey` *(required)*, `libraryKey` (`user` or `group:N`), `topK` |
 | `GET /zotseek/stats` | *(none)* |
+| `GET /zotseek/open` | `target` (`select` \| `pdf`) *(required)*, `key` *(required)*, `library` (`user` or `group:N`), `page` (pdf only) — returns an HTML page that forwards to the matching `zotero://` deep link |
 
 Example:
 
@@ -127,7 +134,7 @@ curl 'http://localhost:23119/zotseek/search?q=transformer+attention&topK=2&mode=
       "score": 0.016,
       "source": "both",
       "matchedChunk": { "snippet": "The Transformer relies entirely on self-attention...", "page": 3, "textSource": "methods" },
-      "links": { "select": "zotero://select/library/items/ABCD2345", "openPdf": "zotero://open-pdf/library/items/WXYZ6789?page=3" }
+      "links": { "select": "zotero://select/library/items/ABCD2345", "selectHttp": "http://localhost:23119/zotseek/open?target=select&key=ABCD2345", "openPdf": "zotero://open-pdf/library/items/WXYZ6789?page=3", "openPdfHttp": "http://localhost:23119/zotseek/open?target=pdf&key=WXYZ6789&page=3" }
     }
   ]
 }
@@ -149,7 +156,7 @@ curl 'http://localhost:23119/zotseek/search?q=transformer+attention&topK=2&mode=
 | **Opt-in** | Off by default; you enable it explicitly in ZotSeek settings |
 | **Read-only** | Nothing exposed here can modify your library or the index — search and stats only |
 | **Localhost only** | Endpoints bind to the loopback interface; not reachable from the network |
-| **Not reachable from web pages** | Zotero's server blocks browser-originated requests before they reach the endpoint, and ZotSeek additionally validates the `Origin` header |
+| **Not reachable from web pages** | Zotero's server blocks browser-originated requests to the search and stats endpoints before they reach ZotSeek, and ZotSeek additionally validates the `Origin` header. The one deliberate exception is the `GET /zotseek/open` link launcher, which browsers can reach by design — it exposes no data and can only forward to a strictly validated `zotero://` deep link |
 | **100% local** | All search and inference run on your machine; no data leaves it |
 
 ## See also

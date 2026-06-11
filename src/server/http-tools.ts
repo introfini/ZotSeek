@@ -11,6 +11,7 @@ import { searchEngine, SearchResult } from '../core/search-engine';
 import { HybridSearchEngine, HybridSearchResult, SearchMode } from '../core/hybrid-search';
 import { getVectorStore } from '../core/storage-factory';
 import { identityFromItem } from '../core/identity-resolver';
+import { OPEN_PATH } from './open-endpoint';
 
 declare const Zotero: any;
 
@@ -26,8 +27,12 @@ export interface MatchedChunk {
 export interface ResultLinks {
   /** Selects the item in the Zotero main pane */
   select: string;
+  /** http launcher equivalent of `select`, for clients that only linkify http(s) URLs */
+  selectHttp: string;
   /** Opens the PDF in Zotero's reader, at the matched page when known */
   openPdf?: string;
+  /** http launcher equivalent of `openPdf` */
+  openPdfHttp?: string;
 }
 
 export interface ToolResultItem {
@@ -101,7 +106,14 @@ async function buildLinks(
   const isGroup = !!libraryKey && libraryKey.startsWith('group:');
   if (libraryKey !== 'user' && !isGroup) return undefined; // orphan/unknown: no stable link
   const prefix = isGroup ? `groups/${libraryKey!.slice('group:'.length)}` : 'library';
-  const links: ResultLinks = { select: `zotero://select/${prefix}/items/${itemKey}` };
+  // http launcher base for clients that don't linkify zotero:// URIs
+  const port = Zotero.Server?.port || 23119;
+  const openBase = `http://localhost:${port}${OPEN_PATH}`;
+  const libParam = isGroup ? `&library=${encodeURIComponent(libraryKey!)}` : '';
+  const links: ResultLinks = {
+    select: `zotero://select/${prefix}/items/${itemKey}`,
+    selectHttp: `${openBase}?target=select&key=${itemKey}${libParam}`,
+  };
   try {
     const libraryId = isGroup
       ? Zotero.Groups.getLibraryIDFromGroupID(Number(libraryKey!.slice('group:'.length)))
@@ -109,11 +121,13 @@ async function buildLinks(
     const item = Zotero.Items.getByLibraryAndKey(libraryId, itemKey);
     const att = item ? await item.getBestAttachment() : null;
     if (att && (typeof att.isPDFAttachment !== 'function' || att.isPDFAttachment())) {
-      links.openPdf =
-        `zotero://open-pdf/${prefix}/items/${att.key}` + (page ? `?page=${page}` : '');
+      const pageSuffix = page ? `?page=${page}` : '';
+      links.openPdf = `zotero://open-pdf/${prefix}/items/${att.key}${pageSuffix}`;
+      links.openPdfHttp =
+        `${openBase}?target=pdf&key=${att.key}${libParam}` + (page ? `&page=${page}` : '');
     }
   } catch {
-    // keep the select link only
+    // keep the select links only
   }
   return links;
 }

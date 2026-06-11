@@ -39,7 +39,10 @@ const TOOL_DEFINITIONS = [
       'excerpts and page numbers where available. Each result carries ' +
       'zotero:// deep links: links.select opens the item in Zotero, ' +
       'links.openPdf opens the PDF at the matched page — include them when ' +
-      'citing results to the user. 100% local; no data leaves the machine. ' +
+      'citing results to the user. If your client does not render zotero:// ' +
+      'URIs as clickable links, use links.selectHttp / links.openPdfHttp ' +
+      'instead (same action via a local http launcher). 100% local; no data ' +
+      'leaves the machine. ' +
       'Hybrid-mode scores are RRF values (small numbers, ~0.005-0.03) meaningful only for ranking within one result set; semantic-mode scores are 0-1 cosine similarities.',
     inputSchema: {
       type: 'object',
@@ -71,7 +74,9 @@ const TOOL_DEFINITIONS = [
     description:
       'Find papers similar to a known library item, using its stored ' +
       'embeddings. Identify the item by its 8-character Zotero item key. ' +
-      'Results carry zotero:// deep links (links.select / links.openPdf).',
+      'Results carry zotero:// deep links (links.select / links.openPdf; ' +
+      'use the links.selectHttp / links.openPdfHttp variants when your ' +
+      'client only linkifies http URLs).',
     inputSchema: {
       type: 'object',
       properties: {
