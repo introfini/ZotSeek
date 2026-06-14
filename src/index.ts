@@ -57,6 +57,7 @@ import './dev/suites/task-37e-model-download';
  */
 type BulkScope =
   | { type: 'library'; libraryId: number }
+  | { type: 'all-libraries' }
   | { type: 'collection'; libraryId: number; collectionId: number };
 
 interface PluginInfo {
@@ -322,11 +323,14 @@ class ZotSeekPlugin {
     let items: any[] = [];
     let label = '';
     try {
-      if (scope.type === 'library') {
-        items = await this.zoteroAPI.getLibraryItems();
+      if (scope.type === 'all-libraries') {
+        items = await this.zoteroAPI.getAllLibraryItems();
+        label = getString('resume-scopeLibrary');
+      } else if (scope.type === 'library') {
+        items = await this.zoteroAPI.getLibraryItems(scope.libraryId);
         label = getString('resume-scopeLibrary');
       } else {
-        items = await this.zoteroAPI.getCollectionItems(scope.collectionId);
+        items = await this.zoteroAPI.getCollectionItems(scope.collectionId, scope.libraryId);
         const collection = await Z.Collections.getAsync(scope.collectionId);
         label = collection?.name
           ? getString('resume-scopeCollection', { name: collection.name })
@@ -685,7 +689,7 @@ class ZotSeekPlugin {
   }
 
   /**
-   * Public method to index the entire library (called from preferences pane)
+   * Public method to index all libraries (called from preferences pane)
    */
   public indexLibrary(): void {
     this.onIndexLibrary();
@@ -985,7 +989,7 @@ class ZotSeekPlugin {
   }
 
   /**
-   * Index entire library
+   * Index all libraries (user + groups)
    */
   private async onIndexLibrary(): Promise<void> {
     if (this.indexing) {
@@ -1005,12 +1009,11 @@ class ZotSeekPlugin {
 
     if (!confirmed) return;
 
-    this.logger.info('Indexing entire library');
-    const items = await this.zoteroAPI.getLibraryItems();
-    this.logger.info(`Found ${items.length} items to index`);
+    this.logger.info('Indexing all libraries');
+    const items = await this.zoteroAPI.getAllLibraryItems();
+    this.logger.info(`Found ${items.length} items to index across all libraries`);
 
-    const libraryId = (Z.Libraries?.userLibraryID ?? items[0]?.libraryID ?? 1) as number;
-    await this.indexItems(items, { type: 'library', libraryId });
+    await this.indexItems(items, { type: 'all-libraries' });
   }
 
   /**

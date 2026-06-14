@@ -8,7 +8,7 @@ zotseek-menu-findSimilar = Find Similar Documents
 zotseek-menu-openZotSeek = Open ZotSeek...
 zotseek-menu-indexSelected = Index Selected for ZotSeek
 zotseek-menu-indexCollection = Index Current Collection
-zotseek-menu-updateLibrary = Update Library Index
+zotseek-menu-updateLibrary = Update All Libraries Index
 zotseek-menu-removeFromIndex = Remove from ZotSeek Index
 zotseek-menu-findRelated = Find Related Documents
 
@@ -261,12 +261,12 @@ zotseek-indexing-selectCollection = Please select a collection first.
     (Click on a collection in the left sidebar)
 zotseek-indexing-emptyCollection = Collection "{ $name }" has no items to index.
 zotseek-indexing-updateTitle = ZotSeek - Update Library Index
-zotseek-indexing-updateConfirmMsg = This will index all unindexed items in your library for semantic search.
+zotseek-indexing-updateConfirmMsg = This will index all unindexed items in all your libraries (personal + groups) for semantic search.
 
 # Auto-resume prompt shown at startup when a previous bulk-index run was interrupted.
 zotseek-resume-title = ZotSeek - Resume Indexing
 zotseek-resume-message = A previous indexing run was interrupted. { $count } item(s) in { $scope } are still pending. Resume now?
-zotseek-resume-scopeLibrary = your library
+zotseek-resume-scopeLibrary = your libraries
 zotseek-resume-scopeCollection = the "{ $name }" collection
 
     Items that are already indexed will be skipped.

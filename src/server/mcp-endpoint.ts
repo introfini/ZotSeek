@@ -75,6 +75,12 @@ const TOOL_DEFINITIONS = [
             'papers = one result per paper (best-matching chunk); ' +
             'passages = every matching chunk as its own result',
         },
+        library_key: {
+          type: 'string',
+          description:
+            "'user' for the personal library, or 'group:<groupID>' to limit the search to one group library. " +
+            'Omit to search all indexed libraries.',
+        },
       },
       required: ['query'],
     },
