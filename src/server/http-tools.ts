@@ -55,6 +55,8 @@ export interface SearchToolArgs {
   granularity?: 'papers' | 'passages';
   /** 0-1; defaults to the user's minSimilarityPercent preference */
   min_similarity?: number;
+  /** 'user' for the personal library, or 'group:<groupID>' to limit the search to one group library. Omit to search all indexed libraries. */
+  library_key?: string;
 }
 
 export interface FindSimilarToolArgs {
@@ -202,6 +204,20 @@ export function isAllowedOrigin(origin: string | null | undefined): boolean {
   return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin);
 }
 
+function resolveLibraryId(libraryKey: string | undefined): number | undefined {
+  if (!libraryKey || typeof libraryKey !== 'string') return undefined;
+  const key = libraryKey.trim();
+  if (!key || key === 'user') return Zotero.Libraries.userLibraryID;
+  if (key.startsWith('group:')) {
+    const groupId = Number(key.slice('group:'.length).trim());
+    if (!Number.isFinite(groupId) || groupId <= 0) {
+      throw new Error(`search: invalid group library key "${libraryKey}"`);
+    }
+    return Zotero.Groups.getLibraryIDFromGroupID(groupId);
+  }
+  throw new Error(`search: library_key must be "user" or "group:<groupID>", got "${libraryKey}"`);
+}
+
 export async function runSearchTool(args: SearchToolArgs): Promise<{ results: ToolResultItem[] }> {
   if (!args || typeof args.query !== 'string' || !args.query.trim()) {
     throw new Error('search: "query" is required and must be a non-empty string');
@@ -213,7 +229,11 @@ export async function runSearchTool(args: SearchToolArgs): Promise<{ results: To
     args.min_similarity !== undefined
       ? clampFloat(args.min_similarity, 0, 1, prefMinSimilarity())
       : prefMinSimilarity();
-  const options = { mode, finalTopK, returnAllChunks, minSimilarity };
+  const libraryId = resolveLibraryId(args.library_key);
+  const options: any = { mode, finalTopK, returnAllChunks, minSimilarity };
+  if (libraryId !== undefined) {
+    options.libraryId = libraryId;
+  }
   // Mirror the UI (search-dialog-vtable): hybrid mode with the auto-adjust
   // pref uses smartSearch, which analyzes the query and tunes the
   // semantic/keyword weight. Without this, MCP/REST hybrid ran a fixed

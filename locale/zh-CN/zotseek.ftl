@@ -8,7 +8,7 @@ zotseek-menu-findSimilar = 查找相似文献
 zotseek-menu-openZotSeek = 打开 ZotSeek...
 zotseek-menu-indexSelected = 为 ZotSeek 索引选中项
 zotseek-menu-indexCollection = 索引当前合集
-zotseek-menu-updateLibrary = 更新文献库索引
+zotseek-menu-updateLibrary = 更新所有文献库索引
 zotseek-menu-removeFromIndex = 从 ZotSeek 索引中移除
 zotseek-menu-findRelated = 查找相关文献
 
@@ -261,12 +261,12 @@ zotseek-indexing-selectCollection = 请先选择一个合集。
     （在左侧边栏中点击一个合集）
 zotseek-indexing-emptyCollection = 合集"{ $name }"没有可索引的条目。
 zotseek-indexing-updateTitle = ZotSeek - 更新文献库索引
-zotseek-indexing-updateConfirmMsg = 这将为文献库中所有未索引的条目建立语义搜索索引。
+zotseek-indexing-updateConfirmMsg = 这将为所有文献库（个人库 + 群组库）中未索引的条目建立语义搜索索引。
 
 # 启动时检测到先前中断的索引任务时显示的恢复提示。
 zotseek-resume-title = ZotSeek - 恢复索引
 zotseek-resume-message = 上一次索引被中断。{ $scope }中仍有 { $count } 个条目待处理。现在恢复？
-zotseek-resume-scopeLibrary = 您的文献库
+zotseek-resume-scopeLibrary = 您的所有文献库
 zotseek-resume-scopeCollection = "{ $name }" 收藏夹
 
     已索引的条目将被跳过。

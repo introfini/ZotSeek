@@ -82,10 +82,10 @@ export class ZoteroAPI {
    * Get all items in a collection using Search API
    * Reference: https://windingwind.github.io/doc-for-zotero-plugin-dev/main/search-operations.html
    */
-  async getCollectionItems(collectionId: number): Promise<ZoteroItem[]> {
+  async getCollectionItems(collectionId: number, libraryId?: number): Promise<ZoteroItem[]> {
     try {
       const s = new Zotero.Search();
-      s.libraryID = Zotero.Libraries.userLibraryID;
+      s.libraryID = libraryId || Zotero.Libraries.userLibraryID;
       s.addCondition('collectionID', 'is', collectionId);
       s.addCondition('recursive', 'true');  // Include subcollections
       s.addCondition('itemType', 'isNot', 'attachment');
@@ -127,6 +127,44 @@ export class ZoteroAPI {
       debug(`Failed to get library items: ${error}`);
       return [];
     }
+  }
+
+  /**
+   * Get all indexable libraries (user + groups, excluding feeds).
+   */
+  getAllLibraries(): Array<{ libraryID: number; name: string; libraryType: string; groupID?: number }> {
+    try {
+      const libs: any[] = Zotero.Libraries.getAll();
+      return libs
+        .filter((lib: any) => lib.libraryType === 'user' || lib.libraryType === 'group')
+        .map((lib: any) => ({
+          libraryID: lib.libraryID,
+          name: lib.name,
+          libraryType: lib.libraryType,
+          groupID: lib.groupID,
+        }));
+    } catch (error) {
+      debug(`Failed to get all libraries: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get all regular items across all indexable libraries (user + groups).
+   */
+  async getAllLibraryItems(): Promise<ZoteroItem[]> {
+    const libraries = this.getAllLibraries();
+    const allItems: ZoteroItem[] = [];
+    for (const lib of libraries) {
+      try {
+        const items = await this.getLibraryItems(lib.libraryID);
+        debug(`Got ${items.length} items from library ${lib.name} (${lib.libraryType})`);
+        allItems.push(...items);
+      } catch (error) {
+        debug(`Failed to get items for library ${lib.name}: ${error}`);
+      }
+    }
+    return allItems;
   }
 
   /**
