@@ -8,7 +8,7 @@ zotseek-menu-findSimilar = Find Similar Documents
 zotseek-menu-openZotSeek = Open ZotSeek...
 zotseek-menu-indexSelected = Index Selected for ZotSeek
 zotseek-menu-indexCollection = Index Current Collection
-zotseek-menu-updateLibrary = Update All Libraries Index
+zotseek-menu-updateLibrary = Update Library Index
 zotseek-menu-removeFromIndex = Remove from ZotSeek Index
 zotseek-menu-findRelated = Find Related Documents
 
@@ -55,10 +55,16 @@ zotseek-pref-mcpServerWarning = Zotero's local HTTP server is disabled. Enable "
 zotseek-pref-autoIndexing = Auto-Indexing
 zotseek-pref-autoIndexLabel =
     .label = Automatically index new items
-zotseek-pref-autoIndexDesc = New papers with PDFs are indexed in the background when added to your library.
+zotseek-pref-autoIndexDesc = New papers with PDFs are indexed in the background when added to the selected libraries.
 zotseek-pref-delayLabel = Delay before indexing:
 zotseek-pref-seconds = seconds
 zotseek-pref-delayDesc = Wait this long after the last item is added before starting auto-indexing.
+zotseek-pref-indexScope = Index scope
+zotseek-pref-indexScopeUser =
+ .label = My Library
+zotseek-pref-indexScopeAll =
+ .label = All libraries
+zotseek-pref-indexScopeDesc = Choose which libraries are included when updating or auto-indexing the index.
 zotseek-pref-searchSettings = Search Settings
 zotseek-pref-resultsToShow = Results to show
 zotseek-pref-resultsToShowDesc = How many matches to display (5-100)
@@ -78,7 +84,7 @@ zotseek-pref-actions = Actions
 zotseek-pref-updateIndex =
     .label = Update Index
 zotseek-pref-recommended = ✓ Recommended
-zotseek-pref-updateIndexDesc = Index all unindexed items in your library. Resumes safely from where you left off.
+zotseek-pref-updateIndexDesc = Index all unindexed items in the selected libraries. Resumes safely from where you left off.
 zotseek-pref-rebuildIndex =
     .label = Rebuild Index
 zotseek-pref-rebuildIndexDesc = Clear and re-index all items with current settings. Use after changing indexing mode.
@@ -261,12 +267,15 @@ zotseek-indexing-selectCollection = Please select a collection first.
     (Click on a collection in the left sidebar)
 zotseek-indexing-emptyCollection = Collection "{ $name }" has no items to index.
 zotseek-indexing-updateTitle = ZotSeek - Update Library Index
-zotseek-indexing-updateConfirmMsg = This will index all unindexed items in all your libraries (personal + groups) for semantic search.
+zotseek-indexing-updateConfirmMsg = This will index all unindexed items in { $scope } for semantic search.
+zotseek-indexing-scopeUser = your personal library
+zotseek-indexing-scopeAll = all your libraries (personal + groups)
 
 # Auto-resume prompt shown at startup when a previous bulk-index run was interrupted.
 zotseek-resume-title = ZotSeek - Resume Indexing
 zotseek-resume-message = A previous indexing run was interrupted. { $count } item(s) in { $scope } are still pending. Resume now?
 zotseek-resume-scopeLibrary = your libraries
+zotseek-resume-scopeUserLibrary = your personal library
 zotseek-resume-scopeCollection = the "{ $name }" collection
 
     Items that are already indexed will be skipped.

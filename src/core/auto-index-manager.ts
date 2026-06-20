@@ -250,6 +250,19 @@ export class AutoIndexManager {
       // Ignore tag check errors
     }
 
+    // Respect index scope preference
+    try {
+      const indexScope = Zotero.Prefs.get('zotseek.indexScope', true);
+      if (indexScope === 'user') {
+        const userLibraryID = Zotero.Libraries.userLibraryID;
+        if (item.libraryID !== userLibraryID) {
+          return false;
+        }
+      }
+    } catch {
+      // Ignore preference errors
+    }
+
     return true;
   }
 

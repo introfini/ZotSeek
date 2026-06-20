@@ -170,6 +170,7 @@ class ZotSeekPlugin {
       'zotseek.indexStatusColumn.firstShown': false, // First-run flag for index-status column
       'zotseek.mcpServer.enabled': false, // Opt-in local MCP/REST endpoints for AI agents
       'zotseek.embeddingModel': 'nomic-embed-text-v1.5',
+      'zotseek.indexScope': 'user', // 'user' (My Library) or 'all' (all libraries)
     };
 
     for (const [key, defaultValue] of Object.entries(defaults)) {
@@ -328,7 +329,10 @@ class ZotSeekPlugin {
         label = getString('resume-scopeLibrary');
       } else if (scope.type === 'library') {
         items = await this.zoteroAPI.getLibraryItems(scope.libraryId);
-        label = getString('resume-scopeLibrary');
+        const userLibraryID = Z.Libraries.userLibraryID;
+        label = scope.libraryId === userLibraryID
+          ? getString('resume-scopeUserLibrary')
+          : getString('resume-scopeLibrary');
       } else {
         items = await this.zoteroAPI.getCollectionItems(scope.collectionId, scope.libraryId);
         const collection = await Z.Collections.getAsync(scope.collectionId);
@@ -989,8 +993,24 @@ class ZotSeekPlugin {
   }
 
   /**
+   * Read the user's index scope preference.
+   * 'user' = My Library only, 'all' = all libraries (user + groups).
+   */
+  private getIndexScope(): 'user' | 'all' {
+    const Z = getZotero();
+    try {
+      const scope = Z?.Prefs.get('zotseek.indexScope', true);
+      if (scope === 'all') return 'all';
+    } catch (e: any) {
+      this.logger.debug(`Could not read indexScope pref: ${e?.message || e}`);
+    }
+    return 'user';
+  }
+
+  /**
    * Index all libraries (user + groups)
    */
+
   private async onIndexLibrary(): Promise<void> {
     if (this.indexing) {
       this.showAlert(getString('indexing-alreadyInProgress'));
@@ -1000,20 +1020,34 @@ class ZotSeekPlugin {
     const Z = getZotero();
     if (!Z) return;
 
-    // Use Services.prompt for Zotero 8 compatibility
+    const scope = this.getIndexScope();
+    const userLibraryID = Z.Libraries.userLibraryID;
+
+    let items: any[];
+    let bulkScope: BulkScope;
+    let scopeLabel: string;
+    if (scope === 'all') {
+      this.logger.info('Indexing all libraries');
+      items = await this.zoteroAPI.getAllLibraryItems();
+      bulkScope = { type: 'all-libraries' };
+      scopeLabel = getString('indexing-scopeAll');
+    } else {
+      this.logger.info('Indexing user library only');
+      items = await this.zoteroAPI.getLibraryItems(userLibraryID);
+      bulkScope = { type: 'library', libraryId: userLibraryID };
+      scopeLabel = getString('indexing-scopeUser');
+    }
+    this.logger.info(`Found ${items.length} items to index`);
+
     const confirmed = Services.prompt.confirm(
       Z.getMainWindow(),
       getString('indexing-updateTitle'),
-      getString('indexing-updateConfirmMsg')
+      getString('indexing-updateConfirmMsg', { scope: scopeLabel })
     );
 
     if (!confirmed) return;
 
-    this.logger.info('Indexing all libraries');
-    const items = await this.zoteroAPI.getAllLibraryItems();
-    this.logger.info(`Found ${items.length} items to index across all libraries`);
-
-    await this.indexItems(items, { type: 'all-libraries' });
+    await this.indexItems(items, bulkScope);
   }
 
   /**
