@@ -282,6 +282,19 @@
   <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
     <html:span data-l10n-id="zotseek-pref-delayDesc">Wait this long after the last item is added before starting auto-indexing.</html:span>
   </html:p>
+
+  <html:div style="margin: 12px 0 0 24px; display: flex; align-items: center; gap: 8px;">
+    <html:label data-l10n-id="zotseek-pref-indexScope" for="zotseek-pref-indexScope" style="color: var(--zotseek-text-primary); font-size: 12px;">Index scope:</html:label>
+    <menulist id="zotseek-pref-indexScope" native="true">
+      <menupopup>
+        <menuitem label="My Library" value="user" data-l10n-id="zotseek-pref-indexScopeUser" />
+        <menuitem label="All libraries" value="all" data-l10n-id="zotseek-pref-indexScopeAll" />
+      </menupopup>
+    </menulist>
+  </html:div>
+  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    <html:span data-l10n-id="zotseek-pref-indexScopeDesc">Choose which libraries are included when updating or auto-indexing the index.</html:span>
+  </html:p>
 </groupbox>
 
 <!-- Search Settings -->

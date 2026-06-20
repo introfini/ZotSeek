@@ -7,6 +7,9 @@ pref("extensions.zotero.zotseek.topK", 20);
 pref("extensions.zotero.zotseek.autoIndex", false);
 pref("extensions.zotero.zotseek.autoIndexDelay", 10);
 
+// Index scope: "user" (My Library only) or "all" (all libraries including groups)
+pref("extensions.zotero.zotseek.indexScope", "user");
+
 // Indexing mode: "abstract" (title+abstract) or "full" (abstract + PDF sections)
 pref("extensions.zotero.zotseek.indexingMode", "abstract");
 

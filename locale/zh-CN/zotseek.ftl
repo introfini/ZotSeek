@@ -8,7 +8,7 @@ zotseek-menu-findSimilar = 查找相似文献
 zotseek-menu-openZotSeek = 打开 ZotSeek...
 zotseek-menu-indexSelected = 为 ZotSeek 索引选中项
 zotseek-menu-indexCollection = 索引当前合集
-zotseek-menu-updateLibrary = 更新所有文献库索引
+zotseek-menu-updateLibrary = 更新文献库索引
 zotseek-menu-removeFromIndex = 从 ZotSeek 索引中移除
 zotseek-menu-findRelated = 查找相关文献
 
@@ -55,10 +55,16 @@ zotseek-pref-mcpServerWarning = Zotero 的本地 HTTP 服务器已禁用。请�
 zotseek-pref-autoIndexing = 自动索引
 zotseek-pref-autoIndexLabel =
     .label = 自动索引新条目
-zotseek-pref-autoIndexDesc = 添加到文献库的新文献将在后台自动索引。
+zotseek-pref-autoIndexDesc = 添加到所选文献库的新文献将在后台自动索引。
 zotseek-pref-delayLabel = 索引前延迟：
 zotseek-pref-seconds = 秒
 zotseek-pref-delayDesc = 添加最后一个条目后等待这么长时间再开始自动索引。
+zotseek-pref-indexScope = 索引范围
+zotseek-pref-indexScopeUser =
+ .label = 我的文献库
+zotseek-pref-indexScopeAll =
+ .label = 所有文献库
+zotseek-pref-indexScopeDesc = 选择更新索引或自动索引时包含哪些文献库。
 zotseek-pref-searchSettings = 搜索设置
 zotseek-pref-resultsToShow = 显示结果数
 zotseek-pref-resultsToShowDesc = 显示多少个匹配结果（5-100）
@@ -78,7 +84,7 @@ zotseek-pref-actions = 操作
 zotseek-pref-updateIndex =
     .label = 更新索引
 zotseek-pref-recommended = ✓ 推荐
-zotseek-pref-updateIndexDesc = 索引文献库中所有未索引的条目。可从上次中断处安全恢复。
+zotseek-pref-updateIndexDesc = 索引所选文献库中所有未索引的条目。可从上次中断处安全恢复。
 zotseek-pref-rebuildIndex =
     .label = 重建索引
 zotseek-pref-rebuildIndexDesc = 清除并使用当前设置重新索引所有条目。更改索引模式后使用。
@@ -261,12 +267,15 @@ zotseek-indexing-selectCollection = 请先选择一个合集。
     （在左侧边栏中点击一个合集）
 zotseek-indexing-emptyCollection = 合集"{ $name }"没有可索引的条目。
 zotseek-indexing-updateTitle = ZotSeek - 更新文献库索引
-zotseek-indexing-updateConfirmMsg = 这将为所有文献库（个人库 + 群组库）中未索引的条目建立语义搜索索引。
+zotseek-indexing-updateConfirmMsg = 这将为{ $scope }中未索引的条目建立语义搜索索引。
+zotseek-indexing-scopeUser = 您的个人文献库
+zotseek-indexing-scopeAll = 您的所有文献库（个人 + 群组）
 
 # 启动时检测到先前中断的索引任务时显示的恢复提示。
 zotseek-resume-title = ZotSeek - 恢复索引
 zotseek-resume-message = 上一次索引被中断。{ $scope }中仍有 { $count } 个条目待处理。现在恢复？
 zotseek-resume-scopeLibrary = 您的所有文献库
+zotseek-resume-scopeUserLibrary = 您的个人文献库
 zotseek-resume-scopeCollection = "{ $name }" 收藏夹
 
     已索引的条目将被跳过。

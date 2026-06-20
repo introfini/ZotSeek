@@ -239,6 +239,7 @@ class PreferencesManager {
       autoIndex: Z.Prefs.get('zotseek.autoIndex', true) ?? false,
       autoIndexDelay: Z.Prefs.get('zotseek.autoIndexDelay', true) ?? 10,
       mcpServer: Z.Prefs.get('zotseek.mcpServer.enabled', true) ?? false,
+      indexScope: Z.Prefs.get('zotseek.indexScope', true) || 'user',
     };
 
     this.logger.debug(`Loaded preferences: ${JSON.stringify(prefs)}`);
@@ -267,6 +268,9 @@ class PreferencesManager {
 
     // Set text input values
     this.setInputValue('zotseek-pref-excludeTag', prefs.excludeTag);
+
+    // Set index scope menulist
+    this.setMenulistValue('zotseek-pref-indexScope', prefs.indexScope);
 
     // Update mode cards to match current selection
     this.updateModeCards();
@@ -451,6 +455,18 @@ class PreferencesManager {
         Z.Prefs.set('zotseek.mcpServer.enabled', checked, true);
         this.logger.info(`MCP server enabled changed to: ${checked}`);
         this.updateMcpServerVisibility(checked);
+      });
+    }
+
+    // Index scope change
+    const indexScopeMenu = doc.getElementById('zotseek-pref-indexScope') as any;
+    if (indexScopeMenu) {
+      indexScopeMenu.addEventListener('command', () => {
+        const value = indexScopeMenu.selectedItem?.value;
+        if (value) {
+          Z.Prefs.set('zotseek.indexScope', value, true);
+          this.logger.info(`Index scope changed to: ${value}`);
+        }
       });
     }
 
