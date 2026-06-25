@@ -6,8 +6,42 @@
 import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
 import { autoIndexManager } from '../core/auto-index-manager';
+import { getAllModels, getActiveModelId } from '../core/model-registry';
+import { isModelOnDisk } from '../core/model-download';
+import { vectorStoreSQLite } from '../core/vector-store-sqlite';
 
 declare const Services: any;
+
+async function populateModelMenu(doc: any): Promise<void> {
+  const menu = doc.getElementById('zotseek-pref-embeddingModel');
+  if (!menu) return;
+  const popup = menu.querySelector('menupopup');
+  if (!popup) return;
+  popup.replaceChildren();
+  for (const m of getAllModels()) {
+    const onDisk = m.bundled || await isModelOnDisk(m);
+    const status = m.bundled ? 'Bundled' : (onDisk ? 'Downloaded' : `Download · ${m.approxSizeMB} MB`);
+    const mi = doc.createXULElement('menuitem');
+    mi.setAttribute('value', m.id);
+    mi.setAttribute('label', `${m.label} · ${m.dimensions}d${m.multilingual ? ' · multilingual' : ''} · ${status}`);
+    popup.appendChild(mi);
+  }
+  const active = getActiveModelId();
+  const items = popup.querySelectorAll('menuitem');
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].getAttribute('value') === active) { menu.selectedIndex = i; break; }
+  }
+}
+
+async function renderCoverage(doc: any): Promise<void> {
+  const active = getActiveModelId();
+  const { covered, total } = await vectorStoreSQLite.getCoverage(active);
+  const el = doc.getElementById('zotseek-embeddingModel-coverage');
+  if (!el) return;
+  el.textContent = total === 0
+    ? 'No items indexed yet.'
+    : `${covered} of ${total} items searchable with the active model.`;
+}
 
 class PreferencesManager {
   private window: Window | null = null;
@@ -35,6 +69,10 @@ class PreferencesManager {
 
       // Initialize preferences
       this.initPreferences();
+
+      // Populate model selector and coverage line
+      await populateModelMenu(this.window.document);
+      await renderCoverage(this.window.document);
 
       // Set up event listeners
       this.initEventListeners();
