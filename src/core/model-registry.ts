@@ -1,5 +1,5 @@
 /**
- * Model registry — single source of truth for selectable local embedding models.
+ * Model registry: single source of truth for selectable local embedding models.
  * See docs (SEARCH_ARCHITECTURE) for the curated set and per-model parameters.
  */
 declare const Zotero: any;
@@ -73,7 +73,7 @@ export const MODELS: ModelConfig[] = [
 export const DEFAULT_MODEL_ID = 'nomic-embed-text-v1.5';
 
 export function getAllModels(): ModelConfig[] {
-  return MODELS;
+  return [...MODELS];
 }
 
 export function getModel(id: string): ModelConfig | undefined {
@@ -87,14 +87,16 @@ export function isAllowedHfPath(hfPath: string): boolean {
 export function legacyModelIdToShortId(stored: string): string {
   const byHf = MODELS.find(m => m.hfPath === stored);
   if (byHf) return byHf.id;
-  return stored; // already a short id (or unknown — leave as-is)
+  return stored; // already a short id (or unknown); leave as-is
 }
 
 export function getActiveModelId(): string {
   try {
     const v = Zotero.Prefs.get('zotseek.embeddingModel', true);
     if (typeof v === 'string' && getModel(v)) return v;
-  } catch { /* ignore */ }
+  } catch (e: any) {
+    Zotero.debug('[ZotSeek] getActiveModelId error: ' + (e?.message || e));
+  }
   return DEFAULT_MODEL_ID;
 }
 

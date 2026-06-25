@@ -40,9 +40,13 @@ selfTest.register('task-37a-model-registry', async () => {
       assertEq(legacyModelIdToShortId('bge-m3'), 'bge-m3');
     }),
     await scenario('active model resolves to default when pref unset/unknown', async () => {
-      Zotero.Prefs.set('zotseek.embeddingModel', 'does-not-exist', true);
-      assertEq(getActiveModel().id, DEFAULT_MODEL_ID);
-      Zotero.Prefs.set('zotseek.embeddingModel', DEFAULT_MODEL_ID, true);
+      const prev = Zotero.Prefs.get('zotseek.embeddingModel', true);
+      try {
+        Zotero.Prefs.set('zotseek.embeddingModel', 'does-not-exist', true);
+        assertEq(getActiveModel().id, DEFAULT_MODEL_ID);
+      } finally {
+        Zotero.Prefs.set('zotseek.embeddingModel', prev ?? DEFAULT_MODEL_ID, true);
+      }
     }),
   ];
 });
