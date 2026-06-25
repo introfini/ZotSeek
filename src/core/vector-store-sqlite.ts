@@ -15,7 +15,7 @@
  */
 
 import { Logger } from '../utils/logger';
-import { legacyModelIdToShortId, DEFAULT_MODEL_ID } from './model-registry';
+import { legacyModelIdToShortId, DEFAULT_MODEL_ID, getActiveModelId } from './model-registry';
 import {
   identityFromItem,
   localItemIDFromIdentity,
@@ -135,6 +135,7 @@ export class VectorStoreSQLite {
       chunkIndex: number;
       title: string;
       textSource: TextSourceType;
+      modelId: string;
       embedding: Float32Array;
       pageNumber?: number;
       paragraphIndex?: number;
@@ -1870,19 +1871,34 @@ export class VectorStoreSQLite {
 
   /**
    * Delete only the chunks for an item, preserving the items row.
-   * Used before re-indexing the same item to clean stale chunks.
+   * When modelId is provided, scopes the delete to that model only so
+   * re-indexing one model does not wipe other models' chunks.
+   * When omitted, deletes all chunks for the item (original behaviour).
    */
-  async deleteChunksForItem(libraryKey: string, itemKey: string): Promise<void> {
+  async deleteChunksForItem(libraryKey: string, itemKey: string, modelId?: string): Promise<void> {
     await this.ensureInit();
     const pk = await Zotero.DB.valueQueryAsync(
       `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
       [libraryKey, itemKey]
     );
     if (!pk || Number(pk) <= 0) return;
-    await Zotero.DB.queryAsync(
-      `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ?`,
-      [Number(pk)]
-    );
+    if (modelId) {
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ? AND model_id = ?`, [Number(pk), modelId]);
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.item_models WHERE item_pk = ? AND model_id = ?`, [Number(pk), modelId]);
+    } else {
+      // No model given: fully unindex the item, so drop its item_models rows too
+      // (otherwise getCoverage would still count it as covered with no chunks left).
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ?`,
+        [Number(pk)]
+      );
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.item_models WHERE item_pk = ?`,
+        [Number(pk)]
+      );
+    }
     this.invalidateCache();
   }
 
@@ -2112,6 +2128,7 @@ export class VectorStoreSQLite {
     chunkIndex: number;
     title: string;
     textSource: TextSourceType;
+    modelId: string;
     embedding: Float32Array;
     pageNumber?: number;
     paragraphIndex?: number;
@@ -2155,6 +2172,7 @@ export class VectorStoreSQLite {
         chunkIndex: e.chunkIndex,
         title: e.title,
         textSource: e.textSource,
+        modelId: e.modelId,
         embedding: float32Embedding,
         pageNumber: e.pageNumber,
         paragraphIndex: e.paragraphIndex,
@@ -2222,7 +2240,7 @@ export class VectorStoreSQLite {
         Zotero.DB.columnQueryAsync(`SELECT i.item_key FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
         Zotero.DB.columnQueryAsync(`SELECT i.title FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
         Zotero.DB.columnQueryAsync(`SELECT i.abstract FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
-        Zotero.DB.columnQueryAsync(`SELECT i.model_id FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.model_id FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
         Zotero.DB.columnQueryAsync(`SELECT i.indexed_at FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
         Zotero.DB.columnQueryAsync(`SELECT i.content_hash FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
         Zotero.DB.columnQueryAsync(`SELECT c.chunk_index FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => (r || []).map(Number)),
@@ -2687,6 +2705,38 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Return coverage for a specific model: how many non-orphan items have at
+   * least one chunk indexed by that model vs. total non-orphan items.
+   */
+  async getCoverage(modelId: string): Promise<{ covered: number; total: number }> {
+    await this.ensureInit();
+    const total = Number(await Zotero.DB.valueQueryAsync(
+      `SELECT COUNT(*) FROM ${DB_NAME}.items WHERE library_key != 'orphan'`));
+    const covered = Number(await Zotero.DB.valueQueryAsync(
+      `SELECT COUNT(DISTINCT im.item_pk) FROM ${DB_NAME}.item_models im
+       JOIN ${DB_NAME}.items i ON im.item_pk = i.item_pk
+       WHERE i.library_key != 'orphan' AND im.model_id = ?`, [modelId]));
+    return { covered, total };
+  }
+
+  /**
+   * Delete all chunks and item_models rows for a given model, leaving the
+   * items identity rows intact. Returns the count of chunks deleted.
+   */
+  async deleteModelEmbeddings(modelId: string): Promise<number> {
+    await this.ensureInit();
+    let deleted = 0;
+    await Zotero.DB.executeTransaction(async () => {
+      deleted = Number(await Zotero.DB.valueQueryAsync(
+        `SELECT COUNT(*) FROM ${DB_NAME}.chunks WHERE model_id = ?`, [modelId]));
+      await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.chunks WHERE model_id = ?`, [modelId]);
+      await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.item_models WHERE model_id = ?`, [modelId]);
+    });
+    this.invalidateCache();
+    return deleted;
+  }
+
+  /**
    * Get store statistics
    * Uses robust fallbacks for Zotero 8 DB wrapper quirks
    */
@@ -2722,20 +2772,10 @@ export class VectorStoreSQLite {
       this.logger.error(`getStats(): Failed to count items: ${e}`);
     }
 
-    // Get model ID (pick from a non-orphan row so a future "orphan-only" DB
-    // doesn't surface a stale model name).
-    let modelId = 'none';
-    try {
-      const modelResult = await Zotero.DB.valueQueryAsync(`
-        SELECT model_id FROM ${DB_NAME}.items WHERE library_key != 'orphan' LIMIT 1
-      `);
-      if (modelResult) {
-        modelId = String(modelResult);
-      }
-      this.logger.debug(`getStats(): Model = ${modelId}`);
-    } catch (e) {
-      this.logger.error(`getStats(): Failed to get model: ${e}`);
-    }
+    // Report the currently active model (from preferences), not a stale
+    // items.model_id value which holds the legacy hfPath string.
+    const modelId = getActiveModelId();
+    this.logger.debug(`getStats(): Model = ${modelId}`);
 
     // Get last indexed date among live (non-orphan) items.
     let lastIndexed: Date | null = null;
