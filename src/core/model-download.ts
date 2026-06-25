@@ -56,6 +56,9 @@ export function registerModelsResourceSubstitution(): void {
   const f = Components.classes['@mozilla.org/file/local;1']
     .createInstance(Components.interfaces.nsIFile);
   f.initWithPath(dir);
+  if (!f.exists()) {
+    f.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
+  }
 
   const fileURI = Services.io.newFileURI(f);
 
@@ -140,11 +143,29 @@ export async function ensureModelDownloaded(
         throw new Error(`HTTP ${resp.status} fetching ${rel}`);
       }
 
-      const buf = new Uint8Array(await resp.arrayBuffer());
-      await IOUtils.write(tmp, buf);
+      if (resp.body && typeof resp.body.getReader === 'function') {
+        const reader = resp.body.getReader();
+        let firstChunk = true;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.length) {
+            await IOUtils.write(tmp, value, firstChunk ? {} : { mode: 'append' });
+            firstChunk = false;
+          }
+        }
+        if (firstChunk) {
+          // empty body: still create the file
+          await IOUtils.write(tmp, new Uint8Array(0));
+        }
+      } else {
+        // Fallback for environments without a streaming body
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        await IOUtils.write(tmp, buf);
+      }
       await IOUtils.move(tmp, dest);
 
-      Zotero.debug(`[ZotSeek] Saved ${rel} (${buf.byteLength} bytes)`);
+      Zotero.debug(`[ZotSeek] Saved ${rel}`);
     } catch (e: any) {
       // Best-effort cleanup of the partial file before re-throwing.
       try { await IOUtils.remove(tmp, { ignoreAbsent: true }); } catch { /* ignore */ }
@@ -168,10 +189,5 @@ export async function ensureModelDownloaded(
  */
 export async function removeModelFiles(model: ModelConfig): Promise<void> {
   const dir = modelDir(model);
-  try {
-    await IOUtils.remove(dir, { recursive: true, ignoreAbsent: true });
-    Zotero.debug(`[ZotSeek] Removed model files: ${model.id} (${dir})`);
-  } catch (e: any) {
-    Zotero.debug(`[ZotSeek] removeModelFiles ignored error: ${e?.message || e}`);
-  }
+  await IOUtils.remove(dir, { recursive: true, ignoreAbsent: true });
 }
