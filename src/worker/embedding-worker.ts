@@ -1,7 +1,7 @@
 /**
  * Embedding Worker - ChromeWorker for Transformers.js v3
- * 
- * Uses nomic-embed-text-v1.5 with 8K token context and instruction prefixes.
+ *
+ * Parameterized by model config passed in the `init` message.
  * Runs in a ChromeWorker thread with privileged access.
  */
 
@@ -34,7 +34,6 @@ env.backends.onnx.wasm.wasmPaths = 'chrome://zotseek/content/wasm/';
 // Configure for local/bundled operation
 env.allowRemoteModels = false;
 env.allowLocalModels = true;
-env.localModelPath = 'chrome://zotseek/content/models/';
 
 // Disable browser caching (not available in ChromeWorker)
 env.useBrowserCache = false;
@@ -51,7 +50,6 @@ postMessage({
   message: 'Transformers.js v3 environment configured',
   data: {
     wasmPaths: env.backends.onnx.wasm.wasmPaths,
-    localModelPath: env.localModelPath,
     webGPUDetected: hasWebGPU,
     numThreads: env.backends.onnx.wasm.numThreads,
   }
@@ -61,14 +59,17 @@ postMessage({
 let embeddingPipeline: any = null;
 let isLoading = false;
 
-// Model configuration - nomic-embed-text-v1.5
-// - 8192 token context window
-// - 768 dimension embeddings (Matryoshka - can truncate to 256/128)
-// - Instruction-aware: use search_document: and search_query: prefixes
-// - Outperforms OpenAI text-embedding-3-small on MTEB
-// See: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
-// Note: Using nomic-ai source with ONNX files in Xenova directory structure
-const MODEL_ID = 'Xenova/nomic-embed-text-v1.5';
+// Per-init model config -- set from the init message before loading
+let CURRENT: {
+  modelId: string;
+  hfPath: string;
+  pooling: 'mean' | 'cls';
+  normalize: boolean;
+  queryPrefix: string;
+  docPrefix: string;
+  basePath: string;
+} | null = null;
+
 const MODEL_OPTIONS = {
   quantized: true,         // Use quantized model (~130MB)
   local_files_only: true,  // Only use local bundled files
@@ -80,11 +81,6 @@ const MODEL_OPTIONS = {
 // - 8000 chars (~2000 tokens): ~3-5 seconds (acceptable)
 // The chunker now creates smaller chunks, this is a safety limit.
 const MAX_CHARS = 8000;
-
-// Instruction prefixes for nomic-embed
-// These improve retrieval quality by signaling intent to the model
-const PREFIX_DOCUMENT = 'search_document: ';
-const PREFIX_QUERY = 'search_query: ';
 
 /**
  * Check if WebGPU is actually available and working
@@ -137,8 +133,21 @@ async function checkWebGPUAvailability(): Promise<boolean> {
 async function initPipeline(): Promise<void> {
   if (embeddingPipeline || isLoading) return;
 
+  if (!CURRENT) {
+    postMessage({
+      type: 'log',
+      level: 'error',
+      message: 'initPipeline called before CURRENT model config was set',
+    });
+    postMessage({ type: 'error', error: 'Model config missing -- send init message with model config first' });
+    return;
+  }
+
   isLoading = true;
   const startTime = Date.now();
+
+  // Apply per-model base path (chrome:// for bundled, resource:// for downloaded)
+  env.localModelPath = CURRENT.basePath;
 
   // Check WebGPU availability
   useWebGPU = await checkWebGPUAvailability();
@@ -150,7 +159,7 @@ async function initPipeline(): Promise<void> {
     type: 'log',
     level: 'info',
     message: `Loading embedding model on ${deviceLabel}`,
-    data: { modelId: MODEL_ID, device: deviceType }
+    data: { modelId: CURRENT.modelId, hfPath: CURRENT.hfPath, device: deviceType }
   });
 
   postMessage({ type: 'status', status: 'loading', message: `Loading model on ${deviceLabel}...` });
@@ -158,7 +167,7 @@ async function initPipeline(): Promise<void> {
   // Try WebGPU first, fall back to WASM if it fails
   if (useWebGPU) {
     try {
-      embeddingPipeline = await pipeline('feature-extraction', MODEL_ID, {
+      embeddingPipeline = await pipeline('feature-extraction', CURRENT.hfPath, {
         ...MODEL_OPTIONS,
         device: 'webgpu',
       });
@@ -168,7 +177,7 @@ async function initPipeline(): Promise<void> {
         type: 'log',
         level: 'info',
         message: `Model loaded on GPU in ${loadTime}ms`,
-        data: { modelId: MODEL_ID, loadTimeMs: loadTime, device: 'webgpu' }
+        data: { modelId: CURRENT.modelId, loadTimeMs: loadTime, device: 'webgpu' }
       });
 
       postMessage({ type: 'status', status: 'ready', message: `Model loaded on GPU (${loadTime}ms)` });
@@ -188,14 +197,14 @@ async function initPipeline(): Promise<void> {
 
   // WASM (CPU) fallback
   try {
-    embeddingPipeline = await pipeline('feature-extraction', MODEL_ID, MODEL_OPTIONS);
+    embeddingPipeline = await pipeline('feature-extraction', CURRENT.hfPath, MODEL_OPTIONS);
 
     const loadTime = Date.now() - startTime;
     postMessage({
       type: 'log',
       level: 'info',
       message: `Model loaded on CPU in ${loadTime}ms`,
-      data: { modelId: MODEL_ID, loadTimeMs: loadTime, device: 'wasm' }
+      data: { modelId: CURRENT.modelId, loadTimeMs: loadTime, device: 'wasm' }
     });
 
     postMessage({ type: 'status', status: 'ready', message: `Model loaded on CPU (${loadTime}ms)` });
@@ -220,14 +229,19 @@ async function initPipeline(): Promise<void> {
 
 /**
  * Generate embedding for text
- * 
+ *
  * @param jobId - Unique job identifier
  * @param text - Text to embed
- * @param isQuery - If true, use search_query prefix; if false, use search_document prefix
+ * @param kind - 'query' for search queries, 'doc' for documents
  */
-async function generateEmbedding(jobId: string, text: string, isQuery: boolean = false): Promise<void> {
+async function generateEmbedding(jobId: string, text: string, kind: 'query' | 'doc' = 'doc'): Promise<void> {
   if (!embeddingPipeline) {
     postMessage({ type: 'error', jobId, error: 'Pipeline not initialized' });
+    return;
+  }
+
+  if (!CURRENT) {
+    postMessage({ type: 'error', jobId, error: 'Model config missing' });
     return;
   }
 
@@ -236,11 +250,13 @@ async function generateEmbedding(jobId: string, text: string, isQuery: boolean =
 
     // Truncate if needed (should be rare with 8K context)
     let processedText = text.length > MAX_CHARS ? text.substring(0, MAX_CHARS) : text;
-    
+
     // Add instruction prefix based on whether this is a query or document
-    // This is critical for nomic-embed's retrieval quality
-    const prefix = isQuery ? PREFIX_QUERY : PREFIX_DOCUMENT;
-    processedText = prefix + processedText;
+    // Prefixes are model-specific (e.g. nomic uses search_query:/search_document:)
+    const prefix = kind === 'query' ? CURRENT.queryPrefix : CURRENT.docPrefix;
+    if (prefix) {
+      processedText = prefix + processedText;
+    }
 
     const wasTruncated = text.length > MAX_CHARS;
     if (wasTruncated) {
@@ -253,19 +269,19 @@ async function generateEmbedding(jobId: string, text: string, isQuery: boolean =
     }
 
     const output = await embeddingPipeline(processedText, {
-      pooling: 'mean',
-      normalize: true,
+      pooling: CURRENT.pooling,
+      normalize: CURRENT.normalize,
     });
 
     const embedding = Array.from(output.data as Float32Array);  // 768 dimensions
-    if (typeof output.dispose === 'function') output.dispose();
+    if (typeof output.dispose === 'function') output.dispose();  // pitfall #9: free WASM tensor
     const processingTimeMs = Date.now() - startTime;
 
     postMessage({
       type: 'embedding',
       jobId,
       embedding,
-      modelId: MODEL_ID,
+      modelId: CURRENT.modelId,
       processingTimeMs,
     });
   } catch (error: any) {
@@ -287,6 +303,8 @@ addEventListener('message', async (event: MessageEvent) => {
 
   switch (type) {
     case 'init':
+      // Store model config from the init message, then load the pipeline
+      CURRENT = event.data.model;
       await initPipeline();
       break;
 
@@ -295,9 +313,9 @@ addEventListener('message', async (event: MessageEvent) => {
         await initPipeline();
       }
       if (embeddingPipeline) {
-        // data.isQuery indicates if this is a search query (true) or document (false)
-        const isQuery = data?.isQuery ?? false;
-        await generateEmbedding(jobId, data.text, isQuery);
+        // data.kind is 'query' or 'doc'; fall back to isQuery for backward compat
+        const kind: 'query' | 'doc' = data?.kind ?? (data?.isQuery ? 'query' : 'doc');
+        await generateEmbedding(jobId, data.text, kind);
       }
       break;
 
@@ -314,7 +332,7 @@ addEventListener('message', async (event: MessageEvent) => {
 postMessage({
   type: 'log',
   level: 'info',
-  message: 'Embedding worker initialized',
-  data: { modelId: MODEL_ID, maxChars: MAX_CHARS, webGPUAvailable: hasWebGPU }
+  message: 'Embedding worker initialized (awaiting model config via init message)',
+  data: { maxChars: MAX_CHARS, webGPUAvailable: hasWebGPU }
 });
 postMessage({ type: 'status', status: 'initialized', message: `Worker loaded (WebGPU ${hasWebGPU ? 'detected' : 'not available'})` });
