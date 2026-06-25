@@ -15,7 +15,7 @@
  */
 
 import { Logger } from '../utils/logger';
-import { legacyModelIdToShortId } from './model-registry';
+import { legacyModelIdToShortId, DEFAULT_MODEL_ID } from './model-registry';
 import {
   identityFromItem,
   localItemIDFromIdentity,
@@ -1198,8 +1198,9 @@ export class VectorStoreSQLite {
       const cols: any[] = await Zotero.DB.queryAsync(`PRAGMA ${DB_NAME}.table_info(chunks)`);
       chunkCols = new Set((cols || []).map((c: any) => c.name));
     } catch (e: any) {
-      this.logger.error(`migrateToV9: cannot introspect chunks: ${e?.message || e}`);
-      return;
+      const msg = e?.message || String(e);
+      this.logger.error(`migrateToV9: cannot introspect chunks: ${msg}`);
+      throw new Error(`v9 migration aborted: cannot introspect chunks (${msg})`);
     }
     if (chunkCols.has('model_id')) {
       this.logger.debug('chunks already at v9, skipping migration');
@@ -1222,25 +1223,12 @@ export class VectorStoreSQLite {
       throw new Error(`v9 migration aborted: backup failed (${e?.message || e})`);
     }
 
-    // 2. Read each item's legacy model_id from items so we can backfill chunks
-    //    and item_models. Parallel columnQueryAsync calls (Zotero 8 quirk).
-    const [pks, legacyModelIds, indexedAts, contentHashes, wasTruncs, pagesIdx, pagesTot] =
-      await Promise.all([
-        Zotero.DB.columnQueryAsync(`SELECT item_pk FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
-        Zotero.DB.columnQueryAsync(`SELECT model_id FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => r || []),
-        Zotero.DB.columnQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => r || []),
-        Zotero.DB.columnQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => r || []),
-        Zotero.DB.columnQueryAsync(`SELECT was_truncated FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
-        Zotero.DB.columnQueryAsync(`SELECT pages_indexed FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
-        Zotero.DB.columnQueryAsync(`SELECT pages_total FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
-      ]);
-
     try {
       await Zotero.DB.executeTransaction(async () => {
-        // 3. Add chunks.model_id (nullable first; SQLite can't add NOT NULL w/o default to a populated table).
+        // 2. Add chunks.model_id (nullable first; SQLite can't add NOT NULL w/o default to a populated table).
         await Zotero.DB.queryAsync(`ALTER TABLE ${DB_NAME}.chunks ADD COLUMN model_id TEXT`);
 
-        // 4. Create item_models table.
+        // 3. Create item_models table.
         await Zotero.DB.queryAsync(`
           CREATE TABLE IF NOT EXISTS ${DB_NAME}.item_models (
             item_pk INTEGER NOT NULL,
@@ -1255,21 +1243,29 @@ export class VectorStoreSQLite {
           )
         `);
 
-        // 5. Per-item backfill: normalize hfPath -> short id, update chunks, insert item_models.
-        for (let i = 0; i < pks.length; i++) {
-          const shortId = legacyModelIdToShortId(legacyModelIds[i] || '');
-          await Zotero.DB.queryAsync(
-            `UPDATE ${DB_NAME}.chunks SET model_id = ? WHERE item_pk = ? AND model_id IS NULL`,
-            [shortId, pks[i]]
-          );
+        // 4. Backfill chunks.model_id + populate item_models, set-based (O(distinct models)).
+        const distinctLegacy: string[] = (await Zotero.DB.columnQueryAsync(
+          `SELECT DISTINCT model_id FROM ${DB_NAME}.items`)) || [];
+        for (const legacy of distinctLegacy) {
+          const shortId = legacyModelIdToShortId(legacy || '') || DEFAULT_MODEL_ID;
+          await Zotero.DB.queryAsync(`
+            UPDATE ${DB_NAME}.chunks SET model_id = ?
+            WHERE model_id IS NULL
+              AND item_pk IN (SELECT item_pk FROM ${DB_NAME}.items WHERE model_id = ?)
+          `, [shortId, legacy]);
           await Zotero.DB.queryAsync(`
             INSERT OR REPLACE INTO ${DB_NAME}.item_models
               (item_pk, model_id, indexed_at, content_hash, was_truncated, pages_indexed, pages_total)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `, [pks[i], shortId, indexedAts[i] || '', contentHashes[i] || '', wasTruncs[i] || 0, pagesIdx[i] || 0, pagesTot[i] || 0]);
+            SELECT item_pk, ?, indexed_at, content_hash, was_truncated, pages_indexed, pages_total
+            FROM ${DB_NAME}.items WHERE model_id = ?
+          `, [shortId, legacy]);
         }
+        // Orphan safety: any chunk whose item_pk has no matching items row keeps NULL; default it
+        // so the NOT NULL rebuild below cannot abort the whole migration.
+        await Zotero.DB.queryAsync(
+          `UPDATE ${DB_NAME}.chunks SET model_id = ? WHERE model_id IS NULL`, [DEFAULT_MODEL_ID]);
 
-        // 6. Rebuild chunks with the new composite PK (item_pk, chunk_index, model_id).
+        // 5. Rebuild chunks with the new composite PK (item_pk, chunk_index, model_id).
         await Zotero.DB.queryAsync(`ALTER TABLE ${DB_NAME}.chunks RENAME TO chunks_v8`);
         await Zotero.DB.queryAsync(`
           CREATE TABLE ${DB_NAME}.chunks (
@@ -1631,6 +1627,23 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Upsert a row in item_models for the given item_pk + model.
+   * Called by put() and putBatch() after getOrCreateItemPk() so that
+   * per-(item, model) indexing status is always kept current.
+   */
+  private async upsertItemModel(itemPk: number, m: {
+    modelId: string; indexedAt: string; contentHash: string;
+    wasTruncated?: boolean; pagesIndexed?: number; pagesTotal?: number;
+  }): Promise<void> {
+    await Zotero.DB.queryAsync(`
+      INSERT OR REPLACE INTO ${DB_NAME}.item_models
+        (item_pk, model_id, indexed_at, content_hash, was_truncated, pages_indexed, pages_total)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [itemPk, m.modelId, m.indexedAt, m.contentHash,
+        m.wasTruncated ? 1 : 0, m.pagesIndexed ?? 0, m.pagesTotal ?? 0]);
+  }
+
+  /**
    * Check whether an item is indexed by stable identity.
    */
   async isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean> {
@@ -1700,13 +1713,18 @@ export class VectorStoreSQLite {
     const embeddingStr = this.embeddingToBase64(embedding.embedding);
     const chunkIndex = embedding.chunkIndex ?? 0;
 
+    await this.upsertItemModel(itemPk, {
+      modelId: embedding.modelId, indexedAt: embedding.indexedAt, contentHash: embedding.contentHash,
+      wasTruncated: embedding.wasTruncated, pagesIndexed: embedding.pagesIndexed, pagesTotal: embedding.pagesTotal,
+    });
+
     await Zotero.DB.queryAsync(`
       INSERT OR REPLACE INTO ${DB_NAME}.chunks
-      (item_pk, chunk_index, chunk_text, text_source, embedding,
+      (item_pk, chunk_index, model_id, chunk_text, text_source, embedding,
        page_number, paragraph_index, start_char, end_char, bbox)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      itemPk, chunkIndex,
+      itemPk, chunkIndex, embedding.modelId,
       embedding.chunkText || null,
       embedding.textSource,
       embeddingStr,
@@ -1763,6 +1781,10 @@ export class VectorStoreSQLite {
           pagesIndexed: e.pagesIndexed,
           pagesTotal: e.pagesTotal,
         });
+        await this.upsertItemModel(pk, {
+          modelId: e.modelId, indexedAt: e.indexedAt, contentHash: e.contentHash,
+          wasTruncated: e.wasTruncated, pagesIndexed: e.pagesIndexed, pagesTotal: e.pagesTotal,
+        });
         pkByIdent.set(key, pk);
       }
 
@@ -1776,11 +1798,11 @@ export class VectorStoreSQLite {
 
         await Zotero.DB.queryAsync(`
           INSERT OR REPLACE INTO ${DB_NAME}.chunks
-          (item_pk, chunk_index, chunk_text, text_source, embedding,
+          (item_pk, chunk_index, model_id, chunk_text, text_source, embedding,
            page_number, paragraph_index, start_char, end_char, bbox)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          itemPk, chunkIndex,
+          itemPk, chunkIndex, embedding.modelId,
           embedding.chunkText || null,
           embedding.textSource,
           embeddingStr,
@@ -1826,6 +1848,10 @@ export class VectorStoreSQLite {
     await Zotero.DB.executeTransaction(async () => {
       await Zotero.DB.queryAsync(
         `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ?`,
+        [Number(pk)]
+      );
+      await Zotero.DB.queryAsync(
+        `DELETE FROM ${DB_NAME}.item_models WHERE item_pk = ?`,
         [Number(pk)]
       );
       await Zotero.DB.queryAsync(
@@ -2599,7 +2625,7 @@ export class VectorStoreSQLite {
   }
 
   /**
-   * Clear all embeddings (v8 schema): empties chunks, items, and orphan_items,
+   * Clear all embeddings (v9 schema): empties chunks, item_models, items, and orphan_items,
    * and resets the autoincrement counter so item_pk starts back at 1.
    */
   async clear(): Promise<void> {
@@ -2607,6 +2633,7 @@ export class VectorStoreSQLite {
 
     await Zotero.DB.executeTransaction(async () => {
       await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.chunks`);
+      await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.item_models`);
       await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.items`);
       await Zotero.DB.queryAsync(`DELETE FROM ${DB_NAME}.orphan_items`);
       // Reset autoincrement counter so item_pks start from 1 again.
@@ -2621,7 +2648,7 @@ export class VectorStoreSQLite {
       }
     });
     this.invalidateCache();
-    this.logger.info('Cleared all embeddings (v8 schema)');
+    this.logger.info('Cleared all embeddings (v9 schema)');
   }
 
   /**
