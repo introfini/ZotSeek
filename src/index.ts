@@ -43,6 +43,7 @@ import './dev/suites/task-9-status-map';
 import './dev/suites/task-10-housekeeping';
 import './dev/suites/task-13-search';
 import './dev/suites/mcp-server';
+import './dev/suites/task-37a-model-registry';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
@@ -161,6 +162,7 @@ class ZotSeekPlugin {
       'zotseek.excludeTag': 'zotseek-exclude', // Tag name to exclude items from indexing
       'zotseek.indexStatusColumn.firstShown': false, // First-run flag for index-status column
       'zotseek.mcpServer.enabled': false, // Opt-in local MCP/REST endpoints for AI agents
+      'zotseek.embeddingModel': 'nomic-embed-text-v1.5',
     };
 
     for (const [key, defaultValue] of Object.entries(defaults)) {

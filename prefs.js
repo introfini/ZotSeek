@@ -47,3 +47,7 @@ pref("extensions.zotero.zotseek.devMode", false);
 // Local MCP/REST endpoints for AI agents (Claude Code etc.). Opt-in:
 // exposes read-only semantic search on Zotero's local HTTP server (23119).
 pref("extensions.zotero.zotseek.mcpServer.enabled", false);
+
+// Active embedding model (short id from the model registry).
+// Change requires re-indexing the library with the new model.
+pref("extensions.zotero.zotseek.embeddingModel", "nomic-embed-text-v1.5");
