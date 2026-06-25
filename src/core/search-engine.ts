@@ -12,6 +12,7 @@ import { PaperEmbedding, IVectorStore, getVectorStore } from './storage-factory'
 import { VectorStoreSQLite, TextSourceType } from './vector-store-sqlite';
 import { EmbeddingPipeline, embeddingPipeline } from './embedding-pipeline';
 import { identityFromItem } from './identity-resolver';
+import { getActiveModelId } from './model-registry';
 
 declare const Zotero: any;
 
@@ -160,6 +161,7 @@ export class SearchEngine {
       chunkIndex: number;
       title: string;
       textSource: TextSourceType;
+      modelId: string;
       embedding: Float32Array;
       pageNumber?: number;
       paragraphIndex?: number;
@@ -190,6 +192,7 @@ export class SearchEngine {
           chunkIndex: e.chunkIndex,
           title: e.title,
           textSource: e.textSource,
+          modelId: e.modelId,
           embedding: float32Embedding,
           pageNumber: e.pageNumber,
           paragraphIndex: e.paragraphIndex,
@@ -199,6 +202,11 @@ export class SearchEngine {
       // Use cached embeddings for global search (SQLite with in-memory cache)
       embeddings = await (store as VectorStoreSQLite).getAllCached();
     }
+
+    // Filter candidates to only those indexed by the currently active embedding model.
+    // This prevents dimension mismatches when the user switches models.
+    const activeModelId = getActiveModelId();
+    embeddings = embeddings.filter((e: any) => e.modelId === activeModelId);
 
     // Filter out excluded items (by resolved local itemId; orphans are never excluded here)
     if (opts.excludeItemIds && opts.excludeItemIds.length > 0) {
@@ -326,6 +334,7 @@ export class SearchEngine {
       chunkIndex: number;
       title: string;
       textSource: TextSourceType;
+      modelId: string;
       embedding: Float32Array;
       pageNumber?: number;
       paragraphIndex?: number;
@@ -355,6 +364,7 @@ export class SearchEngine {
           chunkIndex: e.chunkIndex,
           title: e.title,
           textSource: e.textSource,
+          modelId: e.modelId,
           embedding: float32Embedding,
           pageNumber: e.pageNumber,
           paragraphIndex: e.paragraphIndex,
@@ -364,6 +374,11 @@ export class SearchEngine {
       // Use cached embeddings (SQLite with in-memory cache)
       embeddings = await (store as VectorStoreSQLite).getAllCached();
     }
+
+    // Filter candidates to only those indexed by the currently active embedding model.
+    // This prevents dimension mismatches when the user switches models.
+    const activeModelId = getActiveModelId();
+    embeddings = embeddings.filter((e: any) => e.modelId === activeModelId);
 
     this.logger.info(`Retrieved ${embeddings.length} embedding chunks from store`);
 

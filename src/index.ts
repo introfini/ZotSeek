@@ -46,6 +46,7 @@ import './dev/suites/mcp-server';
 import './dev/suites/task-37a-model-registry';
 import './dev/suites/task-37b-schema-v9';
 import './dev/suites/task-37c-model-aware-store';
+import './dev/suites/task-37d-partitioned-search';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
