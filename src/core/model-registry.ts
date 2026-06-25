@@ -104,6 +104,12 @@ export function getActiveModel(): ModelConfig {
   return getModel(getActiveModelId()) || getModel(DEFAULT_MODEL_ID)!;
 }
 
+export function modelBasePath(model: ModelConfig): string {
+  return model.bundled
+    ? 'chrome://zotseek/content/models/'
+    : 'resource://zotseek-models/';
+}
+
 export function applyPrefix(text: string, kind: 'query' | 'doc', model: ModelConfig): string {
   const prefix = kind === 'query' ? model.queryPrefix : model.docPrefix;
   return prefix ? prefix + text : text;

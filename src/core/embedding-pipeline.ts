@@ -5,7 +5,7 @@
  */
 
 import { Logger } from '../utils/logger';
-import { getActiveModel, getModel, ModelConfig } from './model-registry';
+import { getActiveModel, getModel, ModelConfig, modelBasePath } from './model-registry';
 
 declare const ChromeWorker: any;
 
@@ -23,12 +23,6 @@ export interface EmbeddingProgress {
 }
 
 export type ProgressCallback = (progress: EmbeddingProgress) => void;
-
-function basePathFor(model: ModelConfig): string {
-  return model.bundled
-    ? 'chrome://zotseek/content/models/'
-    : 'resource://zotseek-models/';
-}
 
 /**
  * Embedding Pipeline with ChromeWorker support
@@ -59,6 +53,7 @@ export class EmbeddingPipeline {
   async init(): Promise<void> {
     if (this.ready) return;
     if (this.initPromise) return this.initPromise;
+    this.model = getActiveModel();
 
     this.initPromise = (async () => {
       this.logger.info('Initializing embedding pipeline with Transformers.js');
@@ -66,12 +61,12 @@ export class EmbeddingPipeline {
       this.logger.info('Using Transformers.js via ChromeWorker');
       this.ready = true;
     })();
-
+    const thisAttempt = this.initPromise;
     try {
-      await this.initPromise;
+      await thisAttempt;
     } catch (e) {
       // Reset so a later call can retry; a failed init must not poison retries.
-      this.initPromise = null;
+      if (this.initPromise === thisAttempt) this.initPromise = null;
       throw e;
     }
   }
@@ -173,7 +168,7 @@ export class EmbeddingPipeline {
             normalize: this.model.normalize,
             queryPrefix: this.model.queryPrefix,
             docPrefix: this.model.docPrefix,
-            basePath: basePathFor(this.model),
+            basePath: modelBasePath(this.model),
           },
         });
 
@@ -243,7 +238,7 @@ export class EmbeddingPipeline {
         }
         this.consecutiveRecoveries++;
         this.logger.warn(
-          `Embedding worker died — attempting recovery (${this.consecutiveRecoveries} total)`
+          `Embedding worker died - attempting recovery (${this.consecutiveRecoveries} total)`
         );
         // Loop: recoverWorker() will run at the top of the next iteration.
       }
@@ -348,12 +343,16 @@ export class EmbeddingPipeline {
   reset(): void {
     this.logger.info('Resetting embedding pipeline');
     if (this.worker) {
-      this.worker.terminate();
+      try { this.worker.terminate(); } catch { /* ignore */ }
       this.worker = null;
     }
     this.workerReady = false;
     this.ready = false;
     this.initPromise = null;
+    this.consecutiveRecoveries = 0;
+    for (const [, job] of this.pendingJobs) {
+      job.reject(new Error('Pipeline reset'));
+    }
     this.pendingJobs.clear();
   }
 
@@ -362,8 +361,12 @@ export class EmbeddingPipeline {
    * the worker. If modelId is unknown, falls back to the active model from prefs.
    */
   async setModel(modelId: string): Promise<void> {
-    const next = getModel(modelId) || getActiveModel();
-    if (next.id === this.model.id && this.ready) return;
+    const found = getModel(modelId);
+    if (!found) {
+      this.logger.warn(`setModel: unknown model id '${modelId}', keeping active model`);
+    }
+    const next = found || getActiveModel();
+    if (next.id === this.model.id && this.ready && this.workerReady) return;
     this.logger.info(`Switching embedding model to ${next.id}`);
     this.reset();
     this.model = next;

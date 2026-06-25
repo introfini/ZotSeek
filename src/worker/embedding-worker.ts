@@ -316,6 +316,8 @@ addEventListener('message', async (event: MessageEvent) => {
         // data.kind is 'query' or 'doc'; fall back to isQuery for backward compat
         const kind: 'query' | 'doc' = data?.kind ?? (data?.isQuery ? 'query' : 'doc');
         await generateEmbedding(jobId, data.text, kind);
+      } else {
+        postMessage({ type: 'error', jobId, error: 'Pipeline not initialized' });
       }
       break;
 
