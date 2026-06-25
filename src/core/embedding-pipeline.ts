@@ -5,7 +5,7 @@
  */
 
 import { Logger } from '../utils/logger';
-import { getActiveModel, getModel, ModelConfig, modelBasePath } from './model-registry';
+import { getActiveModel, getModel, ModelConfig, modelBasePath, setActiveModelId } from './model-registry';
 
 declare const ChromeWorker: any;
 
@@ -364,12 +364,14 @@ export class EmbeddingPipeline {
     const found = getModel(modelId);
     if (!found) {
       this.logger.warn(`setModel: unknown model id '${modelId}', keeping active model`);
+      return;
     }
-    const next = found || getActiveModel();
-    if (next.id === this.model.id && this.ready && this.workerReady) return;
-    this.logger.info(`Switching embedding model to ${next.id}`);
+    if (found.id === this.model.id && this.ready && this.workerReady) return;
+    this.logger.info(`Switching embedding model to ${found.id}`);
+    // The active model is defined by the pref; init() reads it via getActiveModel().
+    // Persist it here so the worker reload picks up the requested model.
+    setActiveModelId(found.id);
     this.reset();
-    this.model = next;
     await this.init();
   }
 

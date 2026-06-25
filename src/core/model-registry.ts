@@ -104,6 +104,18 @@ export function getActiveModel(): ModelConfig {
   return getModel(getActiveModelId()) || getModel(DEFAULT_MODEL_ID)!;
 }
 
+/**
+ * Persist the active model id. The pref is the single source of truth for which
+ * model is active; the pipeline reads it back via getActiveModel() on every init.
+ */
+export function setActiveModelId(id: string): void {
+  try {
+    Zotero.Prefs.set('zotseek.embeddingModel', id, true);
+  } catch (e: any) {
+    Zotero.debug('[ZotSeek] setActiveModelId error: ' + (e?.message || e));
+  }
+}
+
 export function modelBasePath(model: ModelConfig): string {
   return model.bundled
     ? 'chrome://zotseek/content/models/'
