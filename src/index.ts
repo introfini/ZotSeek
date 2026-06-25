@@ -32,6 +32,7 @@ import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 import { identityFromItem, libraryKeyFromLocalID } from './core/identity-resolver';
 import { initServerManager, shutdownServerManager } from './server/server-manager';
+import { registerModelsResourceSubstitution } from './core/model-download';
 // Self-test harness (mounted only when extensions.zotseek.devMode = true)
 import { selfTest as zotseekSelfTest } from './dev/self-test';
 // Task suites: imported for registration side effects only.
@@ -47,6 +48,7 @@ import './dev/suites/task-37a-model-registry';
 import './dev/suites/task-37b-schema-v9';
 import './dev/suites/task-37c-model-aware-store';
 import './dev/suites/task-37d-partitioned-search';
+import './dev/suites/task-37e-model-download';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
@@ -217,6 +219,14 @@ class ZotSeekPlugin {
 
     // Register preference pane
     this.registerPreferencePane();
+
+    // Map resource://zotseek-models/ to the profile-side models directory so
+    // Transformers.js in the ChromeWorker can load downloaded models locally.
+    try {
+      registerModelsResourceSubstitution();
+    } catch (e: any) {
+      this.logger.warn(`models resource substitution failed: ${e?.message || e}`);
+    }
 
     // Local MCP/REST endpoints for AI agents (opt-in via preferences)
     initServerManager();
