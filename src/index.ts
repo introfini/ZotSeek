@@ -44,6 +44,7 @@ import './dev/suites/task-10-housekeeping';
 import './dev/suites/task-13-search';
 import './dev/suites/mcp-server';
 import './dev/suites/task-37a-model-registry';
+import './dev/suites/task-37b-schema-v9';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup

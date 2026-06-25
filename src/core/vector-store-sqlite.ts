@@ -15,6 +15,7 @@
  */
 
 import { Logger } from '../utils/logger';
+import { legacyModelIdToShortId } from './model-registry';
 import {
   identityFromItem,
   localItemIDFromIdentity,
@@ -110,7 +111,7 @@ export interface VectorStoreStats {
 // Database configuration
 const DB_NAME = 'zotseek';           // Schema name when attached
 const DB_FILE = 'zotseek.sqlite';    // Database filename
-const SCHEMA_VERSION = 8;            // v8: stable identity (library_key + item_key + item_pk surrogate)
+const SCHEMA_VERSION = 9;            // v9: per-model embeddings (chunks.model_id + item_models)
 
 // Legacy table prefix (for migration from old schema)
 const LEGACY_TABLE_PREFIX = 'zs_';
@@ -228,6 +229,9 @@ export class VectorStoreSQLite {
 
       // Migrate to v8 (stable identity: library_key + item_key + item_pk) if needed
       await this.migrateToV8();
+
+      // Migrate to v9 (per-model embeddings: chunks.model_id + item_models) if needed
+      await this.migrateToV9();
 
       this.initialized = true;
       this.logger.info('SQLite store initialized successfully');
@@ -1176,6 +1180,140 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Migrate schema from v8 to v9.
+   *
+   * v9 adds:
+   * - `chunks.model_id TEXT NOT NULL` — identifies which embedding model produced each chunk
+   * - New composite PK `(item_pk, chunk_index, model_id)` on chunks
+   * - New `item_models` table — per-(item, model) indexing status
+   *
+   * Detection: presence of `model_id` column in chunks is ground truth (pitfall #8).
+   * Backfills legacy hfPath model_ids (e.g. 'Xenova/nomic-embed-text-v1.5') to short ids
+   * via legacyModelIdToShortId, reading per-item model_id from the items table.
+   */
+  private async migrateToV9(): Promise<void> {
+    // Detect done-ness by column presence, not the schema-version marker (pitfall #8).
+    let chunkCols: Set<string>;
+    try {
+      const cols: any[] = await Zotero.DB.queryAsync(`PRAGMA ${DB_NAME}.table_info(chunks)`);
+      chunkCols = new Set((cols || []).map((c: any) => c.name));
+    } catch (e: any) {
+      this.logger.error(`migrateToV9: cannot introspect chunks: ${e?.message || e}`);
+      return;
+    }
+    if (chunkCols.has('model_id')) {
+      this.logger.debug('chunks already at v9, skipping migration');
+      return;
+    }
+
+    this.logger.info('Migrating schema from v8 to v9 (per-model embeddings)...');
+
+    // 1. Pre-migration backup (DETACH -> copy -> ATTACH), mirroring migrateToV8.
+    const dbPath = this.getDbPath();
+    const backupPath = `${dbPath}.v8.bak`;
+    try {
+      await this.detachDatabase();
+      await IOUtils.copy(dbPath, backupPath, { noOverwrite: false });
+      this.logger.info(`Pre-migration backup written to ${backupPath}`);
+      await this.attachDatabase();
+    } catch (e: any) {
+      this.logger.error(`v9 backup failed, aborting: ${e?.message || e}`);
+      try { await this.attachDatabase(); } catch { /* ignore */ }
+      throw new Error(`v9 migration aborted: backup failed (${e?.message || e})`);
+    }
+
+    // 2. Read each item's legacy model_id from items so we can backfill chunks
+    //    and item_models. Parallel columnQueryAsync calls (Zotero 8 quirk).
+    const [pks, legacyModelIds, indexedAts, contentHashes, wasTruncs, pagesIdx, pagesTot] =
+      await Promise.all([
+        Zotero.DB.columnQueryAsync(`SELECT item_pk FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
+        Zotero.DB.columnQueryAsync(`SELECT model_id FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT was_truncated FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
+        Zotero.DB.columnQueryAsync(`SELECT pages_indexed FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
+        Zotero.DB.columnQueryAsync(`SELECT pages_total FROM ${DB_NAME}.items ORDER BY item_pk`).then((r: any) => (r || []).map(Number)),
+      ]);
+
+    try {
+      await Zotero.DB.executeTransaction(async () => {
+        // 3. Add chunks.model_id (nullable first; SQLite can't add NOT NULL w/o default to a populated table).
+        await Zotero.DB.queryAsync(`ALTER TABLE ${DB_NAME}.chunks ADD COLUMN model_id TEXT`);
+
+        // 4. Create item_models table.
+        await Zotero.DB.queryAsync(`
+          CREATE TABLE IF NOT EXISTS ${DB_NAME}.item_models (
+            item_pk INTEGER NOT NULL,
+            model_id TEXT NOT NULL,
+            indexed_at TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            was_truncated INTEGER NOT NULL DEFAULT 0,
+            pages_indexed INTEGER NOT NULL DEFAULT 0,
+            pages_total INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (item_pk, model_id),
+            FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
+          )
+        `);
+
+        // 5. Per-item backfill: normalize hfPath -> short id, update chunks, insert item_models.
+        for (let i = 0; i < pks.length; i++) {
+          const shortId = legacyModelIdToShortId(legacyModelIds[i] || '');
+          await Zotero.DB.queryAsync(
+            `UPDATE ${DB_NAME}.chunks SET model_id = ? WHERE item_pk = ? AND model_id IS NULL`,
+            [shortId, pks[i]]
+          );
+          await Zotero.DB.queryAsync(`
+            INSERT OR REPLACE INTO ${DB_NAME}.item_models
+              (item_pk, model_id, indexed_at, content_hash, was_truncated, pages_indexed, pages_total)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `, [pks[i], shortId, indexedAts[i] || '', contentHashes[i] || '', wasTruncs[i] || 0, pagesIdx[i] || 0, pagesTot[i] || 0]);
+        }
+
+        // 6. Rebuild chunks with the new composite PK (item_pk, chunk_index, model_id).
+        await Zotero.DB.queryAsync(`ALTER TABLE ${DB_NAME}.chunks RENAME TO chunks_v8`);
+        await Zotero.DB.queryAsync(`
+          CREATE TABLE ${DB_NAME}.chunks (
+            item_pk INTEGER NOT NULL,
+            chunk_index INTEGER NOT NULL DEFAULT 0,
+            model_id TEXT NOT NULL,
+            chunk_text TEXT,
+            text_source TEXT NOT NULL,
+            embedding TEXT NOT NULL,
+            page_number INTEGER,
+            paragraph_index INTEGER,
+            start_char INTEGER,
+            end_char INTEGER,
+            bbox TEXT,
+            PRIMARY KEY (item_pk, chunk_index, model_id),
+            FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
+          )
+        `);
+        await Zotero.DB.queryAsync(`
+          INSERT INTO ${DB_NAME}.chunks
+            (item_pk, chunk_index, model_id, chunk_text, text_source, embedding,
+             page_number, paragraph_index, start_char, end_char, bbox)
+          SELECT item_pk, chunk_index, model_id, chunk_text, text_source, embedding,
+             page_number, paragraph_index, start_char, end_char, bbox
+          FROM ${DB_NAME}.chunks_v8
+        `);
+        await Zotero.DB.queryAsync(`DROP TABLE ${DB_NAME}.chunks_v8`);
+
+        // 7. Version bump.
+        await Zotero.DB.queryAsync(
+          `INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value) VALUES ('schema_version', '9')`
+        );
+      });
+    } catch (error: any) {
+      this.logger.error(`Migration to v9 FAILED: ${error?.message || error}`);
+      this.logger.error(`Backup at ${backupPath}. To rollback: quit Zotero, restore the backup file over zotseek.sqlite.`);
+      throw error;
+    }
+
+    this.logger.info('Migrated zotseek DB to schema v9');
+    this.invalidateCache();
+  }
+
+  /**
    * Check if a table exists in the attached database
    */
   private async tableExists(tableName: string): Promise<boolean> {
@@ -1236,6 +1374,7 @@ export class VectorStoreSQLite {
         CREATE TABLE IF NOT EXISTS ${DB_NAME}.chunks (
           item_pk INTEGER NOT NULL,
           chunk_index INTEGER NOT NULL DEFAULT 0,
+          model_id TEXT NOT NULL,
           chunk_text TEXT,
           text_source TEXT NOT NULL,
           embedding TEXT NOT NULL,
@@ -1244,7 +1383,21 @@ export class VectorStoreSQLite {
           start_char INTEGER,
           end_char INTEGER,
           bbox TEXT,
-          PRIMARY KEY (item_pk, chunk_index),
+          PRIMARY KEY (item_pk, chunk_index, model_id),
+          FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
+        )
+      `);
+
+      await Zotero.DB.queryAsync(`
+        CREATE TABLE IF NOT EXISTS ${DB_NAME}.item_models (
+          item_pk INTEGER NOT NULL,
+          model_id TEXT NOT NULL,
+          indexed_at TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          was_truncated INTEGER NOT NULL DEFAULT 0,
+          pages_indexed INTEGER NOT NULL DEFAULT 0,
+          pages_total INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (item_pk, model_id),
           FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
         )
       `);
@@ -1263,7 +1416,7 @@ export class VectorStoreSQLite {
     await this.createIndexes();
     await this.updateSchemaVersion();
 
-    this.logger.debug('Tables created successfully (v8)');
+    this.logger.debug('Tables created successfully (v9)');
   }
 
   /**
