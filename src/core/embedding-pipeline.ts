@@ -5,6 +5,7 @@
  */
 
 import { Logger } from '../utils/logger';
+import { getActiveModel, getModel, ModelConfig } from './model-registry';
 
 declare const ChromeWorker: any;
 
@@ -23,22 +24,18 @@ export interface EmbeddingProgress {
 
 export type ProgressCallback = (progress: EmbeddingProgress) => void;
 
-// Embedding configuration - nomic-embed-text-v1.5
-// 8192 token context, 768 dimensions, Matryoshka-enabled
-// Uses instruction prefixes: search_document: and search_query:
-// See: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
-// Note: Model files from nomic-ai stored in Xenova directory structure for Transformers.js
-export const EMBEDDING_CONFIG = {
-  dimensions: 768,  // nomic-embed-v1.5 outputs 768 dimensions
-  transformersModelId: 'Xenova/nomic-embed-text-v1.5',
-  maxTokens: 8192,  // 8K context window
-};
+function basePathFor(model: ModelConfig): string {
+  return model.bundled
+    ? 'chrome://zotseek/content/models/'
+    : 'resource://zotseek-models/';
+}
 
 /**
  * Embedding Pipeline with ChromeWorker support
  */
 export class EmbeddingPipeline {
   private logger: Logger;
+  private model: ModelConfig = getActiveModel();
   private worker: any = null;
   private workerReady = false;
   private pendingJobs = new Map<string, { resolve: Function; reject: Function }>();
@@ -167,7 +164,18 @@ export class EmbeddingPipeline {
           reject(new Error(`Worker failed: ${errorInfo.message}`));
         };
 
-        this.worker.postMessage({ type: 'init' });
+        this.worker.postMessage({
+          type: 'init',
+          model: {
+            modelId: this.model.id,
+            hfPath: this.model.hfPath,
+            pooling: this.model.pooling,
+            normalize: this.model.normalize,
+            queryPrefix: this.model.queryPrefix,
+            docPrefix: this.model.docPrefix,
+            basePath: basePathFor(this.model),
+          },
+        });
 
       } catch (error) {
         this.logger.error('Failed to create ChromeWorker:', error);
@@ -179,9 +187,9 @@ export class EmbeddingPipeline {
   /**
    * Generate embedding for text using worker
    * @param text - Text to embed
-   * @param isQuery - If true, embed as search query; if false, embed as document
+   * @param kind - 'query' for search queries, 'doc' for documents
    */
-  private async embedWithWorker(text: string, isQuery: boolean = false): Promise<EmbeddingResult> {
+  private async embedWithWorker(text: string, kind: 'query' | 'doc' = 'doc'): Promise<EmbeddingResult> {
     return new Promise((resolve, reject) => {
       const jobId = Math.random().toString(36).substring(2, 15);
 
@@ -190,7 +198,7 @@ export class EmbeddingPipeline {
       this.worker.postMessage({
         type: 'embed',
         jobId,
-        data: { text, isQuery },
+        data: { text, kind },
       });
 
       // Timeout for individual embedding
@@ -208,7 +216,7 @@ export class EmbeddingPipeline {
   /**
    * Generate embedding for a single text
    * @param text - Text to embed
-   * @param isQuery - If true, embed as search query; if false, embed as document
+   * @param kind - 'query' for search queries, 'doc' for documents
    *
    * Resilient against worker death: if the ChromeWorker has crashed (sleep,
    * OOM, parent process recycled the worker process), this method silently
@@ -216,13 +224,13 @@ export class EmbeddingPipeline {
    * MAX_RECOVERIES_PER_EMBED to prevent an infinite loop on a permanently
    * broken state.
    */
-  async embed(text: string, isQuery: boolean = false): Promise<EmbeddingResult> {
+  async embed(text: string, kind: 'query' | 'doc' = 'doc'): Promise<EmbeddingResult> {
     for (let attempt = 0; ; attempt++) {
       if (!this.ready || !this.workerReady) {
         await this.recoverWorker();
       }
       try {
-        const result = await this.embedWithWorker(text, isQuery);
+        const result = await this.embedWithWorker(text, kind);
         this.consecutiveRecoveries = 0;
         return result;
       } catch (e: any) {
@@ -260,18 +268,18 @@ export class EmbeddingPipeline {
 
   /**
    * Convenience method for embedding search queries
-   * Uses the search_query: prefix for better retrieval
+   * Uses the model's query prefix for better retrieval
    */
   async embedQuery(query: string): Promise<EmbeddingResult> {
-    return this.embed(query, true);
+    return this.embed(query, 'query');
   }
 
   /**
    * Convenience method for embedding documents
-   * Uses the search_document: prefix for better retrieval
+   * Uses the model's document prefix for better retrieval
    */
   async embedDocument(text: string): Promise<EmbeddingResult> {
-    return this.embed(text, false);
+    return this.embed(text, 'doc');
   }
 
   /**
@@ -350,10 +358,23 @@ export class EmbeddingPipeline {
   }
 
   /**
+   * Switch to a different embedding model, tearing down and re-initialising
+   * the worker. If modelId is unknown, falls back to the active model from prefs.
+   */
+  async setModel(modelId: string): Promise<void> {
+    const next = getModel(modelId) || getActiveModel();
+    if (next.id === this.model.id && this.ready) return;
+    this.logger.info(`Switching embedding model to ${next.id}`);
+    this.reset();
+    this.model = next;
+    await this.init();
+  }
+
+  /**
    * Get current model ID
    */
   getModelId(): string {
-    return EMBEDDING_CONFIG.transformersModelId;
+    return this.model.id;
   }
 
   /**
@@ -361,9 +382,9 @@ export class EmbeddingPipeline {
    */
   getModelInfo(): { id: string; dimensions: number; description: string } {
     return {
-      id: this.getModelId(),
-      dimensions: EMBEDDING_CONFIG.dimensions,
-      description: 'Transformers.js nomic-embed-v1.5 (768 dims, 8192 tokens, instruction-aware)',
+      id: this.model.id,
+      dimensions: this.model.dimensions,
+      description: `${this.model.label} (${this.model.dimensions} dims)`,
     };
   }
 
