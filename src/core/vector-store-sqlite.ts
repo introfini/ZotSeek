@@ -1916,12 +1916,33 @@ export class VectorStoreSQLite {
   }
 
   /** @deprecated Use deleteChunksForItem(libraryKey, itemKey). */
-  async deleteItemChunks(itemId: number): Promise<void> {
+  async deleteItemChunks(itemId: number, modelId?: string): Promise<void> {
     const item = Zotero.Items.get(itemId);
     if (!item) return;
     const id = identityFromItem(item);
     if (!id) return;
-    return this.deleteChunksForItem(id.libraryKey, id.itemKey);
+    return this.deleteChunksForItem(id.libraryKey, id.itemKey, modelId);
+  }
+
+  /**
+   * Return items in the store that have no coverage for the given modelId.
+   * Uses parallel columnQueryAsync calls (Zotero multi-column quirk).
+   */
+  async getItemsMissingModel(modelId: string): Promise<Array<{ libraryKey: string; itemKey: string }>> {
+    await this.ensureInit();
+    const [libraryKeys, itemKeys] = await Promise.all([
+      Zotero.DB.columnQueryAsync(`
+        SELECT i.library_key FROM ${DB_NAME}.items i
+        WHERE i.library_key != 'orphan'
+          AND NOT EXISTS (SELECT 1 FROM ${DB_NAME}.item_models im WHERE im.item_pk = i.item_pk AND im.model_id = ?)
+        ORDER BY i.item_pk`, [modelId]).then((r: any) => r || []),
+      Zotero.DB.columnQueryAsync(`
+        SELECT i.item_key FROM ${DB_NAME}.items i
+        WHERE i.library_key != 'orphan'
+          AND NOT EXISTS (SELECT 1 FROM ${DB_NAME}.item_models im WHERE im.item_pk = i.item_pk AND im.model_id = ?)
+        ORDER BY i.item_pk`, [modelId]).then((r: any) => r || []),
+    ]);
+    return (libraryKeys as string[]).map((lk: string, i: number) => ({ libraryKey: lk, itemKey: (itemKeys as string[])[i] }));
   }
 
   /**

@@ -6,11 +6,35 @@
 import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
 import { autoIndexManager } from '../core/auto-index-manager';
-import { getAllModels, getActiveModelId } from '../core/model-registry';
-import { isModelOnDisk } from '../core/model-download';
+import { getAllModels, getActiveModelId, getModel } from '../core/model-registry';
+import { isModelOnDisk, ensureModelDownloaded } from '../core/model-download';
 import { vectorStoreSQLite } from '../core/vector-store-sqlite';
+import { embeddingPipeline } from '../core/embedding-pipeline';
 
 declare const Services: any;
+declare const Zotero: any;
+
+function confirmDownload(model: any): boolean {
+  return Services.prompt.confirm(null, 'Download model',
+    `Selecting ${model.label} downloads about ${model.approxSizeMB} MB once from huggingface.co `
+    + `to your computer. None of your library is sent anywhere. Continue?`);
+}
+
+async function maybePromptReindex(doc: any, modelId: string): Promise<void> {
+  const { covered, total } = await vectorStoreSQLite.getCoverage(modelId);
+  if (total === 0 || covered >= total) return;
+  const missing = total - covered;
+  const yes = Services.prompt.confirm(null, 'Index remaining items',
+    `This model covers ${covered} of ${total} items. Index the remaining ${missing} `
+    + `in the background now? You can keep using Zotero while it runs.`);
+  if (yes) {
+    const zs = (typeof Zotero !== 'undefined') ? (Zotero as any).ZotSeek : null;
+    if (zs && zs.api && typeof zs.api.reindexForActiveModel === 'function') {
+      await zs.api.reindexForActiveModel();
+      await renderCoverage(doc);
+    }
+  }
+}
 
 async function populateModelMenu(doc: any): Promise<void> {
   const menu = doc.getElementById('zotseek-pref-embeddingModel');
@@ -228,6 +252,34 @@ class PreferencesManager {
           this.logger.info(`Indexing mode changed to: ${value}`);
           // Check for mismatch after changing
           this.loadStatsAndCheckMismatch();
+        }
+      });
+    }
+
+    // Embedding model change: download-on-select, confirm, model-scoped re-index
+    const modelMenu = doc.getElementById('zotseek-pref-embeddingModel') as any;
+    if (modelMenu) {
+      modelMenu.addEventListener('command', async () => {
+        const id = modelMenu.selectedItem?.getAttribute('value');
+        if (!id) return;
+        const model = getModel(id);
+        if (!model) return;
+        const statusEl = doc.getElementById('zotseek-embeddingModel-status');
+        try {
+          if (!model.bundled && !(await isModelOnDisk(model))) {
+            if (!confirmDownload(model)) { await populateModelMenu(doc); return; }
+            if (statusEl) statusEl.textContent = `Downloading ${model.label}...`;
+            await ensureModelDownloaded(model, (done, total) => {
+              if (statusEl) statusEl.textContent = `Downloading ${model.label}: file ${done} of ${total}`;
+            });
+          }
+          await embeddingPipeline.setModel(id);   // persists the pref + reloads the worker
+          if (statusEl) statusEl.textContent = '';
+          await populateModelMenu(doc);            // refresh status chips
+          await renderCoverage(doc);
+          await maybePromptReindex(doc, id);
+        } catch (e: any) {
+          if (statusEl) statusEl.textContent = `Failed: ${e?.message || e}`;
         }
       });
     }

@@ -30,7 +30,8 @@ import { similarDocumentsWrapper } from './ui/similar-documents-wrapper';
 import { toolbarButton } from './ui/toolbar-button';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
-import { identityFromItem, libraryKeyFromLocalID } from './core/identity-resolver';
+import { identityFromItem, libraryKeyFromLocalID, localItemIDFromIdentity } from './core/identity-resolver';
+import { getActiveModelId } from './core/model-registry';
 import { initServerManager, shutdownServerManager } from './server/server-manager';
 import { registerModelsResourceSubstitution } from './core/model-download';
 // Self-test harness (mounted only when extensions.zotseek.devMode = true)
@@ -1261,8 +1262,8 @@ class ZotSeekPlugin {
 
         const batchEmbeddings: PaperEmbedding[] = [];
         for (const extracted of extractedBatch) {
-          // Delete existing chunks for this item before adding new ones
-          await this.vectorStore!.deleteItemChunks(extracted.itemId);
+          // Delete existing chunks for the active model only — other models' chunks are preserved
+          await this.vectorStore!.deleteItemChunks(extracted.itemId, getActiveModelId());
 
           if (extracted.wasTruncated) {
             totalItemsTruncated++;
@@ -1800,6 +1801,165 @@ class ZotSeekPlugin {
     this.logger.debug('XUL elements removed');
   }
 
+  /**
+   * Index items that are missing coverage for the currently active embedding
+   * model, without touching other models' existing chunks.
+   *
+   * Called from the preferences pane after the user switches models and
+   * confirms the background re-index prompt.
+   */
+  public async reindexForActiveModel(): Promise<void> {
+    if (this.indexing) {
+      this.logger.debug('reindexForActiveModel: indexing already in progress, skipping');
+      return;
+    }
+
+    this.indexing = true;
+    const Z = getZotero();
+
+    const progressWin = new (Z.ProgressWindow as any)({ closeOnClick: true });
+    progressWin.changeHeadline('[ZotSeek] Indexing for new model...');
+    const itemRow = new progressWin.ItemProgress(
+      'chrome://zotero/skin/spinner-16px.png',
+      'Looking up items...'
+    );
+    progressWin.show();
+
+    try {
+      await this.ensureStoreReady();
+
+      const modelId = getActiveModelId();
+      const missing = await this.vectorStore!.getItemsMissingModel(modelId);
+
+      if (missing.length === 0) {
+        try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
+        itemRow.setText('All items already covered by this model.');
+        progressWin.startCloseTimer(3000);
+        return;
+      }
+
+      // Resolve (libraryKey, itemKey) pairs to local Zotero items
+      const zoteroItems: any[] = [];
+      for (const { libraryKey, itemKey } of missing) {
+        const localId = localItemIDFromIdentity({ libraryKey, itemKey });
+        if (localId == null) continue;
+        const item = Zotero.Items.get(localId);
+        if (!item) continue;
+        if (hasExcludeTag(item)) continue;
+        zoteroItems.push(item);
+      }
+
+      if (zoteroItems.length === 0) {
+        try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
+        itemRow.setText('No eligible items to index.');
+        progressWin.startCloseTimer(3000);
+        return;
+      }
+
+      itemRow.setText(`Loading model for ${zoteroItems.length} items...`);
+      embeddingPipeline.reset();
+      await embeddingPipeline.init();
+
+      const indexingMode = getIndexingMode(Z);
+      itemRow.setText(`Extracting text (${zoteroItems.length} items)...`);
+      const extractedItems = await textExtractor.extractChunksFromItems(zoteroItems, indexingMode);
+
+      if (extractedItems.length === 0) {
+        try { itemRow.setIcon('chrome://zotero/skin/cross.png'); } catch { /* ignore */ }
+        itemRow.setText('No content extracted.');
+        progressWin.startCloseTimer(3000);
+        return;
+      }
+
+      const totalChunks = extractedItems.reduce((sum, item) => sum + item.chunks.length, 0);
+      const textsForEmbedding: Array<{ id: string; text: string; title: string }> = [];
+      for (const extracted of extractedItems) {
+        for (const chunk of extracted.chunks) {
+          textsForEmbedding.push({ id: `${extracted.itemId}_${chunk.index}`, text: chunk.text, title: extracted.title });
+        }
+      }
+
+      // Embed all chunks
+      const embeddingMap = new Map<string, { embedding: number[]; modelId: string }>();
+      let processed = 0;
+      let failedChunks = 0;
+      const failedItems = new Set<string>();
+
+      for (const item of textsForEmbedding) {
+        processed++;
+        itemRow.setText(`Embedding ${processed}/${totalChunks}...`);
+        try {
+          const result = await embeddingPipeline.embed(item.text);
+          if (result) embeddingMap.set(item.id, result);
+        } catch (embedException: any) {
+          try {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const retryResult = await embeddingPipeline.embed(item.text);
+            if (retryResult) embeddingMap.set(item.id, retryResult);
+          } catch {
+            failedChunks++;
+            failedItems.add(item.title);
+            this.logger.error(`reindexForActiveModel: skipping chunk ${item.id}: ${embedException?.message || embedException}`);
+          }
+        }
+      }
+
+      // Build embeddings array — NO deleteItemChunks: these items have no
+      // active-model chunks yet, and putBatch adds alongside other models.
+      itemRow.setText('Saving...');
+      const paperEmbeddings: PaperEmbedding[] = [];
+      for (const extracted of extractedItems) {
+        const libKey = libraryKeyFromLocalID(extracted.libraryId);
+        if (!libKey) continue;
+        for (const chunk of extracted.chunks) {
+          const embeddingKey = `${extracted.itemId}_${chunk.index}`;
+          const embeddingData = embeddingMap.get(embeddingKey);
+          if (!embeddingData) continue;
+          paperEmbeddings.push({
+            itemId: extracted.itemId,
+            chunkIndex: chunk.index,
+            libraryKey: libKey,
+            itemKey: extracted.itemKey,
+            libraryId: extracted.libraryId,
+            title: extracted.title,
+            abstract: extracted.abstract || undefined,
+            chunkText: chunk.text,
+            textSource: chunk.type,
+            embedding: embeddingData.embedding,
+            modelId: embeddingData.modelId,
+            indexedAt: new Date().toISOString(),
+            contentHash: extracted.contentHash,
+            pageNumber: chunk.pageNumber,
+            paragraphIndex: chunk.paragraphIndex,
+            startChar: chunk.startChar,
+            endChar: chunk.endChar,
+            wasTruncated: extracted.wasTruncated,
+            pagesIndexed: extracted.pagesIndexed,
+            pagesTotal: extracted.pagesTotal,
+          });
+        }
+      }
+
+      await this.vectorStore!.putBatch(paperEmbeddings);
+      itemTreeIndexColumn.invalidate(extractedItems.map(e => e.itemId));
+
+      this.logger.info(`reindexForActiveModel: indexed ${extractedItems.length} items (${paperEmbeddings.length} chunks, ${failedChunks} failed) for model ${modelId}`);
+      try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
+      itemRow.setText(failedChunks > 0
+        ? `${paperEmbeddings.length} chunks indexed (${failedChunks} failed)`
+        : `${paperEmbeddings.length} chunks indexed`);
+      progressWin.startCloseTimer(4000);
+
+    } catch (error: any) {
+      this.logger.error(`reindexForActiveModel failed: ${error?.message || error}`);
+      try { itemRow.setIcon('chrome://zotero/skin/cross.png'); } catch { /* ignore */ }
+      itemRow.setText(`Error: ${(error?.message || 'unknown').substring(0, 40)}`);
+      progressWin.startCloseTimer(4000);
+    } finally {
+      this.indexing = false;
+    }
+  }
+
   // Public API for other plugins/scripts
   public api = {
     search: (query: string, options?: any) => searchEngine.search(query, options),
@@ -1809,6 +1969,7 @@ class ZotSeekPlugin {
     compactDatabase: () => this.compactDatabase(),
     getReclaimableBytes: () => (this.vectorStore as any)?.getReclaimableBytes?.() ?? Promise.resolve(0),
     isReady: () => this.initialized && embeddingPipeline.isReady(),
+    reindexForActiveModel: () => this.reindexForActiveModel(),
   };
 }
 

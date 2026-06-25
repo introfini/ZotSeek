@@ -26,7 +26,7 @@ export interface IVectorStore {
   getByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding | undefined>;
   getItemChunksByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
   deleteItem(libraryKey: string, itemKey: string): Promise<void>;
-  deleteChunksForItem(libraryKey: string, itemKey: string): Promise<void>;
+  deleteChunksForItem(libraryKey: string, itemKey: string, modelId?: string): Promise<void>;
   isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean>;
   needsReindexByIdentity(libraryKey: string, itemKey: string, contentHash: string): Promise<boolean>;
   getChunkCountByIdentity(libraryKey: string, itemKey: string): Promise<number>;
@@ -36,12 +36,15 @@ export interface IVectorStore {
   // Legacy id-keyed methods (deprecated, kept until call sites migrate)
   get(itemId: number): Promise<import('./vector-store-sqlite').PaperEmbedding | undefined>;
   getItemChunks(itemId: number): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
-  deleteItemChunks(itemId: number): Promise<void>;
+  deleteItemChunks(itemId: number, modelId?: string): Promise<void>;
   delete(itemId: number): Promise<void>;
   isIndexed(itemId: number): Promise<boolean>;
   needsReindex(itemId: number, contentHash: string): Promise<boolean>;
   getIndexStatusMap(itemIds: number[]): Promise<Map<number, import('./vector-store-sqlite').ItemIndexStatus>>;
   getByLibrary(libraryId: number): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
+
+  // Model-scoped helpers
+  getItemsMissingModel(modelId: string): Promise<Array<{ libraryKey: string; itemKey: string }>>;
 
   // Bulk / housekeeping
   getAll(): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
