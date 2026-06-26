@@ -1650,10 +1650,15 @@ export class VectorStoreSQLite {
   async isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean> {
     await this.ensureInit();
     try {
+      // Model-aware: "indexed" means indexed for the ACTIVE model. An item with
+      // only other-model coverage is treated as not-yet-indexed so the normal
+      // index paths (Index Library, auto-index) backfill the active model,
+      // consistent with partitioned search. (Final review #37 Finding 3.)
       const result = await Zotero.DB.valueQueryAsync(
-        `SELECT 1 FROM ${DB_NAME}.items
-         WHERE library_key = ? AND item_key = ? LIMIT 1`,
-        [libraryKey, itemKey]
+        `SELECT 1 FROM ${DB_NAME}.items i
+         JOIN ${DB_NAME}.item_models im ON i.item_pk = im.item_pk
+         WHERE i.library_key = ? AND i.item_key = ? AND im.model_id = ? LIMIT 1`,
+        [libraryKey, itemKey, getActiveModelId()]
       );
       return result === 1;
     } catch (e) {
