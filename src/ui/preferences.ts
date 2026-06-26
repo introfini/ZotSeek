@@ -101,6 +101,11 @@ async function renderManageModels(doc: any): Promise<void> {
     const removable = !m.bundled && m.id !== active;
     btn.textContent = 'Remove';
     btn.disabled = !removable;
+    if (!removable) {
+      btn.title = m.bundled
+        ? 'Built-in model, included with ZotSeek and cannot be removed'
+        : 'Active model, switch to another model first to remove this one';
+    }
     btn.addEventListener('click', async () => {
       const yes = Services.prompt.confirm(null, 'Remove model',
         `Remove ${m.label} files and its embeddings from your library?`);
@@ -111,8 +116,18 @@ async function renderManageModels(doc: any): Promise<void> {
       if (docAlive(doc)) await populateModelMenu(doc);
     });
     row.append(label, btn);
+    if (!removable) {
+      const reason = doc.createElement('span');
+      reason.textContent = m.bundled ? 'Built-in' : 'Active';
+      reason.style.cssText = 'font-size:11px;opacity:.6;';
+      row.append(reason);
+    }
     host.appendChild(row);
   }
+  const note = doc.createElement('div');
+  note.textContent = 'Remove deletes a downloaded model and its embeddings. The built-in model and the active model cannot be removed.';
+  note.style.cssText = 'font-size:11px;opacity:.6;margin-top:8px;';
+  host.appendChild(note);
 }
 
 class PreferencesManager {
