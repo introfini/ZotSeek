@@ -333,6 +333,7 @@ class PreferencesManager {
             if (statusEl) statusEl.textContent = '';
             await populateModelMenu(doc);          // refresh status chips
             await renderCoverage(doc);
+            await renderManageModels(doc);         // show a just-downloaded model in the manage list
           }
           // maybePromptReindex may trigger a long reindex; guard doc touches inside it
           await maybePromptReindex(doc, id);
