@@ -10,6 +10,7 @@
 import { searchEngine, SearchResult } from '../core/search-engine';
 import { HybridSearchEngine, HybridSearchResult, SearchMode } from '../core/hybrid-search';
 import { getVectorStore } from '../core/storage-factory';
+import { getActiveModelId } from '../core/model-registry';
 import { identityFromItem } from '../core/identity-resolver';
 import { OPEN_PATH } from './open-endpoint';
 
@@ -242,6 +243,8 @@ export async function runIndexStatusTool(): Promise<object> {
     await store.init();
   }
   const stats = await store.getStats();
+  const activeModel = getActiveModelId();
+  const coverage = await store.getCoverage(activeModel);
   return {
     // "Will searches return meaningful results?" — the embedding pipeline
     // lazy-loads on first search, so readiness is about the index itself.
@@ -250,6 +253,8 @@ export async function runIndexStatusTool(): Promise<object> {
     indexedPapers: stats.indexedPapers,
     totalChunks: stats.totalChunks,
     modelId: stats.modelId,
+    activeModel,
+    coverage,
     lastIndexed: stats.lastIndexed,
     storageUsedBytes: stats.storageUsedBytes,
   };

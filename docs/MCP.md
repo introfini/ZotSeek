@@ -49,11 +49,11 @@ Any other MCP client that supports the HTTP transport works the same way (for ex
 |------|-----------|---------|
 | `search` | `query` *(required)*; `max_results` (1–100, default 10); `mode` (`hybrid` \| `semantic` \| `keyword`, default `hybrid`); `granularity` (`papers` \| `passages`, default `papers`); `min_similarity` (0–1, defaults to your ZotSeek preference) | Ranked results from a semantic/keyword search over the library |
 | `find_similar` | `item_key` *(required, 8-character Zotero key)*; `library_key` (`user` or `group:<groupID>`, default `user`); `max_results` (1–100, default 10) | Papers similar to a known library item, by its stored embeddings |
-| `index_status` | *(none)* | `{ready, modelLoaded, indexedPapers, totalChunks, modelId, lastIndexed, storageUsedBytes}` |
+| `index_status` | *(none)* | `{ready, modelLoaded, indexedPapers, totalChunks, modelId, activeModel, coverage, lastIndexed, storageUsedBytes}` |
 
 `mode` mirrors the ZotSeek UI: **hybrid** fuses semantic and keyword results with RRF, honoring your ZotSeek preferences including automatic weight adjustment, so it returns the same ranking you see in the ZotSeek dialog; **semantic** uses embeddings only (same code path as the [JS API](API.md)'s `search()`); **keyword** uses Zotero's keyword search only. `granularity` controls whether you get one result per paper (`papers`, best-matching chunk) or every matching chunk as its own result (`passages`).
 
-For `index_status`, `ready` is `true` when the index contains papers; the embedding model itself lazy-loads on the first search, adding ~30s to that first call when `modelLoaded` is `false`. `modelLoaded` reports whether that pipeline is already warm. A `ready: true, modelLoaded: false` status means searches will work but the first one will be slow.
+For `index_status`, `ready` is `true` when the index contains papers; the embedding model itself lazy-loads on the first search, adding ~30s to that first call when `modelLoaded` is `false`. `modelLoaded` reports whether that pipeline is already warm. A `ready: true, modelLoaded: false` status means searches will work but the first one will be slow. `activeModel` is the short identifier of the currently configured embedding model (e.g. `"bge-m3"`). `coverage` is `{ covered, total }` — the number of library items indexed under that model vs. the total items in the index, letting agents detect when a model switch has left items to be re-indexed.
 
 ### Result shape
 
