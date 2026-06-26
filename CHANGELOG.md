@@ -2,6 +2,20 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.17.0] - Unreleased
+
+### Added
+- **Selectable local embedding models** (#37) — Choose between four curated models in **Settings → ZotSeek → Embedding Model**. The bundled default (`nomic-embed-text-v1.5`, English, 768 dims) is joined by three on-demand multilingual models: `paraphrase-multilingual-MiniLM-L12-v2` (384 dims, small/fast, ~135 MB), `multilingual-e5-base` (768 dims, balanced, ~110 MB), and `bge-m3` (1024 dims, highest quality, ~570 MB). Non-bundled models download once from Hugging Face to the Zotero profile directory; nothing from your library ever leaves your machine.
+- **Per-model embedding retention and background re-index on switch** — Switching models keeps embeddings from all previously used models. Items indexed with the new model are available immediately; items not yet covered are re-indexed in the background. Switching back to a previous model is instant.
+- **Manage downloaded models panel** — A new panel in Settings shows disk usage per non-bundled model and allows deleting models you no longer need (deletes model files and removes that model's embeddings from the database).
+
+### Technical
+- **Schema v9** — `chunks` table primary key extended to `(item_pk, chunk_index, model_id)` to support per-model embedding storage for the same chunk. New `item_models` table records per-(item, model) indexing status (`item_pk`, `model_id`, `indexed_at`, `content_hash`, `was_truncated`, `pages_indexed`, `pages_total`), replacing the per-item status columns on `items` that were model-specific. Automatic migration from v8: existing rows are migrated to the active model's slot; pre-migration backup written to `zotseek.sqlite.v8.bak`. Search is partitioned by `model_id` — queries only compare against embeddings produced by the currently active model.
+- New `src/core/model-registry.ts` — single source of truth for the curated model set. Each `ModelConfig` specifies dimensions, pooling strategy (`mean`/`cls`), instruction prefixes for queries vs documents, ONNX file path, files to download, and whether the model is bundled.
+- `EmbeddingPipeline.init()` reads the active model via `getActiveModel()` on every initialisation; `setActiveModelId()` persists the choice to `zotseek.embeddingModel`. Non-bundled model files are served via a `resource://zotseek-models/` alias pointing to the download directory; the bundled model loads from `chrome://zotseek/content/models/`.
+
+---
+
 ## [1.16.1] - 2026-06-11
 
 ### Fixed

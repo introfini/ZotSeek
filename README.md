@@ -26,6 +26,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 📍 **Passage-Level Location** - Jump to exact page & paragraph in Full Document mode
 - ✅ **Multi-Select in Results** - Select multiple search results, right-click to add to collections
 - 📁 **Save Results as Collection** - One click saves the full result set into a new Zotero collection so you can revisit the list later without re-running the search
+- 🧩 **Selectable Embedding Models** - Choose from 4 curated local models, including multilingual options; non-bundled models download once from Hugging Face to your machine
 - 🔄 **Auto-Index** - Automatically index new papers when you add them to your library
 - 🗑️ **Auto-Cleanup** - Embeddings automatically removed when items are deleted or trashed
 - 🚫 **Tag-Based Exclusion** - Tag items with `zotseek-exclude` to skip them during indexing
@@ -44,7 +45,7 @@ ZotSeek is designed with privacy as a core principle:
 
 | Aspect | Guarantee |
 |--------|-----------|
-| **AI Model** | Bundled with the plugin (131MB) — no downloads, no API calls |
+| **AI Model** | Default model bundled (~130MB); optional models download once from Hugging Face on demand — no API keys, no subscription |
 | **Processing** | All AI inference runs locally on your CPU/GPU |
 | **Your Papers** | Only indexes items from your local Zotero library |
 | **Network** | Zero network requests for search or indexing |
@@ -288,6 +289,27 @@ ZotSeek adds a "ZotSeek" column to the Zotero item list so you can see at a glan
 | *(empty)* | Not indexed. |
 
 After indexing, a one-line summary in the progress window also warns when any paper hit the chunk limit, and the same warning is written to the debug log per affected paper.
+
+---
+
+## Choose Your Embedding Model
+
+ZotSeek ships with a curated set of local embedding models. The default model is bundled and works immediately; other models download once from Hugging Face and are then available offline.
+
+Go to **Zotero → Settings → ZotSeek → Embedding Model** to pick the model that fits your library.
+
+| Model | Dims | Multilingual | Approx. size | When to use |
+|-------|------|-------------|--------------|-------------|
+| **nomic-embed-text-v1.5** *(default, bundled)* | 768 | No | ~130 MB | English or mostly-English libraries. Strong all-around retrieval quality, no download needed. |
+| **paraphrase-multilingual-MiniLM-L12-v2** | 384 | Yes | ~135 MB | Smaller and faster; good for hardware-constrained machines or mixed-language collections where speed matters more than top accuracy. |
+| **multilingual-e5-base** | 768 | Yes | ~110 MB | Balanced multilingual quality at the same 768-dimension space as the default. Good first choice for non-English libraries. |
+| **BGE-M3** | 1024 | Yes | ~570 MB | Highest-quality multilingual retrieval in the set. Worth the extra size for large, mixed-language collections where accuracy is paramount. |
+
+**Privacy:** models are downloaded once from Hugging Face directly to your Zotero profile directory. No library content is ever sent anywhere — inference runs entirely on your machine.
+
+**Switching models:** switching to a different model triggers a background re-index for items that have not yet been indexed with the new model. Items indexed with other models retain their embeddings — switching back is instant.
+
+**Manage downloaded models:** a "Manage downloaded models" panel in Settings shows disk usage for each non-bundled model and lets you delete models you no longer need (this also removes that model's embeddings from the database).
 
 ---
 
@@ -710,7 +732,7 @@ Note: If WebGPU is unavailable or fails, the plugin automatically falls back to 
 
 ## Limitations
 
-- **English-optimized search** - The embedding model is trained primarily on English text (UI available in English and Chinese)
+- **Default model is English-optimized** - The bundled nomic-embed-text-v1.5 is trained primarily on English text; switch to a multilingual model in Settings for non-English libraries (UI available in English and Chinese)
 - **Large plugin size** - ~131MB due to bundled AI model
 - **CPU only (for now)** - GPU acceleration ready but waiting for Zotero/Firefox WebGPU support
 - **Zotero 8 or newer required** - As of v1.12.0, Zotero 7 is no longer supported. Users on Zotero 7 should upgrade to Zotero 8 or later, or stay on ZotSeek v1.11.x.

@@ -46,7 +46,7 @@ export const MODELS: ModelConfig[] = [
     queryPrefix: '', docPrefix: '',
     onnxFile: 'onnx/model_quantized.onnx',
     files: [...COMMON_FILES, 'onnx/model_quantized.onnx'],
-    bundled: false, approxSizeMB: 50, multilingual: true,
+    bundled: false, approxSizeMB: 135, multilingual: true,
   },
   {
     id: 'multilingual-e5-base',

@@ -25,9 +25,14 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
 7. [Section-Aware Chunking](#section-aware-chunking)
    - [References Filtering](#references-filtering)
 8. [Performance Optimizations](#performance-optimizations)
-9. [Database Schema](#database-schema)
-   - [Stable Identity (Schema v8)](#stable-identity-schema-v8)
-10. [Query Analysis](#query-analysis)
+9. [Embedding Model Registry](#embedding-model-registry)
+   - [Curated Model Set](#curated-model-set)
+   - [Partitioned Search by Model](#partitioned-search-by-model)
+   - [Switching Models](#switching-models)
+10. [Database Schema](#database-schema)
+    - [Stable Identity (Schema v8)](#stable-identity-schema-v8)
+    - [Per-Model Embeddings (Schema v9)](#per-model-embeddings-schema-v9)
+11. [Query Analysis](#query-analysis)
 
 ---
 
@@ -820,6 +825,61 @@ Tested on MacBook Pro M3:
 
 ---
 
+## Embedding Model Registry
+
+### Curated Model Set
+
+ZotSeek uses a single source of truth — `src/core/model-registry.ts` — that defines each selectable model:
+
+| Model ID | Label | Dims | Pooling | Prefixes | Bundled | Approx. size |
+|----------|-------|------|---------|----------|---------|--------------|
+| `nomic-embed-text-v1.5` | Nomic v1.5 (English, balanced) | 768 | mean | `search_query:` / `search_document:` | Yes | ~130 MB |
+| `paraphrase-multilingual-MiniLM-L12-v2` | MiniLM multilingual (small, fast) | 384 | mean | none | No | ~135 MB |
+| `multilingual-e5-base` | Multilingual E5 base | 768 | mean | `query:` / `passage:` | No | ~110 MB |
+| `bge-m3` | BGE-M3 (top multilingual) | 1024 | cls | none | No | ~570 MB |
+
+Each `ModelConfig` specifies:
+- `dimensions` — embedding vector length; determines cosine-similarity space. Embeddings from different models are **not** interchangeable.
+- `pooling` — `mean` averages all token embeddings; `cls` uses the `[CLS]` token. Must match the model's training setup.
+- `queryPrefix` / `docPrefix` — instruction strings prepended to queries and documents respectively. Nomic and E5 use these to shift the embedding towards retrieval mode; MiniLM and BGE-M3 do not need them.
+- `onnxFile` — path within the Hugging Face repo to the quantized ONNX file.
+- `bundled` — `true` only for the default model shipped inside the XPI (`chrome://zotseek/content/models/`). Non-bundled models are served from `resource://zotseek-models/` once downloaded.
+
+### Partitioned Search by Model
+
+Every embedding chunk in the database carries a `model_id` column. At query time:
+
+```
+Active model: "multilingual-e5-base"
+                        │
+                        ▼
+         Filter chunks WHERE model_id = "multilingual-e5-base"
+                        │
+                        ▼
+         Cosine similarity computed only within this partition
+```
+
+Embeddings from different models live side-by-side in the `chunks` table but are never compared against each other. Switching the active model in preferences changes which partition the next search reads from — without deleting or invalidating the other partitions.
+
+### Switching Models
+
+When the user changes the active model (`zotseek.embeddingModel` pref), the workflow is:
+
+```
+1. Persist new model_id via setActiveModelId()
+2. Reload EmbeddingPipeline (re-reads getActiveModel() on next init)
+3. Check item_models for items not yet covered by the new model
+4. Offer background re-index for uncovered items
+   ├── Items already indexed with the new model → instant, no re-work
+   └── Items not yet indexed → queued for background embedding
+5. Search immediately uses the new model's partition
+   └── Results show only items indexed with the new model
+```
+
+Items indexed with the previous model retain their embeddings. Switching back to that model restores its full result set instantly without re-indexing.
+
+---
+
 ## Database Schema
 
 ZotSeek stores embeddings in a separate SQLite database (`zotseek.sqlite`) attached to Zotero's main connection. The schema is normalized into two tables:
@@ -837,6 +897,20 @@ ZotSeek identifies indexed items using a stable `(library_key, item_key)` pair, 
 Both identifiers are stable across all machines syncing the same library, and survive Zotero reinstalls, profile rebuilds, and database moves. The `items` table uses an internal autoincrement `item_pk` as the primary key referenced by `chunks`. Local `Zotero.Item.id` values are resolved at runtime via `identity-resolver.ts` and never stored.
 
 Migration from v7 to v8 resolves each row's identity using the stored `item_key` (which v7 already populated), so cross-machine database copies succeed even when local `item_id` values from the source machine no longer match the destination's local IDs.
+
+### Per-Model Embeddings (Schema v9)
+
+Schema v9 extends the database to hold embeddings from multiple models simultaneously:
+
+**`chunks` table** — primary key promoted to `(item_pk, chunk_index, model_id)`. A given paragraph can now have one row per model, each with its own embedding vector. The search engine filters by the active `model_id` before computing cosine similarity, so results are always within a single model's embedding space.
+
+**`item_models` table** — records per-(item, model) indexing status:
+- `item_pk` (FK to `items`), `model_id` (composite PK together)
+- `indexed_at`, `content_hash`, `was_truncated`, `pages_indexed`, `pages_total`
+
+The per-item status columns (`was_truncated`, `pages_indexed`, `pages_total`) that were on the `items` table in v7/v8 are now on `item_models` because they are inherently per-(item, model): a paper may be fully indexed under one model but truncated under another if the chunk count varies. The `items` table loses these columns; queries check `item_models` for the active model.
+
+**Migration v8 → v9:** existing `chunks` rows have `model_id` back-filled from the `items.model_id` column (which recorded the last model used to index that item). Rows from `items` that have per-item status columns are migrated into `item_models` for each item's recorded model. A backup is written to `zotseek.sqlite.v8.bak` before the migration starts.
 
 ---
 
