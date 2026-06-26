@@ -126,13 +126,28 @@ interface VectorStoreStats {
   indexedPapers: number;
   totalChunks: number;
   avgChunksPerPaper: number;
-  modelId: string;              // e.g. "Xenova/nomic-embed-text-v1.5"
+  modelId: string;              // active model id, e.g. "nomic-embed-text-v1.5"
+  activeModel: string;          // active model id (explicit field)
+  coverage: {                   // items searchable with the active model
+    covered: number;
+    total: number;
+  };
   lastIndexed: Date | null;
   storageUsedBytes: number;
   chunksWithLocation: number;   // Chunks that have page numbers
   locationCoveragePercent: number;
 }
 ```
+
+### `reindexForActiveModel()`
+
+Index every item that is not yet covered by the currently active embedding model, in the background. Embeddings produced by other models are preserved. This is the same action triggered by the "Index remaining" button in Settings and by the prompt shown when you switch models.
+
+```js
+await Zotero.ZotSeek.api.reindexForActiveModel();
+```
+
+**Returns:** `Promise<void>` - resolves when the background indexing run completes.
 
 ### `compactDatabase()`
 
