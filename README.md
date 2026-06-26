@@ -307,9 +307,16 @@ Go to **Zotero → Settings → ZotSeek → Embedding Model** to pick the model 
 
 **Privacy:** models are downloaded once from Hugging Face directly to your Zotero profile directory. No library content is ever sent anywhere — inference runs entirely on your machine.
 
+**Coverage indicator:** below the model selector, Settings shows "N of M items searchable with the active model." When any items are missing coverage, an **Index remaining N** button appears. Clicking it indexes those items in the background while you continue working; the button shows "Indexing in the background..." and disables itself while the run is active.
+
+**Three ways to index with a model (all preserve other models' embeddings):**
+1. The prompt shown immediately after you switch to a new model.
+2. The **Index remaining** button on the coverage line in Settings.
+3. The toolbar or right-click **Index Library** action — now model-aware, it backfills items not yet covered by the active model rather than reporting "already indexed."
+
 **Switching models:** switching to a different model triggers a background re-index for items that have not yet been indexed with the new model. Items indexed with other models retain their embeddings — switching back is instant.
 
-**Manage downloaded models:** a "Manage downloaded models" panel in Settings shows disk usage for each non-bundled model and lets you delete models you no longer need (this also removes that model's embeddings from the database).
+**Manage downloaded models:** a "Manage downloaded models" panel in Settings shows disk usage for each non-bundled model and lets you delete models you no longer need (this also removes that model's embeddings from the database). The built-in model and whichever model is currently active cannot be removed — each shows an inline reason ("Built-in" / "Active") with a tooltip explaining why.
 
 ---
 

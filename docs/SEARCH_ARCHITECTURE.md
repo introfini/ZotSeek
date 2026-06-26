@@ -878,6 +878,18 @@ When the user changes the active model (`zotseek.embeddingModel` pref), the work
 
 Items indexed with the previous model retain their embeddings. Switching back to that model restores its full result set instantly without re-indexing.
 
+### Model-Aware Indexing and find_similar
+
+All read paths that gate or drive indexing work are model-aware via `item_models`:
+
+- **`isIndexedByIdentity(libraryKey, itemKey, modelId)`** — used by auto-index, manual "Index Library," and the "Index remaining" button. An item counts as covered only when a row exists in `item_models` for the active `model_id`. The result is that "Index Library" backfills items not yet covered by the active model, rather than skipping everything that was ever indexed.
+- **`getItemChunksByIdentity(libraryKey, itemKey, modelId)`** and **`getChunkByPk(itemPk, chunkIndex, modelId)`** — used by `find_similar` / "Find Related Documents." They filter `chunks` by `model_id`, so the source item's embedding and all candidate embeddings come from the same model's vector space. Switching the active model changes which partition similarity is computed in.
+
+Three model-aware triggers can re-index the library, all preserving embeddings from other models:
+1. The prompt shown immediately after switching to a new model.
+2. The **Index remaining N** button on the coverage line in Settings (shows count of items lacking coverage for the active model).
+3. The toolbar / right-click **Index Library** action.
+
 ---
 
 ## Database Schema
