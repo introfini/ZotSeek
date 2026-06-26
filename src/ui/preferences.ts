@@ -89,20 +89,24 @@ async function renderCoverage(doc: any): Promise<void> {
   // When the active model doesn't cover the whole library yet, offer a button
   // to index the missing items (without having to switch models to get the prompt).
   if (total > 0 && covered < total) {
+    const zs = (typeof Zotero !== 'undefined') ? (Zotero as any).ZotSeek : null;
+    const busy = !!(zs && zs.indexing);
     const btn = doc.createElement('button') as any;
-    btn.textContent = `Index remaining ${total - covered}`;
     btn.style.cssText = 'margin-left:8px;';
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      btn.textContent = 'Indexing in the background...';
-      try {
-        const zs = (typeof Zotero !== 'undefined') ? (Zotero as any).ZotSeek : null;
-        if (zs && zs.api && typeof zs.api.reindexForActiveModel === 'function') {
-          await zs.api.reindexForActiveModel();
-        }
-      } catch { /* progress + errors are surfaced by the indexing UI */ }
-      if (docAlive(doc)) await renderCoverage(doc);
-    });
+    btn.textContent = busy ? 'Indexing in the background...' : `Index remaining ${total - covered}`;
+    btn.disabled = busy;
+    if (!busy) {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Indexing in the background...';
+        try {
+          if (zs && zs.api && typeof zs.api.reindexForActiveModel === 'function') {
+            await zs.api.reindexForActiveModel();
+          }
+        } catch { /* progress + errors are surfaced by the indexing UI */ }
+        if (docAlive(doc)) await renderCoverage(doc);
+      });
+    }
     el.appendChild(btn);
   }
 }
