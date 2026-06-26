@@ -14,6 +14,18 @@ import { embeddingPipeline } from '../core/embedding-pipeline';
 declare const Services: any;
 declare const Zotero: any;
 
+/** Re-entrancy guard: prevents two rapid model-change events from racing. */
+let modelSwitchInProgress = false;
+
+/**
+ * Returns true when the preferences document is still alive and usable.
+ * Guards DOM touches after long awaits (e.g. after reindexForActiveModel
+ * returns, the user may have closed the prefs window).
+ */
+function docAlive(doc: any): boolean {
+  try { return !!doc && !!doc.getElementById; } catch { return false; }
+}
+
 function confirmDownload(model: any): boolean {
   return Services.prompt.confirm(null, 'Download model',
     `Selecting ${model.label} downloads about ${model.approxSizeMB} MB once from huggingface.co `
@@ -31,7 +43,8 @@ async function maybePromptReindex(doc: any, modelId: string): Promise<void> {
     const zs = (typeof Zotero !== 'undefined') ? (Zotero as any).ZotSeek : null;
     if (zs && zs.api && typeof zs.api.reindexForActiveModel === 'function') {
       await zs.api.reindexForActiveModel();
-      await renderCoverage(doc);
+      // Guard: prefs window may have been closed while reindex ran
+      if (docAlive(doc)) await renderCoverage(doc);
     }
   }
 }
@@ -260,26 +273,40 @@ class PreferencesManager {
     const modelMenu = doc.getElementById('zotseek-pref-embeddingModel') as any;
     if (modelMenu) {
       modelMenu.addEventListener('command', async () => {
+        // Re-entrancy guard: two rapid selections must not race setModel + reindex
+        if (modelSwitchInProgress) return;
+        modelSwitchInProgress = true;
         const id = modelMenu.selectedItem?.getAttribute('value');
-        if (!id) return;
+        if (!id) { modelSwitchInProgress = false; return; }
         const model = getModel(id);
-        if (!model) return;
+        if (!model) { modelSwitchInProgress = false; return; }
         const statusEl = doc.getElementById('zotseek-embeddingModel-status');
         try {
           if (!model.bundled && !(await isModelOnDisk(model))) {
-            if (!confirmDownload(model)) { await populateModelMenu(doc); return; }
-            if (statusEl) statusEl.textContent = `Downloading ${model.label}...`;
+            if (!confirmDownload(model)) {
+              if (docAlive(doc)) await populateModelMenu(doc);
+              return;
+            }
+            if (docAlive(doc) && statusEl) statusEl.textContent = `Downloading ${model.label}...`;
             await ensureModelDownloaded(model, (done, total) => {
-              if (statusEl) statusEl.textContent = `Downloading ${model.label}: file ${done} of ${total}`;
+              if (docAlive(doc) && statusEl) statusEl.textContent = `Downloading ${model.label}: file ${done} of ${total}`;
             });
           }
           await embeddingPipeline.setModel(id);   // persists the pref + reloads the worker
-          if (statusEl) statusEl.textContent = '';
-          await populateModelMenu(doc);            // refresh status chips
-          await renderCoverage(doc);
+          if (docAlive(doc)) {
+            if (statusEl) statusEl.textContent = '';
+            await populateModelMenu(doc);          // refresh status chips
+            await renderCoverage(doc);
+          }
+          // maybePromptReindex may trigger a long reindex; guard doc touches inside it
           await maybePromptReindex(doc, id);
         } catch (e: any) {
-          if (statusEl) statusEl.textContent = `Failed: ${e?.message || e}`;
+          // Guard: statusEl may throw if the prefs window was closed during a long await
+          try {
+            if (docAlive(doc) && statusEl) statusEl.textContent = `Failed: ${e?.message || e}`;
+          } catch { /* prefs window gone — nothing to update */ }
+        } finally {
+          modelSwitchInProgress = false;
         }
       });
     }

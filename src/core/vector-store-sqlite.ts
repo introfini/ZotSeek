@@ -1882,23 +1882,25 @@ export class VectorStoreSQLite {
       [libraryKey, itemKey]
     );
     if (!pk || Number(pk) <= 0) return;
-    if (modelId) {
-      await Zotero.DB.queryAsync(
-        `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ? AND model_id = ?`, [Number(pk), modelId]);
-      await Zotero.DB.queryAsync(
-        `DELETE FROM ${DB_NAME}.item_models WHERE item_pk = ? AND model_id = ?`, [Number(pk), modelId]);
-    } else {
-      // No model given: fully unindex the item, so drop its item_models rows too
-      // (otherwise getCoverage would still count it as covered with no chunks left).
-      await Zotero.DB.queryAsync(
-        `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ?`,
-        [Number(pk)]
-      );
-      await Zotero.DB.queryAsync(
-        `DELETE FROM ${DB_NAME}.item_models WHERE item_pk = ?`,
-        [Number(pk)]
-      );
-    }
+    await Zotero.DB.executeTransaction(async () => {
+      if (modelId) {
+        await Zotero.DB.queryAsync(
+          `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ? AND model_id = ?`, [Number(pk), modelId]);
+        await Zotero.DB.queryAsync(
+          `DELETE FROM ${DB_NAME}.item_models WHERE item_pk = ? AND model_id = ?`, [Number(pk), modelId]);
+      } else {
+        // No model given: fully unindex the item, so drop its item_models rows too
+        // (otherwise getCoverage would still count it as covered with no chunks left).
+        await Zotero.DB.queryAsync(
+          `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ?`,
+          [Number(pk)]
+        );
+        await Zotero.DB.queryAsync(
+          `DELETE FROM ${DB_NAME}.item_models WHERE item_pk = ?`,
+          [Number(pk)]
+        );
+      }
+    });
     this.invalidateCache();
   }
 

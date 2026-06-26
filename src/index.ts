@@ -1816,6 +1816,9 @@ class ZotSeekPlugin {
 
     this.indexing = true;
     const Z = getZotero();
+    // Capture once — used for getItemsMissingModel and logging; embed() returns
+    // the modelId it actually used so chunks carry it rather than this snapshot.
+    const activeModelId = getActiveModelId();
 
     const progressWin = new (Z.ProgressWindow as any)({ closeOnClick: true });
     progressWin.changeHeadline('[ZotSeek] Indexing for new model...');
@@ -1828,8 +1831,7 @@ class ZotSeekPlugin {
     try {
       await this.ensureStoreReady();
 
-      const modelId = getActiveModelId();
-      const missing = await this.vectorStore!.getItemsMissingModel(modelId);
+      const missing = await this.vectorStore!.getItemsMissingModel(activeModelId);
 
       if (missing.length === 0) {
         try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
@@ -1838,7 +1840,8 @@ class ZotSeekPlugin {
         return;
       }
 
-      // Resolve (libraryKey, itemKey) pairs to local Zotero items
+      // Resolve (libraryKey, itemKey) pairs to local Zotero items, skipping
+      // unresolvable ones (dead group-library items) before extraction/embedding.
       const zoteroItems: any[] = [];
       for (const { libraryKey, itemKey } of missing) {
         const localId = localItemIDFromIdentity({ libraryKey, itemKey });
@@ -1857,97 +1860,135 @@ class ZotSeekPlugin {
       }
 
       itemRow.setText(`Loading model for ${zoteroItems.length} items...`);
-      embeddingPipeline.reset();
+      // Do NOT call reset(): the prefs handler already loaded the active model
+      // via setModel. init() is idempotent — returns immediately if already ready.
       await embeddingPipeline.init();
 
       const indexingMode = getIndexingMode(Z);
-      itemRow.setText(`Extracting text (${zoteroItems.length} items)...`);
-      const extractedItems = await textExtractor.extractChunksFromItems(zoteroItems, indexingMode);
 
-      if (extractedItems.length === 0) {
-        try { itemRow.setIcon('chrome://zotero/skin/cross.png'); } catch { /* ignore */ }
-        itemRow.setText('No content extracted.');
-        progressWin.startCloseTimer(3000);
-        return;
-      }
+      // === Checkpoint batching — mirrors indexItems' structure for crash recovery ===
+      // Each batch of CHECKPOINT_BATCH_SIZE items is extracted, embedded, and saved
+      // independently so a crash loses at most one batch's work.
+      const CHECKPOINT_BATCH_SIZE = 10;
+      const totalBatches = Math.ceil(zoteroItems.length / CHECKPOINT_BATCH_SIZE);
+      let totalItemsIndexed = 0;
+      let totalChunksIndexed = 0;
+      let totalFailedChunks = 0;
 
-      const totalChunks = extractedItems.reduce((sum, item) => sum + item.chunks.length, 0);
-      const textsForEmbedding: Array<{ id: string; text: string; title: string }> = [];
-      for (const extracted of extractedItems) {
-        for (const chunk of extracted.chunks) {
-          textsForEmbedding.push({ id: `${extracted.itemId}_${chunk.index}`, text: chunk.text, title: extracted.title });
+      this.logger.info(`reindexForActiveModel: ${zoteroItems.length} items in ${totalBatches} batches, model ${activeModelId}`);
+
+      for (let batchStart = 0; batchStart < zoteroItems.length; batchStart += CHECKPOINT_BATCH_SIZE) {
+        const batchEnd = Math.min(batchStart + CHECKPOINT_BATCH_SIZE, zoteroItems.length);
+        const batchItems = zoteroItems.slice(batchStart, batchEnd);
+        const batchNumber = Math.floor(batchStart / CHECKPOINT_BATCH_SIZE) + 1;
+
+        // STEP 1: Extract chunks for this batch
+        itemRow.setText(`Extracting batch ${batchNumber}/${totalBatches}...`);
+        this.logger.info(`reindexForActiveModel: batch ${batchNumber}/${totalBatches}: extracting ${batchItems.length} items`);
+
+        const extractedBatch = await textExtractor.extractChunksFromItems(batchItems, indexingMode);
+
+        if (extractedBatch.length === 0) {
+          this.logger.info(`reindexForActiveModel: batch ${batchNumber} produced no extractable content, skipping`);
+          continue;
         }
-      }
 
-      // Embed all chunks
-      const embeddingMap = new Map<string, { embedding: number[]; modelId: string }>();
-      let processed = 0;
-      let failedChunks = 0;
-      const failedItems = new Set<string>();
-
-      for (const item of textsForEmbedding) {
-        processed++;
-        itemRow.setText(`Embedding ${processed}/${totalChunks}...`);
-        try {
-          const result = await embeddingPipeline.embed(item.text);
-          if (result) embeddingMap.set(item.id, result);
-        } catch (embedException: any) {
-          try {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const retryResult = await embeddingPipeline.embed(item.text);
-            if (retryResult) embeddingMap.set(item.id, retryResult);
-          } catch {
-            failedChunks++;
-            failedItems.add(item.title);
-            this.logger.error(`reindexForActiveModel: skipping chunk ${item.id}: ${embedException?.message || embedException}`);
+        // STEP 2: Embed all chunks in this batch
+        const batchChunks: Array<{ id: string; text: string; title: string }> = [];
+        for (const extracted of extractedBatch) {
+          for (const chunk of extracted.chunks) {
+            batchChunks.push({ id: `${extracted.itemId}_${chunk.index}`, text: chunk.text, title: extracted.title });
           }
         }
-      }
 
-      // Build embeddings array — NO deleteItemChunks: these items have no
-      // active-model chunks yet, and putBatch adds alongside other models.
-      itemRow.setText('Saving...');
-      const paperEmbeddings: PaperEmbedding[] = [];
-      for (const extracted of extractedItems) {
-        const libKey = libraryKeyFromLocalID(extracted.libraryId);
-        if (!libKey) continue;
-        for (const chunk of extracted.chunks) {
-          const embeddingKey = `${extracted.itemId}_${chunk.index}`;
-          const embeddingData = embeddingMap.get(embeddingKey);
-          if (!embeddingData) continue;
-          paperEmbeddings.push({
-            itemId: extracted.itemId,
-            chunkIndex: chunk.index,
-            libraryKey: libKey,
-            itemKey: extracted.itemKey,
-            libraryId: extracted.libraryId,
-            title: extracted.title,
-            abstract: extracted.abstract || undefined,
-            chunkText: chunk.text,
-            textSource: chunk.type,
-            embedding: embeddingData.embedding,
-            modelId: embeddingData.modelId,
-            indexedAt: new Date().toISOString(),
-            contentHash: extracted.contentHash,
-            pageNumber: chunk.pageNumber,
-            paragraphIndex: chunk.paragraphIndex,
-            startChar: chunk.startChar,
-            endChar: chunk.endChar,
-            wasTruncated: extracted.wasTruncated,
-            pagesIndexed: extracted.pagesIndexed,
-            pagesTotal: extracted.pagesTotal,
-          });
+        const embeddingMap = new Map<string, { embedding: number[]; modelId: string }>();
+        let chunkProcessed = 0;
+        let failedChunks = 0;
+        const failedItems = new Set<string>();
+
+        itemRow.setText(`Embedding batch ${batchNumber}/${totalBatches} (${batchChunks.length} chunks)...`);
+        this.logger.info(`reindexForActiveModel: batch ${batchNumber}/${totalBatches}: embedding ${batchChunks.length} chunks`);
+
+        for (const chunk of batchChunks) {
+          chunkProcessed++;
+          try {
+            const result = await embeddingPipeline.embed(chunk.text);
+            if (result) embeddingMap.set(chunk.id, result);
+          } catch (embedException: any) {
+            try {
+              this.logger.warn(`reindexForActiveModel: embed failed for ${chunk.id} ("${chunk.title}"), retrying: ${embedException?.message || embedException}`);
+              await new Promise(resolve => setTimeout(resolve, 500));
+              const retryResult = await embeddingPipeline.embed(chunk.text);
+              if (retryResult) embeddingMap.set(chunk.id, retryResult);
+            } catch {
+              failedChunks++;
+              failedItems.add(chunk.title);
+              this.logger.error(`reindexForActiveModel: skipping chunk ${chunk.id} ("${chunk.title}"): ${embedException?.message || embedException}`);
+            }
+          }
+          // Yield to the UI thread periodically to avoid freezing
+          if (chunkProcessed % 5 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
         }
+
+        if (failedChunks > 0) {
+          totalFailedChunks += failedChunks;
+          this.logger.warn(`reindexForActiveModel: batch ${batchNumber}: ${failedChunks} chunks failed in: ${Array.from(failedItems).join(', ')}`);
+        }
+
+        // STEP 3: Save this batch (CHECKPOINT) — no deleteItemChunks: items have
+        // no active-model chunks yet; putBatch adds alongside other models' chunks.
+        itemRow.setText(`Saving batch ${batchNumber}/${totalBatches}...`);
+        const batchEmbeddings: PaperEmbedding[] = [];
+        for (const extracted of extractedBatch) {
+          const libKey = libraryKeyFromLocalID(extracted.libraryId);
+          if (!libKey) {
+            this.logger.warn(`[reindex] Cannot resolve libraryKey for item ${extracted.itemId} (libraryId=${extracted.libraryId}); skipping`);
+            continue;
+          }
+          for (const chunk of extracted.chunks) {
+            const embeddingKey = `${extracted.itemId}_${chunk.index}`;
+            const embeddingData = embeddingMap.get(embeddingKey);
+            if (!embeddingData) continue;
+            batchEmbeddings.push({
+              itemId: extracted.itemId,
+              chunkIndex: chunk.index,
+              libraryKey: libKey,
+              itemKey: extracted.itemKey,
+              libraryId: extracted.libraryId,
+              title: extracted.title,
+              abstract: extracted.abstract || undefined,
+              chunkText: chunk.text,
+              textSource: chunk.type,
+              embedding: embeddingData.embedding,
+              modelId: embeddingData.modelId,
+              indexedAt: new Date().toISOString(),
+              contentHash: extracted.contentHash,
+              pageNumber: chunk.pageNumber,
+              paragraphIndex: chunk.paragraphIndex,
+              startChar: chunk.startChar,
+              endChar: chunk.endChar,
+              wasTruncated: extracted.wasTruncated,
+              pagesIndexed: extracted.pagesIndexed,
+              pagesTotal: extracted.pagesTotal,
+            });
+          }
+        }
+
+        await this.vectorStore!.putBatch(batchEmbeddings);
+        itemTreeIndexColumn.invalidate(extractedBatch.map(e => e.itemId));
+
+        totalItemsIndexed += extractedBatch.length;
+        totalChunksIndexed += batchEmbeddings.length;
+        this.logger.info(`reindexForActiveModel: checkpoint ${batchNumber}/${totalBatches}: saved ${batchEmbeddings.length} chunks from ${extractedBatch.length} items`);
       }
 
-      await this.vectorStore!.putBatch(paperEmbeddings);
-      itemTreeIndexColumn.invalidate(extractedItems.map(e => e.itemId));
-
-      this.logger.info(`reindexForActiveModel: indexed ${extractedItems.length} items (${paperEmbeddings.length} chunks, ${failedChunks} failed) for model ${modelId}`);
+      this.logger.info(`reindexForActiveModel: indexed ${totalItemsIndexed} items (${totalChunksIndexed} chunks, ${totalFailedChunks} failed) for model ${activeModelId}`);
       try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
-      itemRow.setText(failedChunks > 0
-        ? `${paperEmbeddings.length} chunks indexed (${failedChunks} failed)`
-        : `${paperEmbeddings.length} chunks indexed`);
+      itemRow.setText(totalFailedChunks > 0
+        ? `${totalChunksIndexed} chunks indexed (${totalFailedChunks} failed)`
+        : `${totalChunksIndexed} chunks indexed`);
       progressWin.startCloseTimer(4000);
 
     } catch (error: any) {
