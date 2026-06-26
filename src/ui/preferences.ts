@@ -7,7 +7,7 @@ import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
 import { autoIndexManager } from '../core/auto-index-manager';
 import { getAllModels, getActiveModelId, getModel } from '../core/model-registry';
-import { isModelOnDisk, ensureModelDownloaded } from '../core/model-download';
+import { isModelOnDisk, ensureModelDownloaded, removeModelFiles } from '../core/model-download';
 import { vectorStoreSQLite } from '../core/vector-store-sqlite';
 import { embeddingPipeline } from '../core/embedding-pipeline';
 
@@ -80,6 +80,36 @@ async function renderCoverage(doc: any): Promise<void> {
     : `${covered} of ${total} items searchable with the active model.`;
 }
 
+async function renderManageModels(doc: any): Promise<void> {
+  const host = doc.getElementById('zotseek-manageModels');
+  if (!host) return;
+  host.replaceChildren();
+  const active = getActiveModelId();
+  for (const m of getAllModels()) {
+    const onDisk = m.bundled || await isModelOnDisk(m);
+    if (!onDisk) continue;
+    const row = doc.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0;';
+    const label = doc.createElement('span');
+    label.textContent = `${m.label} · ${m.dimensions}d`;
+    const btn = doc.createElement('button') as any;
+    const removable = !m.bundled && m.id !== active;
+    btn.textContent = 'Remove';
+    btn.disabled = !removable;
+    btn.addEventListener('click', async () => {
+      const yes = Services.prompt.confirm(null, 'Remove model',
+        `Remove ${m.label} files and its embeddings from your library?`);
+      if (!yes) return;
+      await removeModelFiles(m);
+      await vectorStoreSQLite.deleteModelEmbeddings(m.id);
+      if (docAlive(doc)) await renderManageModels(doc);
+      if (docAlive(doc)) await populateModelMenu(doc);
+    });
+    row.append(label, btn);
+    host.appendChild(row);
+  }
+}
+
 class PreferencesManager {
   private window: Window | null = null;
   private logger: any;
@@ -107,9 +137,10 @@ class PreferencesManager {
       // Initialize preferences
       this.initPreferences();
 
-      // Populate model selector and coverage line
+      // Populate model selector, coverage line, and manage-models list
       await populateModelMenu(this.window.document);
       await renderCoverage(this.window.document);
+      await renderManageModels(this.window.document);
 
       // Set up event listeners
       this.initEventListeners();
