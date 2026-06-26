@@ -1961,6 +1961,8 @@ export class VectorStoreSQLite {
 
   /**
    * Get all chunks for a specific item by stable identity.
+   * Only returns chunks for the currently active embedding model, so
+   * find_similar source vectors always match the candidate model.
    */
   async getItemChunksByIdentity(libraryKey: string, itemKey: string): Promise<PaperEmbedding[]> {
     await this.ensureInit();
@@ -1970,9 +1972,10 @@ export class VectorStoreSQLite {
     );
     if (!pk) return [];
 
+    const activeModelId = getActiveModelId();
     const rawChunkIdxs = await Zotero.DB.columnQueryAsync(
-      `SELECT chunk_index FROM ${DB_NAME}.chunks WHERE item_pk = ? ORDER BY chunk_index`,
-      [Number(pk)]
+      `SELECT chunk_index FROM ${DB_NAME}.chunks WHERE item_pk = ? AND model_id = ? ORDER BY chunk_index`,
+      [Number(pk), activeModelId]
     );
     const chunkIndexes: number[] = (rawChunkIdxs || []).map((v: any) => Number(v));
 
@@ -2045,30 +2048,35 @@ export class VectorStoreSQLite {
   /**
    * Internal: fetch a chunk by item_pk + chunk_index, joined with items.
    * Uses parallel valueQueryAsync calls - most reliable method in Zotero 8.
+   *
+   * All chunk-table reads are scoped to the ACTIVE model so that find_similar
+   * source vectors always come from the same model as the candidate set.
+   * If the active-model chunk does not exist, returns undefined (the item has
+   * not been indexed with the active model yet).
    */
   private async getChunkByPk(itemPk: number, chunkIndex: number): Promise<PaperEmbedding | undefined> {
     await this.ensureInit();
     try {
+      const activeModelId = getActiveModelId();
       const [
-        library_key, item_key, title, model_id, indexed_at, content_hash, abstract,
+        library_key, item_key, title, indexed_at, content_hash, abstract,
         text_source, chunk_text, embedding,
         page_number, paragraph_index, start_char, end_char, bbox
       ] = await Promise.all([
         Zotero.DB.valueQueryAsync(`SELECT library_key FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
         Zotero.DB.valueQueryAsync(`SELECT item_key FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
         Zotero.DB.valueQueryAsync(`SELECT title FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
-        Zotero.DB.valueQueryAsync(`SELECT model_id FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
         Zotero.DB.valueQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
         Zotero.DB.valueQueryAsync(`SELECT content_hash FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
         Zotero.DB.valueQueryAsync(`SELECT abstract FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
-        Zotero.DB.valueQueryAsync(`SELECT text_source FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT chunk_text FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT embedding FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT page_number FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT paragraph_index FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT start_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT end_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
-        Zotero.DB.valueQueryAsync(`SELECT bbox FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ?`, [itemPk, chunkIndex]),
+        Zotero.DB.valueQueryAsync(`SELECT text_source FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT chunk_text FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT embedding FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT page_number FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT paragraph_index FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT start_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT end_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT bbox FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
       ]);
 
       if (!library_key || !item_key || !embedding) return undefined;
@@ -2079,7 +2087,7 @@ export class VectorStoreSQLite {
         itemKey: item_key,
         title: title || '',
         abstract,
-        modelId: model_id || '',
+        modelId: activeModelId,
         indexedAt: indexed_at || '',
         contentHash: content_hash || '',
         chunkIndex,
@@ -2579,7 +2587,14 @@ export class VectorStoreSQLite {
    * Identity-keyed variant of {@link getIndexStatusMap}.
    *
    * Returns a Map keyed by `${libraryKey}|${itemKey}` with per-item status.
-   * Items not in the index are absent from the map. Batched in groups of 200
+   * Status fields and chunk count are scoped to the ACTIVE embedding model:
+   * - Status (indexedAt / wasTruncated / pagesIndexed / pagesTotal) comes from
+   *   `item_models` for the active model.
+   * - chunkCount counts only active-model chunks.
+   * - Items with no `item_models` row for the active model are absent from the map
+   *   (not yet indexed with this model).
+   *
+   * Items not in the index at all are absent from the map. Batched in groups of 200
    * using a composite OR-clause because SQLite cannot match tuples via IN.
    */
   async getIndexStatusByIdentity(
@@ -2589,6 +2604,7 @@ export class VectorStoreSQLite {
     const result = new Map<string, ItemIndexStatus>();
     if (identities.length === 0) return result;
 
+    const activeModelId = getActiveModelId();
     const CHUNK = 200;
     try {
       for (let start = 0; start < identities.length; start += CHUNK) {
@@ -2603,48 +2619,92 @@ export class VectorStoreSQLite {
         for (const id of batch) { params.push(id.libraryKey, id.itemKey); }
 
         const baseWhere = `WHERE ${placeholders} ORDER BY item_pk`;
-        const [pks, libKeys, itemKeys, indexedAts, truncs, pIdx, pTot] = await Promise.all([
+        const [pks, libKeys, itemKeys] = await Promise.all([
           Zotero.DB.columnQueryAsync(`SELECT item_pk FROM ${DB_NAME}.items ${baseWhere}`, params),
           Zotero.DB.columnQueryAsync(`SELECT library_key FROM ${DB_NAME}.items ${baseWhere}`, params),
           Zotero.DB.columnQueryAsync(`SELECT item_key FROM ${DB_NAME}.items ${baseWhere}`, params),
-          Zotero.DB.columnQueryAsync(`SELECT indexed_at FROM ${DB_NAME}.items ${baseWhere}`, params),
-          Zotero.DB.columnQueryAsync(`SELECT was_truncated FROM ${DB_NAME}.items ${baseWhere}`, params),
-          Zotero.DB.columnQueryAsync(`SELECT pages_indexed FROM ${DB_NAME}.items ${baseWhere}`, params),
-          Zotero.DB.columnQueryAsync(`SELECT pages_total FROM ${DB_NAME}.items ${baseWhere}`, params),
         ]);
 
         const pkArr: number[] = (pks || []).map((v: any) => Number(v));
         if (pkArr.length === 0) continue;
 
-        // Build chunk-count map keyed by item_pk.
-        const chunkPlaceholders = pkArr.map(() => '?').join(',');
-        const [cPks, cCounts] = await Promise.all([
+        // Read per-(item, model) status from item_models for the active model.
+        const imPlaceholders = pkArr.map(() => '?').join(',');
+        const imParams = [...pkArr, activeModelId];
+        const [imPks, imIndexedAts, imTruncs, imPIdx, imPTot] = await Promise.all([
           Zotero.DB.columnQueryAsync(
-            `SELECT item_pk FROM ${DB_NAME}.chunks WHERE item_pk IN (${chunkPlaceholders}) GROUP BY item_pk ORDER BY item_pk`,
-            pkArr
+            `SELECT item_pk FROM ${DB_NAME}.item_models WHERE item_pk IN (${imPlaceholders}) AND model_id = ? ORDER BY item_pk`,
+            imParams
           ),
           Zotero.DB.columnQueryAsync(
-            `SELECT COUNT(*) FROM ${DB_NAME}.chunks WHERE item_pk IN (${chunkPlaceholders}) GROUP BY item_pk ORDER BY item_pk`,
-            pkArr
+            `SELECT indexed_at FROM ${DB_NAME}.item_models WHERE item_pk IN (${imPlaceholders}) AND model_id = ? ORDER BY item_pk`,
+            imParams
+          ),
+          Zotero.DB.columnQueryAsync(
+            `SELECT was_truncated FROM ${DB_NAME}.item_models WHERE item_pk IN (${imPlaceholders}) AND model_id = ? ORDER BY item_pk`,
+            imParams
+          ),
+          Zotero.DB.columnQueryAsync(
+            `SELECT pages_indexed FROM ${DB_NAME}.item_models WHERE item_pk IN (${imPlaceholders}) AND model_id = ? ORDER BY item_pk`,
+            imParams
+          ),
+          Zotero.DB.columnQueryAsync(
+            `SELECT pages_total FROM ${DB_NAME}.item_models WHERE item_pk IN (${imPlaceholders}) AND model_id = ? ORDER BY item_pk`,
+            imParams
           ),
         ]);
+
+        // Build a map: item_pk -> active-model status.
+        const itemModelMap = new Map<number, {
+          indexedAt: string; wasTruncated: boolean; pagesIndexed: number; pagesTotal: number;
+        }>();
+        for (let i = 0; i < (imPks || []).length; i++) {
+          itemModelMap.set(Number(imPks[i]), {
+            indexedAt: String(imIndexedAts?.[i] ?? ''),
+            wasTruncated: Number(imTruncs?.[i] ?? 0) === 1,
+            pagesIndexed: Number(imPIdx?.[i] ?? 0),
+            pagesTotal: Number(imPTot?.[i] ?? 0),
+          });
+        }
+
+        // Build chunk-count map keyed by item_pk, scoped to the active model.
+        // Only query item_pks that have an item_models row (others are un-indexed for this model).
+        const coveredPkArr = pkArr.filter(pk => itemModelMap.has(pk));
         const chunkCountMap = new Map<number, number>();
-        for (let i = 0; i < (cPks || []).length; i++) {
-          chunkCountMap.set(Number(cPks[i]), Number(cCounts[i]) || 0);
+        if (coveredPkArr.length > 0) {
+          const chunkPlaceholders = coveredPkArr.map(() => '?').join(',');
+          const chunkParams = [...coveredPkArr, activeModelId];
+          const [cPks, cCounts] = await Promise.all([
+            Zotero.DB.columnQueryAsync(
+              `SELECT item_pk FROM ${DB_NAME}.chunks WHERE item_pk IN (${chunkPlaceholders}) AND model_id = ? GROUP BY item_pk ORDER BY item_pk`,
+              chunkParams
+            ),
+            Zotero.DB.columnQueryAsync(
+              `SELECT COUNT(*) FROM ${DB_NAME}.chunks WHERE item_pk IN (${chunkPlaceholders}) AND model_id = ? GROUP BY item_pk ORDER BY item_pk`,
+              chunkParams
+            ),
+          ]);
+          for (let i = 0; i < (cPks || []).length; i++) {
+            chunkCountMap.set(Number(cPks[i]), Number(cCounts[i]) || 0);
+          }
         }
 
         for (let i = 0; i < pkArr.length; i++) {
+          const pk = pkArr[i];
+          const modelStatus = itemModelMap.get(pk);
+          // No item_models row for this model -> item not covered -> skip.
+          if (!modelStatus) continue;
           const lk = String(libKeys?.[i] ?? '');
           const ik = String(itemKeys?.[i] ?? '');
           const key = `${lk}|${ik}`;
           result.set(key, {
             libraryKey: lk,
             itemKey: ik,
-            indexedAt: String(indexedAts?.[i] ?? ''),
-            wasTruncated: Number(truncs?.[i] ?? 0) === 1,
-            pagesIndexed: Number(pIdx?.[i] ?? 0),
-            pagesTotal: Number(pTot?.[i] ?? 0),
-            chunkCount: chunkCountMap.get(pkArr[i]) ?? 0,
+            indexedAt: modelStatus.indexedAt,
+            wasTruncated: modelStatus.wasTruncated,
+            pagesIndexed: modelStatus.pagesIndexed,
+            pagesTotal: modelStatus.pagesTotal,
+            chunkCount: chunkCountMap.get(pk) ?? 0,
           });
         }
       }

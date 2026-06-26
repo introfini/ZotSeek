@@ -45,6 +45,11 @@ async function maybePromptReindex(doc: any, modelId: string): Promise<void> {
       await zs.api.reindexForActiveModel();
       // Guard: prefs window may have been closed while reindex ran
       if (docAlive(doc)) await renderCoverage(doc);
+    } else {
+      if (docAlive(doc)) {
+        const statusEl = doc.getElementById('zotseek-embeddingModel-status');
+        if (statusEl) statusEl.textContent = 'Could not start indexing; try reopening preferences.';
+      }
     }
   }
 }
