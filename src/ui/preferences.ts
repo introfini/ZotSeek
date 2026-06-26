@@ -80,9 +80,31 @@ async function renderCoverage(doc: any): Promise<void> {
   const { covered, total } = await vectorStoreSQLite.getCoverage(active);
   const el = doc.getElementById('zotseek-embeddingModel-coverage');
   if (!el) return;
-  el.textContent = total === 0
+  el.replaceChildren();
+  const text = doc.createElement('span');
+  text.textContent = total === 0
     ? 'No items indexed yet.'
     : `${covered} of ${total} items searchable with the active model.`;
+  el.appendChild(text);
+  // When the active model doesn't cover the whole library yet, offer a button
+  // to index the missing items (without having to switch models to get the prompt).
+  if (total > 0 && covered < total) {
+    const btn = doc.createElement('button') as any;
+    btn.textContent = `Index remaining ${total - covered}`;
+    btn.style.cssText = 'margin-left:8px;';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Indexing in the background...';
+      try {
+        const zs = (typeof Zotero !== 'undefined') ? (Zotero as any).ZotSeek : null;
+        if (zs && zs.api && typeof zs.api.reindexForActiveModel === 'function') {
+          await zs.api.reindexForActiveModel();
+        }
+      } catch { /* progress + errors are surfaced by the indexing UI */ }
+      if (docAlive(doc)) await renderCoverage(doc);
+    });
+    el.appendChild(btn);
+  }
 }
 
 async function renderManageModels(doc: any): Promise<void> {
