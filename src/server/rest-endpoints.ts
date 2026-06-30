@@ -41,6 +41,7 @@ export async function handleSearchRequest(requestData: any): Promise<EndpointRes
   try {
     const payload = await runSearchTool({
       query: q,
+      library_key: sp.get('libraryKey') || undefined,
       max_results: sp.get('topK') ? parseInt(sp.get('topK') as string, 10) : undefined,
       mode: (sp.get('mode') as any) || undefined,
       granularity: (sp.get('granularity') as any) || undefined,
