@@ -213,7 +213,11 @@ function resolveLibraryId(libraryKey: string | undefined): number | undefined {
     if (!Number.isFinite(groupId) || groupId <= 0) {
       throw new Error(`search: invalid group library key "${libraryKey}"`);
     }
-    return Zotero.Groups.getLibraryIDFromGroupID(groupId);
+    const libraryId = Zotero.Groups.getLibraryIDFromGroupID(groupId);
+    if (libraryId === false) {
+      throw new Error(`search: unknown group library for group ${groupId}`);
+    }
+    return libraryId;
   }
   throw new Error(`search: library_key must be "user" or "group:<groupID>", got "${libraryKey}"`);
 }
