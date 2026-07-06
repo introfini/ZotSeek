@@ -316,7 +316,7 @@ Go to **Zotero → Settings → ZotSeek → Embedding Model** to pick the model 
 
 **Switching models:** switching to a different model triggers a background re-index for items that have not yet been indexed with the new model. Items indexed with other models retain their embeddings — switching back is instant.
 
-**Manage downloaded models:** a "Manage downloaded models" panel in Settings shows disk usage for each non-bundled model and lets you delete models you no longer need (this also removes that model's embeddings from the database). The built-in model and whichever model is currently active cannot be removed — each shows an inline reason ("Built-in" / "Active") with a tooltip explaining why.
+**Manage downloaded models:** a "Manage downloaded models" panel in Settings shows per-model index statistics (items, chunks, and embedding storage) and lets you delete models you no longer need (this also removes that model's embeddings from the database). The built-in model and whichever model is currently active cannot be removed; each shows an inline reason ("Built-in" / "Active") with a tooltip explaining why.
 
 ---
 
