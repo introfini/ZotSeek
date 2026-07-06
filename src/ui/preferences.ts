@@ -116,6 +116,8 @@ async function renderManageModels(doc: any): Promise<void> {
   if (!host) return;
   host.replaceChildren();
   const active = getActiveModelId();
+  const statsByModel = new Map(
+    (await vectorStoreSQLite.getPerModelStats()).map(s => [s.modelId, s]));
   for (const m of getAllModels()) {
     const onDisk = m.bundled || await isModelOnDisk(m);
     if (!onDisk) continue;
@@ -123,6 +125,16 @@ async function renderManageModels(doc: any): Promise<void> {
     row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0;';
     const label = doc.createElement('span');
     label.textContent = `${m.label} · ${m.dimensions}d`;
+    // Per-model index statistics (items / chunks / embedding storage).
+    const st = statsByModel.get(m.id);
+    const statsEl = doc.createElement('span');
+    statsEl.style.cssText = 'font-size:11px;opacity:.6;';
+    if (st && st.chunks > 0) {
+      const mb = st.storageBytes / 1024 / 1024;
+      statsEl.textContent = `${st.items} items · ${st.chunks} chunks · ${mb >= 1 ? mb.toFixed(0) + ' MB' : '<1 MB'}`;
+    } else {
+      statsEl.textContent = 'not indexed';
+    }
     const btn = doc.createElement('button') as any;
     const removable = !m.bundled && m.id !== active;
     btn.textContent = 'Remove';
@@ -141,7 +153,7 @@ async function renderManageModels(doc: any): Promise<void> {
       if (docAlive(doc)) await renderManageModels(doc);
       if (docAlive(doc)) await populateModelMenu(doc);
     });
-    row.append(label, btn);
+    row.append(label, statsEl, btn);
     if (!removable) {
       const reason = doc.createElement('span');
       reason.textContent = m.bundled ? 'Built-in' : 'Active';

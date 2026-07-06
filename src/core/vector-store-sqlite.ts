@@ -2808,6 +2808,29 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Per-model index statistics: for every model that has embeddings stored,
+   * the number of items and chunks and the approximate embedding storage (bytes).
+   * Uses a per-model loop (small model set) to avoid the Zotero multi-column
+   * SELECT quirk.
+   */
+  async getPerModelStats(): Promise<Array<{ modelId: string; items: number; chunks: number; storageBytes: number }>> {
+    await this.ensureInit();
+    const modelIds: string[] = (await Zotero.DB.columnQueryAsync(
+      `SELECT DISTINCT model_id FROM ${DB_NAME}.chunks ORDER BY model_id`)) || [];
+    const out: Array<{ modelId: string; items: number; chunks: number; storageBytes: number }> = [];
+    for (const modelId of modelIds) {
+      const chunks = Number(await Zotero.DB.valueQueryAsync(
+        `SELECT COUNT(*) FROM ${DB_NAME}.chunks WHERE model_id = ?`, [modelId]));
+      const items = Number(await Zotero.DB.valueQueryAsync(
+        `SELECT COUNT(DISTINCT item_pk) FROM ${DB_NAME}.chunks WHERE model_id = ?`, [modelId]));
+      const storageBytes = Number(await Zotero.DB.valueQueryAsync(
+        `SELECT SUM(LENGTH(embedding)) FROM ${DB_NAME}.chunks WHERE model_id = ?`, [modelId])) || 0;
+      out.push({ modelId, items, chunks, storageBytes });
+    }
+    return out;
+  }
+
+  /**
    * Delete all chunks and item_models rows for a given model, leaving the
    * items identity rows intact. Returns the count of chunks deleted.
    */
