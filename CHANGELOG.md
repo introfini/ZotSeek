@@ -2,6 +2,23 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.18.0] - 2026-07-17
+
+### Added
+- **Group library indexing (opt-in)** (#41) — a new **Index scope** setting in **Settings → ZotSeek → Auto-Indexing** chooses which libraries ZotSeek covers: **My Library** (default) or **All libraries** (personal + groups). The scope governs both the bulk **Update Index** action and background auto-indexing. Group items already appear in search results once indexed, with correct deep links into the group library. Contributed by @wjma-phy (#40).
+- `library_key` parameter on the MCP `search` tool and `libraryKey` on `GET /zotseek/search` — limit a search to the personal library (`user`) or a single group (`group:<groupID>`); omit to search everything indexed. Brings `search` to parity with `find_similar`, which already accepted `library_key`.
+
+### Changed
+- **Auto-indexing now respects the index scope** — previously auto-index processed new items from *any* library (group items included) while the bulk Update Index action covered only My Library. Both paths now follow the Index scope setting, so the default behavior is consistently My Library only. If you relied on group items being auto-indexed, set Index scope to **All libraries**.
+- The Update Index confirmation dialog now states which scope it will index ("your personal library" vs "all your libraries").
+
+### Technical
+- New `zotseek.indexScope` preference (`"user"` default | `"all"`), read by both `onIndexLibrary()` (bulk) and `AutoIndexManager.shouldProcess()`.
+- `ZoteroAPI.getAllLibraries()` / `getAllLibraryItems()` enumerate user + group libraries (feeds excluded); `getCollectionItems()` accepts an optional `libraryId` so collection indexing works in group libraries (fixes bulk-resume in group collections).
+- REST/MCP `library_key` resolution validates unknown groups: `group:<id>` for a group Zotero doesn't have returns an explicit error instead of silently searching nothing.
+
+---
+
 ## [1.17.0] - 2026-07-11
 
 ### Added
