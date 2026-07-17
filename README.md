@@ -28,6 +28,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 📁 **Save Results as Collection** - One click saves the full result set into a new Zotero collection so you can revisit the list later without re-running the search
 - 🧩 **Selectable Embedding Models** - Choose from 4 curated local models, including multilingual options; non-bundled models download once from Hugging Face to your machine
 - 🔄 **Auto-Index** - Automatically index new papers when you add them to your library
+- 👥 **Group Libraries (opt-in)** - Extend indexing and search to your Zotero group libraries with the Index scope setting
 - 🗑️ **Auto-Cleanup** - Embeddings automatically removed when items are deleted or trashed
 - 🚫 **Tag-Based Exclusion** - Tag items with `zotseek-exclude` to skip them during indexing
 - 📊 **Indexing Status Column** - "ZotSeek" column in the item list shows whether each paper is fully indexed, partially indexed (chunk limit hit), out of date, excluded, or not indexed
@@ -237,6 +238,17 @@ For technical details, see [docs/SEARCH_ARCHITECTURE.md](docs/SEARCH_ARCHITECTUR
 | **Full Document** (default) | PDF content split by sections | Deep content search, better results |
 
 Configure via **Zotero → Settings → ZotSeek**.
+
+### Library Scope (Group Libraries)
+
+By default, ZotSeek indexes only **My Library**. If you use Zotero group libraries, the **Index scope** setting (under Auto-Indexing) lets you include them:
+
+| Scope | What Gets Indexed |
+|-------|-------------------|
+| **My Library** (default) | Your personal library only |
+| **All libraries** | Personal library + every group library |
+
+The scope applies to both the bulk **Update Index** action and background auto-indexing. Once indexed, group items show up in search results like any other paper, with links that open them in the right library. Searches over MCP/REST can also be limited to a single library with the `library_key` parameter (see [docs/MCP.md](docs/MCP.md)).
 
 ### How Full Document Mode Works
 
