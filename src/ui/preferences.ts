@@ -324,6 +324,62 @@ function initServerSection(doc: any): void {
   els.apiKey?.addEventListener('input', () => { invalidateServerProbe(doc); });
 }
 
+/** Groups open by default; all others start collapsed. */
+const DEFAULT_OPEN_GROUPS = new Set(['zotseek-group-status', 'zotseek-group-models']);
+
+let prefsSearchCleanup: (() => void) | null = null;
+
+function applyDefaultGroupStates(doc: any): void {
+  const groups = doc.querySelectorAll('details.zotseek-prefs-group');
+  for (const g of groups) {
+    if (DEFAULT_OPEN_GROUPS.has(g.id)) g.setAttribute('open', '');
+    else g.removeAttribute('open');
+  }
+}
+
+/**
+ * Zotero's settings search reveals matching rows by data-search-strings,
+ * but content inside a closed details element would stay hidden. While a
+ * search term is active, open every group; restore defaults when cleared.
+ * If the search field cannot be found (Zotero DOM change), do nothing:
+ * groups remain manually collapsible.
+ */
+function initPrefsGroupSearchSync(doc: any): void {
+  try {
+    const winDoc = doc.ownerGlobal?.document || doc;
+    const searchBox: any = winDoc.getElementById('prefs-search')
+      || winDoc.querySelector('search-textbox, input[type="search"]');
+    if (!searchBox) return;
+    const onInput = () => {
+      try {
+        if (!docAlive(doc)) return;
+        const term = String(searchBox.value || '').trim();
+        if (term) {
+          const groups = doc.querySelectorAll('details.zotseek-prefs-group');
+          for (const g of groups) g.setAttribute('open', '');
+        } else {
+          applyDefaultGroupStates(doc);
+        }
+      } catch { /* pane going away; nothing to sync */ }
+    };
+    searchBox.addEventListener('input', onInput);
+    searchBox.addEventListener('command', onInput);
+    prefsSearchCleanup = () => {
+      try {
+        searchBox.removeEventListener('input', onInput);
+        searchBox.removeEventListener('command', onInput);
+      } catch { /* ignore */ }
+      prefsSearchCleanup = null;
+    };
+    // The pane can be opened while a term is already active; sync now.
+    onInput();
+  } catch { /* non-fatal: groups still usable manually */ }
+}
+
+function teardownPrefsGroupSearchSync(): void {
+  if (prefsSearchCleanup) prefsSearchCleanup();
+}
+
 class PreferencesManager {
   private window: Window | null = null;
   private logger: any;
@@ -358,6 +414,9 @@ class PreferencesManager {
 
       // Local inference server section (issue #42)
       initServerSection(this.window.document);
+
+      // Keep collapsible groups in sync with the Settings search field
+      initPrefsGroupSearchSync(this.window.document);
 
       // Set up event listeners
       this.initEventListeners();
@@ -1048,6 +1107,7 @@ class PreferencesManager {
    * Clean up when preference pane is closed
    */
   destroy(): void {
+    teardownPrefsGroupSearchSync();
     this.window = null;
     this.logger.info('Preference pane destroyed');
   }
