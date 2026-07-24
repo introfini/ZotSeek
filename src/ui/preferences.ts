@@ -6,7 +6,7 @@
 import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
 import { autoIndexManager } from '../core/auto-index-manager';
-import { getAllModels, getActiveModelId, getModel } from '../core/model-registry';
+import { getAllModels, getActiveModelId, getModel, removeServerModel } from '../core/model-registry';
 import { isModelOnDisk, ensureModelDownloaded, removeModelFiles } from '../core/model-download';
 import { vectorStoreSQLite } from '../core/vector-store-sqlite';
 import { embeddingPipeline } from '../core/embedding-pipeline';
@@ -61,8 +61,10 @@ async function populateModelMenu(doc: any): Promise<void> {
   if (!popup) return;
   popup.replaceChildren();
   for (const m of getAllModels()) {
-    const onDisk = m.bundled || await isModelOnDisk(m);
-    const status = m.bundled ? 'Bundled' : (onDisk ? 'Downloaded' : `Download · ${m.approxSizeMB} MB`);
+    const onDisk = m.runtime === 'server' ? true : (m.bundled || await isModelOnDisk(m));
+    const status = m.runtime === 'server'
+      ? 'via server'
+      : (m.bundled ? 'Bundled' : (onDisk ? 'Downloaded' : `Download · ${m.approxSizeMB} MB`));
     const mi = doc.createXULElement('menuitem');
     mi.setAttribute('value', m.id);
     mi.setAttribute('label', `${m.label} · ${m.dimensions}d${m.multilingual ? ' · multilingual' : ''} · ${status}`);
@@ -119,12 +121,16 @@ async function renderManageModels(doc: any): Promise<void> {
   const statsByModel = new Map(
     (await vectorStoreSQLite.getPerModelStats()).map(s => [s.modelId, s]));
   for (const m of getAllModels()) {
-    const onDisk = m.bundled || await isModelOnDisk(m);
-    if (!onDisk) continue;
+    if (m.runtime !== 'server') {
+      const onDisk = m.bundled || await isModelOnDisk(m);
+      if (!onDisk) continue;
+    }
     const row = doc.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0;';
     const label = doc.createElement('span');
-    label.textContent = `${m.label} · ${m.dimensions}d`;
+    label.textContent = m.runtime === 'server'
+      ? `${m.label} · ${m.dimensions}d · via server (${m.baseUrl})`
+      : `${m.label} · ${m.dimensions}d`;
     // Per-model index statistics (items / chunks / embedding storage).
     const st = statsByModel.get(m.id);
     const statsEl = doc.createElement('span');
@@ -146,9 +152,15 @@ async function renderManageModels(doc: any): Promise<void> {
     }
     btn.addEventListener('click', async () => {
       const yes = Services.prompt.confirm(null, 'Remove model',
-        `Remove ${m.label} files and its embeddings from your library?`);
+        m.runtime === 'server'
+          ? `Remove ${m.label} from ZotSeek and delete its embeddings from your library? The server itself is not touched.`
+          : `Remove ${m.label} files and its embeddings from your library?`);
       if (!yes) return;
-      await removeModelFiles(m);
+      if (m.runtime === 'server') {
+        removeServerModel(m.id);
+      } else {
+        await removeModelFiles(m);
+      }
       await vectorStoreSQLite.deleteModelEmbeddings(m.id);
       if (docAlive(doc)) await renderManageModels(doc);
       if (docAlive(doc)) await populateModelMenu(doc);
@@ -375,7 +387,7 @@ class PreferencesManager {
         if (!model) { modelSwitchInProgress = false; return; }
         const statusEl = doc.getElementById('zotseek-embeddingModel-status');
         try {
-          if (!model.bundled && !(await isModelOnDisk(model))) {
+          if (model.runtime !== 'server' && !model.bundled && !(await isModelOnDisk(model))) {
             if (!confirmDownload(model)) {
               if (docAlive(doc)) await populateModelMenu(doc);
               return;
@@ -398,7 +410,7 @@ class PreferencesManager {
           // Guard: statusEl may throw if the prefs window was closed during a long await
           try {
             if (docAlive(doc) && statusEl) statusEl.textContent = `Failed: ${e?.message || e}`;
-          } catch { /* prefs window gone — nothing to update */ }
+          } catch { /* prefs window gone, nothing to update */ }
         } finally {
           modelSwitchInProgress = false;
         }
