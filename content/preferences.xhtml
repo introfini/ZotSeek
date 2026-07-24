@@ -228,6 +228,37 @@
   <html:div id="zotseek-manageModels"></html:div>
 </groupbox>
 
+<!-- Local Inference Server (issue #42) -->
+<groupbox>
+  <label><html:h2>Local inference server</html:h2></label>
+  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 0 0 6px 0;">
+    Use an embedding model served by LM Studio, Ollama, llama.cpp or vLLM running on this computer
+    (OpenAI-compatible API). Connections are restricted to this machine (localhost only).
+  </html:p>
+  <hbox align="center">
+    <label value="Server URL:" style="min-width: 120px;" />
+    <html:input type="text" id="zotseek-server-url" placeholder="http://127.0.0.1:1234" style="width: 220px;" />
+    <button id="zotseek-server-test" label="Test connection" />
+  </hbox>
+  <html:div id="zotseek-server-status" style="margin: 4px 0 0 120px; font-size: 11px; opacity: .8;"></html:div>
+  <hbox align="center" id="zotseek-server-model-row" style="margin-top: 6px; display: none;">
+    <label value="Model:" style="min-width: 120px;" />
+    <menulist id="zotseek-server-model-menu" native="true">
+      <menupopup/>
+    </menulist>
+    <button id="zotseek-server-add" label="Add model" disabled="true" />
+  </hbox>
+  <html:div id="zotseek-server-advanced" style="margin: 6px 0 0 120px; display: none; font-size: 11px;">
+    <html:div>
+      <html:label>Query prefix: <html:input type="text" id="zotseek-server-queryPrefix" style="width: 150px;" /></html:label>
+      <html:label style="margin-left: 8px;">Document prefix: <html:input type="text" id="zotseek-server-docPrefix" style="width: 150px;" /></html:label>
+    </html:div>
+    <html:div style="margin-top: 4px;">
+      <html:label>API key (optional): <html:input type="password" id="zotseek-server-apiKey" style="width: 200px;" /></html:label>
+    </html:div>
+  </html:div>
+</groupbox>
+
 <!-- AI Agent Access (local MCP server) -->
 <groupbox>
   <label><html:h2 data-l10n-id="zotseek-pref-mcpServer">AI Agent Access</html:h2></label>

@@ -6,10 +6,12 @@
 import { getZotero } from '../utils/zotero-helper';
 import { getString } from '../utils/locale';
 import { autoIndexManager } from '../core/auto-index-manager';
-import { getAllModels, getActiveModelId, getModel, removeServerModel } from '../core/model-registry';
+import { getAllModels, getActiveModelId, getModel, removeServerModel, sanitizeServerModelId, inferServerPrefixes, addServerModel } from '../core/model-registry';
 import { isModelOnDisk, ensureModelDownloaded, removeModelFiles } from '../core/model-download';
 import { vectorStoreSQLite } from '../core/vector-store-sqlite';
 import { embeddingPipeline } from '../core/embedding-pipeline';
+import { ServerEmbeddingClient } from '../core/server-embedding-client';
+import { assertLoopbackUrl } from '../core/loopback-url';
 
 declare const Services: any;
 declare const Zotero: any;
@@ -180,6 +182,123 @@ async function renderManageModels(doc: any): Promise<void> {
   host.appendChild(note);
 }
 
+/** Result of the last successful probe in the server section; gates Add model. */
+let serverProbe: { baseUrl: string; modelName: string; dims: number } | null = null;
+let serverTestInProgress = false;
+
+function serverSectionEls(doc: any) {
+  return {
+    url: doc.getElementById('zotseek-server-url') as HTMLInputElement | null,
+    test: doc.getElementById('zotseek-server-test') as any,
+    status: doc.getElementById('zotseek-server-status') as HTMLElement | null,
+    modelRow: doc.getElementById('zotseek-server-model-row') as HTMLElement | null,
+    modelMenu: doc.getElementById('zotseek-server-model-menu') as any,
+    add: doc.getElementById('zotseek-server-add') as any,
+    advanced: doc.getElementById('zotseek-server-advanced') as HTMLElement | null,
+    queryPrefix: doc.getElementById('zotseek-server-queryPrefix') as HTMLInputElement | null,
+    docPrefix: doc.getElementById('zotseek-server-docPrefix') as HTMLInputElement | null,
+    apiKey: doc.getElementById('zotseek-server-apiKey') as HTMLInputElement | null,
+  };
+}
+
+function setServerStatus(doc: any, text: string): void {
+  const el = serverSectionEls(doc).status;
+  if (el) el.textContent = text;
+}
+
+async function testServerConnection(doc: any): Promise<void> {
+  if (serverTestInProgress) return;
+  serverTestInProgress = true;
+  const els = serverSectionEls(doc);
+  serverProbe = null;
+  if (els.add) els.add.disabled = true;
+  try {
+    const raw = (els.url?.value || '').trim();
+    const base = assertLoopbackUrl(raw); // throws with a user-readable message
+    setServerStatus(doc, 'Connecting...');
+    const client = new ServerEmbeddingClient({ baseUrl: base.origin, serverModelName: '' });
+    const models = await client.listModels();
+    if (!docAlive(doc)) return;
+    if (models.length === 0) {
+      setServerStatus(doc, 'Connected, but the server lists no models. Load a model in the server first.');
+      return;
+    }
+    const popup = els.modelMenu?.querySelector('menupopup');
+    if (popup) {
+      popup.replaceChildren();
+      for (const name of models) {
+        const mi = doc.createXULElement('menuitem');
+        mi.setAttribute('value', name);
+        mi.setAttribute('label', name);
+        popup.appendChild(mi);
+      }
+    }
+    if (els.modelRow) els.modelRow.style.display = 'flex';
+    if (els.advanced) els.advanced.style.display = 'block';
+    setServerStatus(doc, `Connected. ${models.length} model(s) available: pick one to test it.`);
+  } catch (e: any) {
+    if (docAlive(doc)) setServerStatus(doc, `Failed: ${e?.message || e}`);
+  } finally {
+    serverTestInProgress = false;
+  }
+}
+
+async function probeServerModel(doc: any): Promise<void> {
+  const els = serverSectionEls(doc);
+  const name = els.modelMenu?.selectedItem?.getAttribute('value');
+  const raw = (els.url?.value || '').trim();
+  if (!name || !raw) return;
+  serverProbe = null;
+  if (els.add) els.add.disabled = true;
+  // Pre-fill inferred task prefixes (editable before Add)
+  const inferred = inferServerPrefixes(name);
+  if (els.queryPrefix) els.queryPrefix.value = inferred.queryPrefix;
+  if (els.docPrefix) els.docPrefix.value = inferred.docPrefix;
+  try {
+    const base = assertLoopbackUrl(raw);
+    setServerStatus(doc, `Testing ${name}...`);
+    const client = new ServerEmbeddingClient({
+      baseUrl: base.origin, serverModelName: name,
+      apiKey: els.apiKey?.value || undefined,
+    });
+    const dims = await client.embed(['zotseek probe'], 0).then(v => v[0]?.length || 0);
+    if (!docAlive(doc)) return;
+    if (dims <= 0) { setServerStatus(doc, `Failed: ${name} returned no embedding.`); return; }
+    serverProbe = { baseUrl: base.origin, modelName: name, dims };
+    if (els.add) els.add.disabled = false;
+    setServerStatus(doc, `${name}: ${dims} dimensions. Review the prefixes below, then Add model.`);
+  } catch (e: any) {
+    if (docAlive(doc)) setServerStatus(doc, `Failed: ${e?.message || e}`);
+  }
+}
+
+async function addProbedServerModel(doc: any): Promise<void> {
+  const els = serverSectionEls(doc);
+  if (!serverProbe) return;
+  addServerModel({
+    id: sanitizeServerModelId(serverProbe.modelName),
+    label: `${serverProbe.modelName} (server)`,
+    baseUrl: serverProbe.baseUrl,
+    serverModelName: serverProbe.modelName,
+    dimensions: serverProbe.dims,
+    queryPrefix: els.queryPrefix?.value ?? '',
+    docPrefix: els.docPrefix?.value ?? '',
+    apiKey: els.apiKey?.value || undefined,
+  });
+  setServerStatus(doc, 'Added. Select it in the Embedding Model menu above to start using it.');
+  if (docAlive(doc)) {
+    await populateModelMenu(doc);
+    await renderManageModels(doc);
+  }
+}
+
+function initServerSection(doc: any): void {
+  const els = serverSectionEls(doc);
+  els.test?.addEventListener('command', () => { void testServerConnection(doc); });
+  els.modelMenu?.addEventListener('command', () => { void probeServerModel(doc); });
+  els.add?.addEventListener('command', () => { void addProbedServerModel(doc); });
+}
+
 class PreferencesManager {
   private window: Window | null = null;
   private logger: any;
@@ -211,6 +330,9 @@ class PreferencesManager {
       await populateModelMenu(this.window.document);
       await renderCoverage(this.window.document);
       await renderManageModels(this.window.document);
+
+      // Local inference server section (issue #42)
+      initServerSection(this.window.document);
 
       // Set up event listeners
       this.initEventListeners();
