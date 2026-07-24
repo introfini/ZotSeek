@@ -29,6 +29,7 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
    - [Curated Model Set](#curated-model-set)
    - [Partitioned Search by Model](#partitioned-search-by-model)
    - [Switching Models](#switching-models)
+   - [Server-Backed Embeddings](#server-backed-embeddings)
 10. [Database Schema](#database-schema)
     - [Stable Identity (Schema v8)](#stable-identity-schema-v8)
     - [Per-Model Embeddings (Schema v9)](#per-model-embeddings-schema-v9)
@@ -889,6 +890,50 @@ Three model-aware triggers can re-index the library, all preserving embeddings f
 1. The prompt shown immediately after switching to a new model.
 2. The **Index remaining N** button on the coverage line in Settings (shows count of items lacking coverage for the active model).
 3. The toolbar / right-click **Index Library** action.
+
+### Server-Backed Embeddings
+
+Issue #42 adds a second `runtime` to `ModelConfig` alongside the in-process ChromeWorker: `'server'`, which delegates embedding generation to a local OpenAI-compatible inference server (LM Studio, Ollama, llama.cpp or vLLM), all of which expose `POST /v1/embeddings` and `GET /v1/models` on localhost.
+
+**Provider branch:** `EmbeddingPipeline.init()` reads the active model's `runtime` and initializes one of two code paths. Both converge on the same `embed()` / `embedDocuments()` call surface used by the rest of the search engine, so callers never branch on runtime themselves:
+
+```
+                         getActiveModel()
+                                │
+                                ▼
+                       ┌─────────────────┐
+                       │  model.runtime  │
+                       └────────┬────────┘
+                   'onnx'       │        'server'
+             ┌──────────────────┴──────────────────┐
+             ▼                                      ▼
+     initWorker()                          initServerClient()
+     ChromeWorker + Transformers.js         ServerEmbeddingClient
+     (WASM, in-process)                     (HTTP, loopback-only)
+             │                                      │
+             ▼                                      ▼
+     per-chunk embed, one retry            probe() checks dims match
+             │                              ModelConfig.dimensions,
+             │                              then embed() in groups
+             │                              of 32 chunks/request
+             └──────────────────┬───────────────────┘
+                                ▼
+                    embedChunks() (src/index.ts)
+                    shared by indexLibrary, auto-index,
+                    and reindexForActiveModel
+```
+
+**Request batching:** the server runtime groups chunks into requests of `SERVER_EMBED_GROUP = 32` (`embedChunks()` in `src/index.ts`), one HTTP round-trip per group, rather than one request per chunk as the ONNX path does internally. This amortizes HTTP overhead across chunks; the response array is re-sorted by the `index` field the OpenAI embeddings API returns, so out-of-order responses cannot misalign chunk IDs with vectors.
+
+**Model ID namespacing:** every server model is added under an id produced by `sanitizeServerModelId(serverModelName)`, which slugifies the server's model name and prefixes it: `server:<slug>` (e.g. `server:nomic-embed-text-v1.5`). This guarantees a server-backed model never collides with a same-named bundled or Hugging Face model in the `chunks.model_id` partition, even though the underlying weights may be identical: a `server:` id is always its own vector space, requiring its own one-time index pass. Previous indexes (ONNX or other server models) are retained untouched, exactly like switching between any two models (see "Switching Models" above).
+
+**Prefix handling:** ZotSeek applies task prefixes (`search_query: ` / `search_document: ` style instruction strings), not the server. `inferServerPrefixes(serverModelName)` guesses sensible defaults from the model name (`nomic` → Nomic-style prefixes, `e5` → E5-style prefixes, otherwise none) at Add-model time in Settings, and the fields are editable before confirming. The chosen prefixes are stored on the `ServerModelEntry` and applied client-side via the same `applyPrefix()` helper used for ONNX models, so the server always receives already-prefixed text and never needs to know about prefixes itself.
+
+**Failure semantics:** `ServerEmbeddingClient.embed()` retries network errors, timeouts and 5xx responses with a bounded backoff of 2s, 5s, then 15s; a 4xx response fails immediately (a configuration problem that retrying cannot fix). After the retry budget is exhausted, the client throws `ServerUnavailableError`, which propagates out of `embedChunks()` to the caller's outer catch and stops the run cleanly, the same way a cancellation does. There is deliberately **no fallback to the in-process ONNX model**: silently switching runtimes mid-run would mix two different vector spaces under one `model_id`. Update Index resumes from the same checkpoint mechanism used for any interrupted run once the server is back.
+
+**Dimension-mismatch guard:** `initServerClient()` calls `client.probe()` (a one-text `/v1/embeddings` call) on every pipeline init and compares the returned vector length against the `dimensions` recorded on the `ModelConfig` when the model was added. A mismatch (the server operator swapped the model behind that name) throws immediately, before any chunk is embedded, rather than silently writing wrong-length vectors into the `chunks` table. The error message tells the user to remove and re-add the model in Settings, which re-probes and records the new dimension count (a re-index is then required, since the old vectors are no longer comparable).
+
+**Loopback enforcement:** every request URL, not just the configured base URL, passes through `assertLoopbackUrl()` at request time, which allow-lists `127.0.0.1`, `localhost` and `[::1]` and rejects everything else, including a redirect target (`fetch` is called with `redirect: 'error'`, so a redirect off-loopback aborts rather than being followed). There is no preference to disable this check.
 
 ---
 

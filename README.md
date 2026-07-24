@@ -27,6 +27,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - ✅ **Multi-Select in Results** - Select multiple search results, right-click to add to collections
 - 📁 **Save Results as Collection** - One click saves the full result set into a new Zotero collection so you can revisit the list later without re-running the search
 - 🧩 **Selectable Embedding Models** - Choose from 4 curated local models, including multilingual options; non-bundled models download once from Hugging Face to your machine
+- 🖥️ **Local Inference Server (optional)** - Serve the embedding model from LM Studio, Ollama, llama.cpp or vLLM on the same machine for native GPU speed: OpenAI-compatible API, localhost only
 - 🔄 **Auto-Index** - Automatically index new papers when you add them to your library
 - 👥 **Group Libraries (opt-in)** - Extend indexing and search to your Zotero group libraries with the Index scope setting
 - 🗑️ **Auto-Cleanup** - Embeddings automatically removed when items are deleted or trashed
@@ -49,15 +50,17 @@ ZotSeek is designed with privacy as a core principle:
 | **AI Model** | Default model bundled (~130MB); optional models download once from Hugging Face on demand — no API keys, no subscription |
 | **Processing** | All AI inference runs locally on your CPU/GPU |
 | **Your Papers** | Only indexes items from your local Zotero library |
-| **Network** | Zero network requests for search or indexing |
+| **Network** | Zero network requests for search or indexing, unless you opt into a local inference server (see below) |
 | **Storage** | Embeddings saved locally in `zotseek.sqlite` in your Zotero data folder |
-| **Offline** | Works completely offline after installation |
+| **Offline** | Works completely offline after installation (or after the optional inference server has started) |
 
 **What this means:**
 - Your research never leaves your machine
 - No cloud services, no API keys, no subscriptions
 - No telemetry or usage tracking
 - Uninstalling the plugin removes all ZotSeek data
+
+**Optional local inference server:** the default is the fully in-process engine described above, which makes no network requests at all. If you choose to add a local inference server (LM Studio, Ollama, llama.cpp or vLLM), the guarantee shifts from "no network code exists" to "network code provably cannot leave the machine": every request is validated at request time against an allow-list of `127.0.0.1`, `localhost` and `[::1]`, there is no preference to override this, redirects to a non-loopback address are refused rather than followed, and cloud or remote endpoints are unsupported by design. This is opt-in and off by default.
 
 ---
 
@@ -329,6 +332,29 @@ Go to **Zotero → Settings → ZotSeek → Embedding Model** to pick the model 
 **Switching models:** switching to a different model triggers a background re-index for items that have not yet been indexed with the new model. Items indexed with other models retain their embeddings — switching back is instant.
 
 **Manage downloaded models:** a "Manage downloaded models" panel in Settings shows per-model index statistics (items, chunks, and embedding storage) and lets you delete models you no longer need (this also removes that model's embeddings from the database). The built-in model and whichever model is currently active cannot be removed; each shows an inline reason ("Built-in" / "Active") with a tooltip explaining why.
+
+---
+
+## Using a Local Inference Server
+
+If you have a GPU, running the embedding model in a dedicated inference server (LM Studio, Ollama, llama.cpp or vLLM) is faster than the built-in WASM engine, which runs on CPU inside Zotero. This is entirely optional: the default remains the fully in-process engine, and ZotSeek never talks to anything off this machine.
+
+**Setup with LM Studio:**
+1. In LM Studio, load an embedding model (e.g. an embedding-capable GGUF) and start the local server. Note the port shown (typically `1234`).
+2. In Zotero, go to **Settings → ZotSeek → Local inference server** and enter the server URL, e.g. `http://127.0.0.1:1234`.
+3. Click **Test connection**. ZotSeek lists the models the server currently has loaded.
+4. Pick a model from the dropdown. ZotSeek sends a test embedding request and reports the dimensions it returns.
+5. Click **Add model**. The model now appears in the main **Embedding Model** picker alongside the bundled and Hugging Face models.
+6. Select it in the model picker to make it the active model.
+
+**Setup with Ollama:**
+1. Pull an embedding model, e.g. `ollama pull nomic-embed-text`. Ollama serves its OpenAI-compatible API on port `11434` by default.
+2. In **Settings → ZotSeek → Local inference server**, enter `http://127.0.0.1:11434`.
+3. Follow the same Test connection → pick model → Add model steps as above.
+
+The same flow works with llama.cpp's server (`llama-server`) and vLLM, since both also expose an OpenAI-compatible `/v1/embeddings` endpoint on localhost.
+
+**Re-indexing note:** a server-hosted model is a separate index from the built-in models, even for the same model name: indexing runs once per model, and previous indexes are kept. Switching between a server model and a built-in model does not require re-indexing again later, since both are retained side by side.
 
 ---
 

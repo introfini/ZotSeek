@@ -2,6 +2,23 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.19.0-beta.1] - Unreleased
+
+### Added
+- Local inference server support: use an embedding model served by LM Studio, Ollama,
+  llama.cpp or vLLM on the same machine (OpenAI-compatible /v1/embeddings, localhost only).
+  Configure under Settings → Local inference server. (#42)
+
+### Technical
+- New `ServerEmbeddingClient` with request-time loopback validation, bounded retry
+  (2s/5s/15s) and batched requests (32 chunks per call).
+- Server models are stored in the `zotseek.serverModels` pref and index under a
+  `server:`-namespaced model_id (own vector space; one-time index per model).
+- Indexing paths unified behind a shared `embedChunks()` helper; a dead server stops
+  the run cleanly and Update Index resumes where it left off.
+
+---
+
 ## [1.18.0] - 2026-07-17
 
 ### Added
