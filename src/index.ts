@@ -50,6 +50,7 @@ import './dev/suites/task-37b-schema-v9';
 import './dev/suites/task-37c-model-aware-store';
 import './dev/suites/task-37d-partitioned-search';
 import './dev/suites/task-37e-model-download';
+import './dev/suites/task-42a-loopback';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
