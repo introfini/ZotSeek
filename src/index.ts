@@ -1659,7 +1659,7 @@ class ZotSeekPlugin {
     } catch (error: any) {
       this.logger.error(`Auto-indexing failed: ${error?.message || error}`);
       // Show error in progress window - use try-catch for setIcon
-      const errMsg = (error?.message || 'Unknown error').substring(0, 30);
+      const errMsg = error?.message || 'Unknown error';
       try { itemRow.setIcon('chrome://zotero/skin/cross.png'); } catch { /* ignore */ }
       itemRow.setText(`✗ Error: ${errMsg}`);
       progressWin.startCloseTimer(4000);
@@ -2031,7 +2031,7 @@ class ZotSeekPlugin {
     } catch (error: any) {
       this.logger.error(`reindexForActiveModel failed: ${error?.message || error}`);
       try { itemRow.setIcon('chrome://zotero/skin/cross.png'); } catch { /* ignore */ }
-      itemRow.setText(`Error: ${(error?.message || 'unknown').substring(0, 40)}`);
+      itemRow.setText(`Error: ${error?.message || 'unknown'}`);
       progressWin.startCloseTimer(4000);
     } finally {
       this.indexing = false;
