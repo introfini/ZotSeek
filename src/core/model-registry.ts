@@ -21,7 +21,7 @@ export interface ModelConfig {
   multilingual: boolean;
 
   // server-runtime only
-  baseUrl?: string;          // e.g. 'http://127.0.0.1:1234' — loopback enforced at request time
+  baseUrl?: string;          // e.g. 'http://127.0.0.1:1234' (loopback enforced at request time)
   serverModelName?: string;  // the model id the server knows, e.g. 'text-embedding-nomic-embed-text-v1.5'
   apiKey?: string;           // optional bearer token (vLLM)
 }
@@ -140,7 +140,7 @@ export function applyPrefix(text: string, kind: 'query' | 'doc', model: ModelCon
 /**
  * Server-backed models (issue #42). Persisted in the 'zotseek.serverModels'
  * pref as a JSON array of ServerModelEntry. A server model is a separate
- * vector space from any bundled ONNX model — even for the "same" weights —
+ * vector space from any bundled ONNX model (even for the "same" weights),
  * so it always indexes under its own 'server:'-namespaced model_id.
  */
 export interface ServerModelEntry {
