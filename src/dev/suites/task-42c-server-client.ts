@@ -23,7 +23,7 @@ selfTest.register('task-42c-server-client', async () => {
         await client.embed(['test'], 0);
         assertTrue(false, 'should have thrown');
       } catch (e: any) {
-        assertTrue(e?.code !== 'SERVER_UNAVAILABLE', 'validation error, not a network error');
+        assertEq(e?.code, 'LOOPBACK_REJECTED');
         assertTrue(String(e?.message).includes('example.com'), 'names the offending host');
       }
     }),

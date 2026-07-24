@@ -9,21 +9,29 @@
 
 const ALLOWED_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
+export class LoopbackRejectedError extends Error {
+  code = 'LOOPBACK_REJECTED' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'LoopbackRejectedError';
+  }
+}
+
 export function assertLoopbackUrl(raw: string): URL {
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
-    throw new Error(`Invalid server URL: '${raw}'`);
+    throw new LoopbackRejectedError(`Invalid server URL: '${raw}'`);
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    throw new Error(`Server URL must use http or https, got '${u.protocol}'`);
+    throw new LoopbackRejectedError(`Server URL must use http or https, got '${u.protocol}'`);
   }
   if (u.username || u.password) {
-    throw new Error('Server URL must not contain embedded credentials');
+    throw new LoopbackRejectedError('Server URL must not contain embedded credentials');
   }
   if (!ALLOWED_HOSTNAMES.has(u.hostname)) {
-    throw new Error(
+    throw new LoopbackRejectedError(
       `ZotSeek only talks to an inference server on this machine ` +
       `(127.0.0.1, localhost or [::1]); got '${u.hostname}'`
     );

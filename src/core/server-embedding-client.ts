@@ -103,12 +103,9 @@ export class ServerEmbeddingClient {
         return data.map((d: any) => d.embedding as number[]);
       } catch (e: any) {
         // Loopback-validation errors must propagate untouched (never
-        // retried, never wrapped as "unavailable"): the URL is simply not
-        // allowed.
-        if (e?.message?.includes('inference server on this machine')
-            || e?.message?.startsWith('Invalid server URL')
-            || e?.message?.includes('must use http')
-            || e?.message?.includes('embedded credentials')) {
+        // retried, never wrapped as "unavailable"): validation errors carry
+        // code LOOPBACK_REJECTED (see loopback-url.ts).
+        if (e?.code === 'LOOPBACK_REJECTED') {
           throw e;
         }
         const status = e?.status;
