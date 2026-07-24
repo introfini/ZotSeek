@@ -231,7 +231,7 @@
     <html:input type="text" id="zotseek-server-url" placeholder="http://127.0.0.1:1234" style="width: 220px;" />
     <button id="zotseek-server-test" label="Test connection" />
   </hbox>
-  <html:div id="zotseek-server-status" style="margin: 4px 0 0 120px; font-size: 11px; opacity: .8;"></html:div>
+  <html:div id="zotseek-server-status" style="margin: 4px 0 0 120px; font-size: 11px; opacity: .8; min-height: 14px;"></html:div>
   <hbox align="center" id="zotseek-server-model-row" style="margin-top: 6px; display: none;">
     <label value="Model:" style="min-width: 120px;" />
     <menulist id="zotseek-server-model-menu" native="true">
@@ -240,12 +240,13 @@
     <button id="zotseek-server-add" label="Add model" disabled="true" />
   </hbox>
   <html:div id="zotseek-server-advanced" style="margin: 6px 0 0 120px; display: none; font-size: 11px;">
-    <html:div>
-      <html:label>Query prefix: <html:input type="text" id="zotseek-server-queryPrefix" style="width: 150px;" /></html:label>
-      <html:label style="margin-left: 8px;">Document prefix: <html:input type="text" id="zotseek-server-docPrefix" style="width: 150px;" /></html:label>
-    </html:div>
-    <html:div style="margin-top: 4px;">
-      <html:label>API key (optional): <html:input type="password" id="zotseek-server-apiKey" style="width: 200px;" /></html:label>
+    <html:div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; max-width: 420px; font-size: 11px;">
+      <html:label for="zotseek-server-queryPrefix">Query prefix:</html:label>
+      <html:input type="text" id="zotseek-server-queryPrefix" />
+      <html:label for="zotseek-server-docPrefix">Document prefix:</html:label>
+      <html:input type="text" id="zotseek-server-docPrefix" />
+      <html:label for="zotseek-server-apiKey">API key (optional):</html:label>
+      <html:input type="password" id="zotseek-server-apiKey" />
     </html:div>
   </html:div>
 </groupbox>

@@ -119,6 +119,7 @@ async function renderManageModels(doc: any): Promise<void> {
   const host = doc.getElementById('zotseek-manageModels');
   if (!host) return;
   host.replaceChildren();
+  host.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px 12px;align-items:center;';
   const active = getActiveModelId();
   const statsByModel = new Map(
     (await vectorStoreSQLite.getPerModelStats()).map(s => [s.modelId, s]));
@@ -127,16 +128,17 @@ async function renderManageModels(doc: any): Promise<void> {
       const onDisk = m.bundled || await isModelOnDisk(m);
       if (!onDisk) continue;
     }
-    const row = doc.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0;';
     const label = doc.createElement('span');
-    label.textContent = m.runtime === 'server'
+    const labelText = m.runtime === 'server'
       ? `${m.label} · ${m.dimensions}d · via server (${m.baseUrl})`
       : `${m.label} · ${m.dimensions}d`;
+    label.textContent = labelText;
+    label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    label.title = labelText;
     // Per-model index statistics (items / chunks / embedding storage).
     const st = statsByModel.get(m.id);
     const statsEl = doc.createElement('span');
-    statsEl.style.cssText = 'font-size:11px;opacity:.6;';
+    statsEl.style.cssText = 'font-size:11px;opacity:.6;white-space:nowrap;';
     if (st && st.chunks > 0) {
       const mb = st.storageBytes / 1024 / 1024;
       statsEl.textContent = `${st.items} items · ${st.chunks} chunks · ${mb >= 1 ? mb.toFixed(0) + ' MB' : '<1 MB'}`;
@@ -167,18 +169,14 @@ async function renderManageModels(doc: any): Promise<void> {
       if (docAlive(doc)) await renderManageModels(doc);
       if (docAlive(doc)) await populateModelMenu(doc);
     });
-    row.append(label, statsEl, btn);
-    if (!removable) {
-      const reason = doc.createElement('span');
-      reason.textContent = m.bundled ? 'Built-in' : 'Active';
-      reason.style.cssText = 'font-size:11px;opacity:.6;';
-      row.append(reason);
-    }
-    host.appendChild(row);
+    const reason = doc.createElement('span');
+    reason.textContent = removable ? '' : (m.bundled ? 'Built-in' : 'Active');
+    reason.style.cssText = 'font-size:11px;opacity:.6;white-space:nowrap;';
+    host.append(label, statsEl, reason, btn);
   }
   const note = doc.createElement('div');
   note.textContent = 'Remove deletes a downloaded model and its embeddings. The built-in model and the active model cannot be removed.';
-  note.style.cssText = 'font-size:11px;opacity:.6;margin-top:8px;';
+  note.style.cssText = 'font-size:11px;opacity:.6;margin-top:8px;grid-column: 1 / -1;';
   host.appendChild(note);
 }
 

@@ -9,6 +9,11 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
   llama.cpp or vLLM on the same machine (OpenAI-compatible /v1/embeddings, localhost only).
   Configure under Settings → Local inference server. (#42)
 
+### Changed
+- Reorganized the settings pane into five collapsible groups (Status, Models, Indexing,
+  Search, Integrations and Maintenance) with aligned layouts for the model list and the
+  local inference server fields. Groups auto-expand while the settings search is active.
+
 ### Technical
 - New `ServerEmbeddingClient` with request-time loopback validation, bounded retry
   (2s/5s/15s) and batched requests (32 chunks per call).
