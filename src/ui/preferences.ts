@@ -183,8 +183,10 @@ async function renderManageModels(doc: any): Promise<void> {
 }
 
 /** Result of the last successful probe in the server section; gates Add model. */
-let serverProbe: { baseUrl: string; modelName: string; dims: number } | null = null;
+let serverProbe: { baseUrl: string; modelName: string; dims: number; apiKey: string | undefined } | null = null;
 let serverTestInProgress = false;
+/** Bumped whenever the URL or apiKey changes, or a new test/probe starts; stale async callbacks bail if their gen is out of date. */
+let serverProbeGeneration = 0;
 
 function serverSectionEls(doc: any) {
   return {
@@ -206,9 +208,23 @@ function setServerStatus(doc: any, text: string): void {
   if (el) el.textContent = text;
 }
 
+/**
+ * Invalidate any completed or in-flight probe: bumps the generation counter (so stale
+ * probeServerModel callbacks bail out before writing back), clears the cached probe result,
+ * and disables Add. Called whenever the URL or apiKey field is edited, since either would
+ * make a previously-verified probe describe a server/credential that's no longer current.
+ */
+function invalidateServerProbe(doc: any): void {
+  serverProbeGeneration++;
+  serverProbe = null;
+  const els = serverSectionEls(doc);
+  if (els.add) els.add.disabled = true;
+}
+
 async function testServerConnection(doc: any): Promise<void> {
   if (serverTestInProgress) return;
   serverTestInProgress = true;
+  serverProbeGeneration++;
   const els = serverSectionEls(doc);
   serverProbe = null;
   if (els.add) els.add.disabled = true;
@@ -244,6 +260,7 @@ async function testServerConnection(doc: any): Promise<void> {
 }
 
 async function probeServerModel(doc: any): Promise<void> {
+  const gen = ++serverProbeGeneration;
   const els = serverSectionEls(doc);
   const name = els.modelMenu?.selectedItem?.getAttribute('value');
   const raw = (els.url?.value || '').trim();
@@ -256,18 +273,21 @@ async function probeServerModel(doc: any): Promise<void> {
   if (els.docPrefix) els.docPrefix.value = inferred.docPrefix;
   try {
     const base = assertLoopbackUrl(raw);
+    const apiKey = els.apiKey?.value || undefined;
     setServerStatus(doc, `Testing ${name}...`);
     const client = new ServerEmbeddingClient({
       baseUrl: base.origin, serverModelName: name,
-      apiKey: els.apiKey?.value || undefined,
+      apiKey,
     });
     const dims = await client.embed(['zotseek probe'], 0).then(v => v[0]?.length || 0);
+    if (gen !== serverProbeGeneration) return; // superseded by a newer probe or URL/key edit
     if (!docAlive(doc)) return;
     if (dims <= 0) { setServerStatus(doc, `Failed: ${name} returned no embedding.`); return; }
-    serverProbe = { baseUrl: base.origin, modelName: name, dims };
+    serverProbe = { baseUrl: base.origin, modelName: name, dims, apiKey };
     if (els.add) els.add.disabled = false;
     setServerStatus(doc, `${name}: ${dims} dimensions. Review the prefixes below, then Add model.`);
   } catch (e: any) {
+    if (gen !== serverProbeGeneration) return; // superseded; don't overwrite newer status
     if (docAlive(doc)) setServerStatus(doc, `Failed: ${e?.message || e}`);
   }
 }
@@ -283,7 +303,7 @@ async function addProbedServerModel(doc: any): Promise<void> {
     dimensions: serverProbe.dims,
     queryPrefix: els.queryPrefix?.value ?? '',
     docPrefix: els.docPrefix?.value ?? '',
-    apiKey: els.apiKey?.value || undefined,
+    apiKey: serverProbe.apiKey,
   });
   setServerStatus(doc, 'Added. Select it in the Embedding Model menu above to start using it.');
   if (docAlive(doc)) {
@@ -297,6 +317,11 @@ function initServerSection(doc: any): void {
   els.test?.addEventListener('command', () => { void testServerConnection(doc); });
   els.modelMenu?.addEventListener('command', () => { void probeServerModel(doc); });
   els.add?.addEventListener('command', () => { void addProbedServerModel(doc); });
+  // Editing the URL or API key invalidates any completed/in-flight probe: the persisted
+  // baseUrl/apiKey must match what was actually verified, not whatever is in the field at
+  // Add time. Prefix fields intentionally stay editable post-probe.
+  els.url?.addEventListener('input', () => { invalidateServerProbe(doc); });
+  els.apiKey?.addEventListener('input', () => { invalidateServerProbe(doc); });
 }
 
 class PreferencesManager {
