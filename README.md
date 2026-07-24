@@ -358,6 +358,22 @@ The same flow works with llama.cpp's server (`llama-server`) and vLLM, since bot
 
 **API key note:** if your server requires an API key, ZotSeek stores it in plain text in the Zotero profile preferences, sends it only to the loopback server you configured, and never logs it.
 
+**Choosing a model and task prefixes:**
+
+Pick a dedicated embedding model. The server's model list includes every model it has loaded, including chat models, and ZotSeek cannot tell the two apart from the API alone, so it warns you when a selected model's name does not look like an embedding model. Running a chat model as your embedding model produces poor search results.
+
+Some embedding models were trained to expect a short prefix before the text, different for queries versus documents (a "task prefix"). Using the correct prefix helps the model separate what you are searching for from what you indexed.
+
+| Model family | Query prefix | Document prefix |
+|--------------|--------------|------------------|
+| Nomic | `search_query: ` | `search_document: ` |
+| E5 | `query: ` | `passage: ` |
+| Most others (BGE, MiniLM, GTE) | none | none |
+
+ZotSeek pre-fills these prefixes automatically when it recognizes the model family from its name. If you are using a model that is not listed here, check the model card on Hugging Face for a prefix requirement, and leave the fields empty if the card does not mention one.
+
+Using the wrong prefixes does not produce an error. Search will simply run and quietly return lower-quality results.
+
 ---
 
 ## The AI Model

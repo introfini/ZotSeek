@@ -180,6 +180,15 @@ async function renderManageModels(doc: any): Promise<void> {
   host.appendChild(note);
 }
 
+/**
+ * Heuristic: does this model name look like a dedicated embedding model?
+ * The OpenAI-compatible /v1/models route cannot distinguish chat from
+ * embedding models, so this is a soft warning, not a gate.
+ */
+function looksLikeEmbeddingModel(name: string): boolean {
+  return /embed|bge|e5|gte|minilm|nomic|mxbai|arctic|snowflake|jina/i.test(name);
+}
+
 /** Result of the last successful probe in the server section; gates Add model. */
 let serverProbe: { baseUrl: string; modelName: string; dims: number; apiKey: string | undefined } | null = null;
 let serverTestInProgress = false;
@@ -291,7 +300,11 @@ async function probeServerModel(doc: any): Promise<void> {
     if (dims <= 0) { setServerStatus(doc, `Failed: ${name} returned no embedding.`); return; }
     serverProbe = { baseUrl: base.origin, modelName: name, dims, apiKey };
     if (els.add) els.add.disabled = false;
-    setServerStatus(doc, `${name}: ${dims} dimensions. Review the prefixes below, then Add model.`);
+    let statusMsg = `${name}: ${dims} dimensions. Review the prefixes below, then Add model.`;
+    if (!looksLikeEmbeddingModel(name)) {
+      statusMsg += ' Note: this looks like a chat model, not an embedding model; search quality will likely be poor.';
+    }
+    setServerStatus(doc, statusMsg);
   } catch (e: any) {
     if (gen !== serverProbeGeneration) return; // superseded; don't overwrite newer status
     if (docAlive(doc)) setServerStatus(doc, `Failed: ${e?.message || e}`);
