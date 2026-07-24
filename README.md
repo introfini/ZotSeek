@@ -356,6 +356,8 @@ The same flow works with llama.cpp's server (`llama-server`) and vLLM, since bot
 
 **Re-indexing note:** a server-hosted model is a separate index from the built-in models, even for the same model name: indexing runs once per model, and previous indexes are kept. Switching between a server model and a built-in model does not require re-indexing again later, since both are retained side by side.
 
+**API key note:** if your server requires an API key, ZotSeek stores it in plain text in the Zotero profile preferences, sends it only to the loopback server you configured, and never logs it.
+
 ---
 
 ## The AI Model
