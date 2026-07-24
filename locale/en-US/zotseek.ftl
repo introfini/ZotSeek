@@ -353,3 +353,12 @@ zotseek-export-itemcountEmpty = No items to add.
 zotseek-export-statusExported = Added { $count } items to "{ $name }".
 zotseek-export-statusExportedSkipped = Added { $count } items to "{ $name }", { $skipped } skipped.
 zotseek-export-statusFailed = Failed to save results as collection.
+
+## Preference group headers
+
+zotseek-prefs-group-status = Status
+zotseek-prefs-group-models = Models
+zotseek-prefs-group-indexing = Indexing
+zotseek-prefs-group-search = Search
+zotseek-prefs-group-maintenance = Integrations & Maintenance
+zotseek-prefs-exclusions = Exclusions

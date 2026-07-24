@@ -103,7 +103,24 @@
     .zotseek-warning-box { background: #fff3cd !important; border-color: #ffc107 !important; }
     .zotseek-settings-box { background: #fafafa !important; border-color: #e0e0e0 !important; }
   }
+
+  /* Collapsible preference groups */
+  details.zotseek-prefs-group { margin: 2px 0 10px 0; }
+  details.zotseek-prefs-group > summary {
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--zotseek-text-primary);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--zotseek-border);
+    margin-bottom: 8px;
+    user-select: none;
+  }
+  details.zotseek-prefs-group > summary:hover { color: var(--zotseek-blue); }
 </html:style>
+
+<html:details class="zotseek-prefs-group" id="zotseek-group-status" open="">
+  <html:summary data-l10n-id="zotseek-prefs-group-status">Status</html:summary>
 
 <!-- Index Statistics - Visual Cards -->
 <groupbox>
@@ -144,9 +161,99 @@
 
   <hbox>
     <button id="zotseek-refresh-stats" label="Refresh Stats" data-l10n-id="zotseek-pref-refreshStats" />
-    <button id="zotseek-compact-db" label="Compact Database" data-l10n-id="zotseek-pref-compactDatabase" style="margin-left: 8px;" />
   </hbox>
 </groupbox>
+
+<!-- Actions -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-pref-actions">Actions</html:h2></label>
+
+  <!-- Update Index - Primary action -->
+  <vbox class="zotseek-action-primary" style="border-radius: 6px; padding: 12px; margin-bottom: 8px; border-width: 1px; border-style: solid;">
+    <hbox align="center">
+      <button id="zotseek-update-index"
+              label="Update Index"
+              data-l10n-id="zotseek-pref-updateIndex"
+              style="font-weight: 600;" />
+      <html:span data-l10n-id="zotseek-pref-recommended" style="margin-left: 8px; color: var(--zotseek-green); font-size: 11px; font-weight: 500;">✓ Recommended</html:span>
+    </hbox>
+    <html:p data-l10n-id="zotseek-pref-updateIndexDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
+      Index all unindexed items in your library. Resumes safely from where you left off.
+    </html:p>
+  </vbox>
+
+  <!-- Rebuild Index -->
+  <vbox class="zotseek-action-secondary" style="border-radius: 6px; padding: 12px; margin-bottom: 8px; border-width: 1px; border-style: solid;">
+    <hbox align="center">
+      <button id="zotseek-rebuild-index"
+              label="Rebuild Index"
+              data-l10n-id="zotseek-pref-rebuildIndex" />
+    </hbox>
+    <html:p data-l10n-id="zotseek-pref-rebuildIndexDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
+      Clear and re-index all items with current settings. Use after changing indexing mode.
+    </html:p>
+  </vbox>
+</groupbox>
+
+</html:details>
+
+<html:details class="zotseek-prefs-group" id="zotseek-group-models" open="">
+  <html:summary data-l10n-id="zotseek-prefs-group-models">Models</html:summary>
+
+<!-- Embedding Model -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-pref-embeddingModelTitle">Embedding Model</html:h2></label>
+  <hbox align="center">
+    <label value="Model:" style="min-width: 120px;" />
+    <menulist id="zotseek-pref-embeddingModel" native="true">
+      <menupopup/>
+    </menulist>
+  </hbox>
+  <html:div id="zotseek-embeddingModel-coverage" style="margin-top:8px; font-size:12px;"></html:div>
+  <html:div id="zotseek-embeddingModel-status" style="margin-top:4px; font-size:11px; opacity:.8;"></html:div>
+</groupbox>
+
+<!-- Manage Downloaded Models -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-pref-manageModelsTitle">Manage downloaded models</html:h2></label>
+  <html:div id="zotseek-manageModels"></html:div>
+</groupbox>
+
+<!-- Local Inference Server (issue #42) -->
+<groupbox>
+  <label><html:h2>Local inference server</html:h2></label>
+  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 0 0 6px 0;">
+    Use an embedding model served by LM Studio, Ollama, llama.cpp or vLLM running on this computer
+    (OpenAI-compatible API). Connections are restricted to this machine (localhost only).
+  </html:p>
+  <hbox align="center">
+    <label value="Server URL:" style="min-width: 120px;" />
+    <html:input type="text" id="zotseek-server-url" placeholder="http://127.0.0.1:1234" style="width: 220px;" />
+    <button id="zotseek-server-test" label="Test connection" />
+  </hbox>
+  <html:div id="zotseek-server-status" style="margin: 4px 0 0 120px; font-size: 11px; opacity: .8;"></html:div>
+  <hbox align="center" id="zotseek-server-model-row" style="margin-top: 6px; display: none;">
+    <label value="Model:" style="min-width: 120px;" />
+    <menulist id="zotseek-server-model-menu" native="true">
+      <menupopup/>
+    </menulist>
+    <button id="zotseek-server-add" label="Add model" disabled="true" />
+  </hbox>
+  <html:div id="zotseek-server-advanced" style="margin: 6px 0 0 120px; display: none; font-size: 11px;">
+    <html:div>
+      <html:label>Query prefix: <html:input type="text" id="zotseek-server-queryPrefix" style="width: 150px;" /></html:label>
+      <html:label style="margin-left: 8px;">Document prefix: <html:input type="text" id="zotseek-server-docPrefix" style="width: 150px;" /></html:label>
+    </html:div>
+    <html:div style="margin-top: 4px;">
+      <html:label>API key (optional): <html:input type="password" id="zotseek-server-apiKey" style="width: 200px;" /></html:label>
+    </html:div>
+  </html:div>
+</groupbox>
+
+</html:details>
+
+<html:details class="zotseek-prefs-group" id="zotseek-group-indexing">
+  <html:summary data-l10n-id="zotseek-prefs-group-indexing">Indexing</html:summary>
 
 <!-- Indexing Mode Mismatch Warning -->
 <html:div id="zotseek-indexmode-warning" class="zotseek-warning-box" style="display: none; border-radius: 6px; padding: 12px; margin-bottom: 12px; border-width: 1px; border-style: solid;">
@@ -209,84 +316,6 @@
 
 </groupbox>
 
-<!-- Embedding Model -->
-<groupbox>
-  <label><html:h2 data-l10n-id="zotseek-pref-embeddingModelTitle">Embedding Model</html:h2></label>
-  <hbox align="center">
-    <label value="Model:" style="min-width: 120px;" />
-    <menulist id="zotseek-pref-embeddingModel" native="true">
-      <menupopup/>
-    </menulist>
-  </hbox>
-  <html:div id="zotseek-embeddingModel-coverage" style="margin-top:8px; font-size:12px;"></html:div>
-  <html:div id="zotseek-embeddingModel-status" style="margin-top:4px; font-size:11px; opacity:.8;"></html:div>
-</groupbox>
-
-<!-- Manage Downloaded Models -->
-<groupbox>
-  <label><html:h2 data-l10n-id="zotseek-pref-manageModelsTitle">Manage downloaded models</html:h2></label>
-  <html:div id="zotseek-manageModels"></html:div>
-</groupbox>
-
-<!-- Local Inference Server (issue #42) -->
-<groupbox>
-  <label><html:h2>Local inference server</html:h2></label>
-  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 0 0 6px 0;">
-    Use an embedding model served by LM Studio, Ollama, llama.cpp or vLLM running on this computer
-    (OpenAI-compatible API). Connections are restricted to this machine (localhost only).
-  </html:p>
-  <hbox align="center">
-    <label value="Server URL:" style="min-width: 120px;" />
-    <html:input type="text" id="zotseek-server-url" placeholder="http://127.0.0.1:1234" style="width: 220px;" />
-    <button id="zotseek-server-test" label="Test connection" />
-  </hbox>
-  <html:div id="zotseek-server-status" style="margin: 4px 0 0 120px; font-size: 11px; opacity: .8;"></html:div>
-  <hbox align="center" id="zotseek-server-model-row" style="margin-top: 6px; display: none;">
-    <label value="Model:" style="min-width: 120px;" />
-    <menulist id="zotseek-server-model-menu" native="true">
-      <menupopup/>
-    </menulist>
-    <button id="zotseek-server-add" label="Add model" disabled="true" />
-  </hbox>
-  <html:div id="zotseek-server-advanced" style="margin: 6px 0 0 120px; display: none; font-size: 11px;">
-    <html:div>
-      <html:label>Query prefix: <html:input type="text" id="zotseek-server-queryPrefix" style="width: 150px;" /></html:label>
-      <html:label style="margin-left: 8px;">Document prefix: <html:input type="text" id="zotseek-server-docPrefix" style="width: 150px;" /></html:label>
-    </html:div>
-    <html:div style="margin-top: 4px;">
-      <html:label>API key (optional): <html:input type="password" id="zotseek-server-apiKey" style="width: 200px;" /></html:label>
-    </html:div>
-  </html:div>
-</groupbox>
-
-<!-- AI Agent Access (local MCP server) -->
-<groupbox>
-  <label><html:h2 data-l10n-id="zotseek-pref-mcpServer">AI Agent Access</html:h2></label>
-
-  <checkbox id="zotseek-pref-mcpServer"
-            label="Allow AI agents to search your library (local MCP server)"
-            data-l10n-id="zotseek-pref-mcpServerLabel"
-            native="true"
-            checked="false" />
-  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
-    <html:span data-l10n-id="zotseek-pref-mcpServerDesc">Lets MCP clients such as Claude Code run read-only semantic searches over your library. Everything stays on this computer (localhost only).</html:span>
-  </html:p>
-
-  <html:div id="zotseek-mcpserver-info" style="margin: 8px 0 0 24px; display: none;">
-    <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 0;">
-      <html:span data-l10n-id="zotseek-pref-mcpServerUrl">Connect with:</html:span>
-    </html:p>
-    <html:code id="zotseek-mcpserver-command"
-               style="display: block; font-size: 11px; padding: 4px 8px; margin-top: 4px; background: var(--zotseek-bg-secondary); border: 1px solid var(--zotseek-border); border-radius: 4px; user-select: all;">
-      claude mcp add --transport http --scope user zotseek http://localhost:23119/zotseek/mcp
-    </html:code>
-  </html:div>
-  <html:p id="zotseek-mcpserver-warning"
-          style="color: var(--zotseek-orange); font-size: 11px; margin: 4px 0 0 24px; display: none;">
-    <html:span data-l10n-id="zotseek-pref-mcpServerWarning">Zotero&apos;s local HTTP server is disabled. Enable &quot;Allow other applications on this computer to communicate with Zotero&quot; in Settings, Advanced.</html:span>
-  </html:p>
-</groupbox>
-
 <!-- Auto-Indexing -->
 <groupbox>
   <label><html:h2 data-l10n-id="zotseek-pref-autoIndexing">Auto-Indexing</html:h2></label>
@@ -327,6 +356,38 @@
     <html:span data-l10n-id="zotseek-pref-indexScopeDesc">Choose which libraries are included when updating or auto-indexing the index.</html:span>
   </html:p>
 </groupbox>
+
+<!-- Exclusions -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-prefs-exclusions">Exclusions</html:h2></label>
+
+  <checkbox id="zotseek-pref-excludeBooks"
+            label="Exclude books from indexing"
+            data-l10n-id="zotseek-pref-excludeBooks"
+            native="true"
+            checked="true" />
+  <html:p data-l10n-id="zotseek-pref-excludeBooksDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    Books lack paper sections and are too long to index well.
+  </html:p>
+
+  <html:div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+    <html:label data-l10n-id="zotseek-pref-excludeTag" for="zotseek-pref-excludeTag" style="color: var(--zotseek-text-primary);">Exclude tag</html:label>
+    <html:input type="text"
+                id="zotseek-pref-excludeTag"
+                class="zotseek-input"
+                value="zotseek-exclude"
+                placeholder="Enter tag name"
+                style="width: 160px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
+  </html:div>
+  <html:p data-l10n-id="zotseek-pref-excludeTagDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    Items with this tag will be skipped during indexing. Leave empty to disable.
+  </html:p>
+</groupbox>
+
+</html:details>
+
+<html:details class="zotseek-prefs-group" id="zotseek-group-search">
+  <html:summary data-l10n-id="zotseek-prefs-group-search">Search</html:summary>
 
 <!-- Search Settings -->
 <groupbox>
@@ -381,61 +442,43 @@
     </html:div>
 
   </html:div>
+</groupbox>
 
-  <checkbox id="zotseek-pref-excludeBooks"
-            label="Exclude books from indexing"
-            data-l10n-id="zotseek-pref-excludeBooks"
+</html:details>
+
+<html:details class="zotseek-prefs-group" id="zotseek-group-maintenance">
+  <html:summary data-l10n-id="zotseek-prefs-group-maintenance">Integrations &amp; Maintenance</html:summary>
+
+<!-- AI Agent Access (local MCP server) -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-pref-mcpServer">AI Agent Access</html:h2></label>
+
+  <checkbox id="zotseek-pref-mcpServer"
+            label="Allow AI agents to search your library (local MCP server)"
+            data-l10n-id="zotseek-pref-mcpServerLabel"
             native="true"
-            checked="true"
-            style="margin-top: 12px;" />
-  <html:p data-l10n-id="zotseek-pref-excludeBooksDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
-    Books lack paper sections and are too long to index well.
+            checked="false" />
+  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    <html:span data-l10n-id="zotseek-pref-mcpServerDesc">Lets MCP clients such as Claude Code run read-only semantic searches over your library. Everything stays on this computer (localhost only).</html:span>
   </html:p>
 
-  <html:div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
-    <html:label data-l10n-id="zotseek-pref-excludeTag" for="zotseek-pref-excludeTag" style="color: var(--zotseek-text-primary);">Exclude tag</html:label>
-    <html:input type="text"
-                id="zotseek-pref-excludeTag"
-                class="zotseek-input"
-                value="zotseek-exclude"
-                placeholder="Enter tag name"
-                style="width: 160px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
+  <html:div id="zotseek-mcpserver-info" style="margin: 8px 0 0 24px; display: none;">
+    <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 0;">
+      <html:span data-l10n-id="zotseek-pref-mcpServerUrl">Connect with:</html:span>
+    </html:p>
+    <html:code id="zotseek-mcpserver-command"
+               style="display: block; font-size: 11px; padding: 4px 8px; margin-top: 4px; background: var(--zotseek-bg-secondary); border: 1px solid var(--zotseek-border); border-radius: 4px; user-select: all;">
+      claude mcp add --transport http --scope user zotseek http://localhost:23119/zotseek/mcp
+    </html:code>
   </html:div>
-  <html:p data-l10n-id="zotseek-pref-excludeTagDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
-    Items with this tag will be skipped during indexing. Leave empty to disable.
+  <html:p id="zotseek-mcpserver-warning"
+          style="color: var(--zotseek-orange); font-size: 11px; margin: 4px 0 0 24px; display: none;">
+    <html:span data-l10n-id="zotseek-pref-mcpServerWarning">Zotero&apos;s local HTTP server is disabled. Enable &quot;Allow other applications on this computer to communicate with Zotero&quot; in Settings, Advanced.</html:span>
   </html:p>
 </groupbox>
 
-<!-- Actions -->
+<!-- Clear Index (Danger) -->
 <groupbox>
-  <label><html:h2 data-l10n-id="zotseek-pref-actions">Actions</html:h2></label>
-
-  <!-- Update Index - Primary action -->
-  <vbox class="zotseek-action-primary" style="border-radius: 6px; padding: 12px; margin-bottom: 8px; border-width: 1px; border-style: solid;">
-    <hbox align="center">
-      <button id="zotseek-update-index"
-              label="Update Index"
-              data-l10n-id="zotseek-pref-updateIndex"
-              style="font-weight: 600;" />
-      <html:span data-l10n-id="zotseek-pref-recommended" style="margin-left: 8px; color: var(--zotseek-green); font-size: 11px; font-weight: 500;">✓ Recommended</html:span>
-    </hbox>
-    <html:p data-l10n-id="zotseek-pref-updateIndexDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
-      Index all unindexed items in your library. Resumes safely from where you left off.
-    </html:p>
-  </vbox>
-
-  <!-- Rebuild Index -->
-  <vbox class="zotseek-action-secondary" style="border-radius: 6px; padding: 12px; margin-bottom: 8px; border-width: 1px; border-style: solid;">
-    <hbox align="center">
-      <button id="zotseek-rebuild-index"
-              label="Rebuild Index"
-              data-l10n-id="zotseek-pref-rebuildIndex" />
-    </hbox>
-    <html:p data-l10n-id="zotseek-pref-rebuildIndexDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
-      Clear and re-index all items with current settings. Use after changing indexing mode.
-    </html:p>
-  </vbox>
-
   <!-- Clear Index - Danger -->
   <vbox class="zotseek-action-danger" style="border-radius: 6px; padding: 12px; border-width: 1px; border-style: solid;">
     <hbox align="center">
@@ -467,6 +510,9 @@
     <html:p data-l10n-id="zotseek-pref-healthOrphansDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 6px 0 0 0;">
       Embeddings whose source items couldn't be matched to your current library. Purging frees space but cannot be undone.
     </html:p>
+    <hbox align="center" style="margin-top: 8px;">
+      <button id="zotseek-compact-db" label="Compact Database" data-l10n-id="zotseek-pref-compactDatabase" />
+    </hbox>
   </html:div>
 </groupbox>
 
@@ -482,5 +528,7 @@
            data-l10n-id="zotseek-pref-githubRepo" />
   </hbox>
 </groupbox>
+
+</html:details>
 
 </vbox>
