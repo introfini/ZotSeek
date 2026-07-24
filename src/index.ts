@@ -52,6 +52,7 @@ import './dev/suites/task-37d-partitioned-search';
 import './dev/suites/task-37e-model-download';
 import './dev/suites/task-42a-loopback';
 import './dev/suites/task-42b-server-registry';
+import './dev/suites/task-42c-server-client';
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
