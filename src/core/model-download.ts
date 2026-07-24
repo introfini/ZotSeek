@@ -77,6 +77,7 @@ export function registerModelsResourceSubstitution(): void {
  * JSON config files may still be absent (404 skip) without affecting this.
  */
 export async function isModelOnDisk(model: ModelConfig): Promise<boolean> {
+  if (model.runtime === 'server') return true; // nothing on disk; the server hosts the weights
   const onnxPath = PathUtils.join(modelDir(model), ...model.onnxFile.split('/'));
   try {
     return await IOUtils.exists(onnxPath);

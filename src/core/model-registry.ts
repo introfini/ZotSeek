@@ -7,6 +7,7 @@ declare const Zotero: any;
 export interface ModelConfig {
   id: string;              // stored as model_id in the DB (short id)
   label: string;           // UI label
+  runtime: 'onnx' | 'server'; // 'onnx' = in-process ChromeWorker; 'server' = local inference server
   hfPath: string;          // Hugging Face repo path, e.g. 'Xenova/bge-m3'
   dimensions: number;
   pooling: 'mean' | 'cls';
@@ -18,6 +19,11 @@ export interface ModelConfig {
   bundled: boolean;        // true only for the model shipped inside the XPI
   approxSizeMB: number;
   multilingual: boolean;
+
+  // server-runtime only
+  baseUrl?: string;          // e.g. 'http://127.0.0.1:1234' — loopback enforced at request time
+  serverModelName?: string;  // the model id the server knows, e.g. 'text-embedding-nomic-embed-text-v1.5'
+  apiKey?: string;           // optional bearer token (vLLM)
 }
 
 const COMMON_FILES = [
@@ -31,6 +37,7 @@ export const MODELS: ModelConfig[] = [
   {
     id: 'nomic-embed-text-v1.5',
     label: 'Nomic v1.5 (English, balanced)',
+    runtime: 'onnx',
     hfPath: 'Xenova/nomic-embed-text-v1.5',
     dimensions: 768, pooling: 'mean', normalize: true,
     queryPrefix: 'search_query: ', docPrefix: 'search_document: ',
@@ -41,6 +48,7 @@ export const MODELS: ModelConfig[] = [
   {
     id: 'paraphrase-multilingual-MiniLM-L12-v2',
     label: 'MiniLM multilingual (small, fast)',
+    runtime: 'onnx',
     hfPath: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
     dimensions: 384, pooling: 'mean', normalize: true,
     queryPrefix: '', docPrefix: '',
@@ -51,6 +59,7 @@ export const MODELS: ModelConfig[] = [
   {
     id: 'multilingual-e5-base',
     label: 'Multilingual E5 base',
+    runtime: 'onnx',
     hfPath: 'Xenova/multilingual-e5-base',
     dimensions: 768, pooling: 'mean', normalize: true,
     queryPrefix: 'query: ', docPrefix: 'passage: ',
@@ -61,6 +70,7 @@ export const MODELS: ModelConfig[] = [
   {
     id: 'bge-m3',
     label: 'BGE-M3 (top multilingual)',
+    runtime: 'onnx',
     hfPath: 'Xenova/bge-m3',
     dimensions: 1024, pooling: 'cls', normalize: true,
     queryPrefix: '', docPrefix: '',
@@ -73,11 +83,11 @@ export const MODELS: ModelConfig[] = [
 export const DEFAULT_MODEL_ID = 'nomic-embed-text-v1.5';
 
 export function getAllModels(): ModelConfig[] {
-  return [...MODELS];
+  return [...MODELS, ...getServerModels()];
 }
 
 export function getModel(id: string): ModelConfig | undefined {
-  return MODELS.find(m => m.id === id);
+  return MODELS.find(m => m.id === id) || getServerModels().find(m => m.id === id);
 }
 
 export function isAllowedHfPath(hfPath: string): boolean {
@@ -125,4 +135,88 @@ export function modelBasePath(model: ModelConfig): string {
 export function applyPrefix(text: string, kind: 'query' | 'doc', model: ModelConfig): string {
   const prefix = kind === 'query' ? model.queryPrefix : model.docPrefix;
   return prefix ? prefix + text : text;
+}
+
+/**
+ * Server-backed models (issue #42). Persisted in the 'zotseek.serverModels'
+ * pref as a JSON array of ServerModelEntry. A server model is a separate
+ * vector space from any bundled ONNX model — even for the "same" weights —
+ * so it always indexes under its own 'server:'-namespaced model_id.
+ */
+export interface ServerModelEntry {
+  id: string;
+  label: string;
+  baseUrl: string;
+  serverModelName: string;
+  dimensions: number;
+  queryPrefix: string;
+  docPrefix: string;
+  apiKey?: string;
+}
+
+const SERVER_MODELS_PREF = 'zotseek.serverModels';
+
+export function sanitizeServerModelId(serverModelName: string): string {
+  const slug = serverModelName.toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
+  return `server:${slug || 'model'}`;
+}
+
+/** Prefix inference by model-name family; servers never add task prefixes themselves. */
+export function inferServerPrefixes(name: string): { queryPrefix: string; docPrefix: string } {
+  const n = name.toLowerCase();
+  if (n.includes('nomic')) return { queryPrefix: 'search_query: ', docPrefix: 'search_document: ' };
+  if (n.includes('e5')) return { queryPrefix: 'query: ', docPrefix: 'passage: ' };
+  return { queryPrefix: '', docPrefix: '' };
+}
+
+function isValidServerEntry(e: any): e is ServerModelEntry {
+  return !!e && typeof e === 'object'
+    && typeof e.id === 'string' && e.id.startsWith('server:')
+    && typeof e.label === 'string'
+    && typeof e.baseUrl === 'string'
+    && typeof e.serverModelName === 'string'
+    && typeof e.dimensions === 'number' && e.dimensions > 0
+    && typeof e.queryPrefix === 'string'
+    && typeof e.docPrefix === 'string';
+}
+
+function serverEntryToModelConfig(e: ServerModelEntry): ModelConfig {
+  return {
+    id: e.id, label: e.label, runtime: 'server',
+    dimensions: e.dimensions, pooling: 'mean', normalize: true, // pooling/normalize handled server-side; fillers
+    queryPrefix: e.queryPrefix, docPrefix: e.docPrefix,
+    hfPath: '', onnxFile: '', files: [], bundled: false, approxSizeMB: 0, // onnx-only fields, unused
+    multilingual: false,
+    baseUrl: e.baseUrl, serverModelName: e.serverModelName, apiKey: e.apiKey,
+  };
+}
+
+export function getServerModelEntries(): ServerModelEntry[] {
+  try {
+    const raw = Zotero.Prefs.get(SERVER_MODELS_PREF, true);
+    if (typeof raw !== 'string' || !raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(isValidServerEntry);
+  } catch (e: any) {
+    Zotero.debug('[ZotSeek] getServerModelEntries: malformed pref ignored: ' + (e?.message || e));
+    return [];
+  }
+}
+
+export function getServerModels(): ModelConfig[] {
+  return getServerModelEntries().map(serverEntryToModelConfig);
+}
+
+export function addServerModel(entry: ServerModelEntry): void {
+  const list = getServerModelEntries().filter(x => x.id !== entry.id);
+  list.push(entry);
+  Zotero.Prefs.set(SERVER_MODELS_PREF, JSON.stringify(list), true);
+}
+
+export function removeServerModel(id: string): void {
+  const list = getServerModelEntries().filter(x => x.id !== id);
+  Zotero.Prefs.set(SERVER_MODELS_PREF, JSON.stringify(list), true);
 }
