@@ -362,3 +362,8 @@ zotseek-prefs-group-indexing = Indexing
 zotseek-prefs-group-search = Search
 zotseek-prefs-group-maintenance = Integrations & Maintenance
 zotseek-prefs-exclusions = Exclusions
+
+## Model section headers (fallbacks existed in XHTML only; adds the missing ftl entries)
+
+zotseek-pref-embeddingModelTitle = Embedding Model
+zotseek-pref-manageModelsTitle = Manage downloaded models
