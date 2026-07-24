@@ -5,7 +5,8 @@
  */
 
 import { Logger } from '../utils/logger';
-import { getActiveModel, getModel, ModelConfig, modelBasePath, setActiveModelId } from './model-registry';
+import { getActiveModel, getModel, ModelConfig, modelBasePath, setActiveModelId, applyPrefix } from './model-registry';
+import { ServerEmbeddingClient } from './server-embedding-client';
 
 declare const ChromeWorker: any;
 
@@ -31,6 +32,7 @@ export class EmbeddingPipeline {
   private logger: Logger;
   private model: ModelConfig = getActiveModel();
   private worker: any = null;
+  private serverClient: ServerEmbeddingClient | null = null;
   private workerReady = false;
   private pendingJobs = new Map<string, { resolve: Function; reject: Function }>();
   private ready = false;
@@ -56,9 +58,14 @@ export class EmbeddingPipeline {
     this.model = getActiveModel();
 
     this.initPromise = (async () => {
-      this.logger.info('Initializing embedding pipeline with Transformers.js');
-      await this.initWorker();  // Will throw on failure
-      this.logger.info('Using Transformers.js via ChromeWorker');
+      if (this.model.runtime === 'server') {
+        this.logger.info(`Initializing server-backed embedding pipeline (${this.model.baseUrl})`);
+        await this.initServerClient();  // Will throw on failure (unreachable / dimension mismatch)
+      } else {
+        this.logger.info('Initializing embedding pipeline with Transformers.js');
+        await this.initWorker();  // Will throw on failure
+        this.logger.info('Using Transformers.js via ChromeWorker');
+      }
       this.ready = true;
     })();
     const thisAttempt = this.initPromise;
@@ -180,6 +187,31 @@ export class EmbeddingPipeline {
   }
 
   /**
+   * Initialize the server-backed branch: build the client and probe once to
+   * (a) verify the server is reachable and (b) confirm the dimensions still
+   * match what this model was configured with. A mismatch means the user
+   * swapped the model behind the same name: indexing under the stored
+   * model_id would corrupt the vector space, so we refuse.
+   */
+  private async initServerClient(): Promise<void> {
+    const { baseUrl, serverModelName, apiKey } = this.model;
+    if (!baseUrl || !serverModelName) {
+      throw new Error(`Server model '${this.model.id}' is missing its server configuration`);
+    }
+    const client = new ServerEmbeddingClient({ baseUrl, serverModelName, apiKey });
+    const dims = await client.probe();
+    if (dims !== this.model.dimensions) {
+      throw new Error(
+        `Server model '${serverModelName}' now returns ${dims}-dimensional embeddings, ` +
+        `but this ZotSeek model was added with ${this.model.dimensions}. ` +
+        `The model behind this name has changed: remove and re-add it in ZotSeek settings ` +
+        `(a re-index will be required).`
+      );
+    }
+    this.serverClient = client;
+  }
+
+  /**
    * Generate embedding for text using worker
    * @param text - Text to embed
    * @param kind - 'query' for search queries, 'doc' for documents
@@ -220,6 +252,18 @@ export class EmbeddingPipeline {
    * broken state.
    */
   async embed(text: string, kind: 'query' | 'doc' = 'doc'): Promise<EmbeddingResult> {
+    if (!this.ready) {
+      await this.init();
+    }
+    if (this.model.runtime === 'server') {
+      if (!this.serverClient) await this.init();
+      const start = Date.now();
+      const prefixed = applyPrefix(text, kind, this.model);
+      // Search queries fail fast (1 retry); documents get the full backoff (3).
+      const retries = kind === 'query' ? 1 : 3;
+      const [embedding] = await this.serverClient!.embed([prefixed], retries);
+      return { embedding, modelId: this.model.id, processingTimeMs: Date.now() - start };
+    }
     for (let attempt = 0; ; attempt++) {
       if (!this.ready || !this.workerReady) {
         await this.recoverWorker();
@@ -254,6 +298,7 @@ export class EmbeddingPipeline {
       try { this.worker.terminate(); } catch { /* ignore */ }
       this.worker = null;
     }
+    this.serverClient = null;
     this.workerReady = false;
     this.ready = false;
     this.initPromise = null;
@@ -277,6 +322,25 @@ export class EmbeddingPipeline {
     return this.embed(text, 'doc');
   }
 
+  /** True when the active model runs on a local inference server. */
+  isServerBacked(): boolean {
+    return getActiveModel().runtime === 'server';
+  }
+
+  /**
+   * Batched document embedding: server runtime only. This is where the
+   * native Metal/CUDA speedup materializes: one HTTP request carries many
+   * chunks instead of one. Prefixes are applied here; pass raw chunk text.
+   */
+  async embedDocuments(texts: string[]): Promise<number[][]> {
+    if (!this.ready) await this.init();
+    if (this.model.runtime !== 'server' || !this.serverClient) {
+      throw new Error('embedDocuments is only available with a server-backed model');
+    }
+    const prefixed = texts.map(t => applyPrefix(t, 'doc', this.model));
+    return this.serverClient.embed(prefixed);
+  }
+
   /**
    * Generate embeddings for multiple texts with progress callback
    * Always embeds as documents (isQuery=false) since this is for indexing
@@ -287,6 +351,22 @@ export class EmbeddingPipeline {
   ): Promise<Map<number, EmbeddingResult>> {
     if (!this.ready) {
       await this.init();
+    }
+
+    if (this.model.runtime === 'server') {
+      const results = new Map<number, EmbeddingResult>();
+      const total = texts.length;
+      const GROUP = 32;
+      for (let i = 0; i < texts.length; i += GROUP) {
+        const group = texts.slice(i, i + GROUP);
+        if (onProgress) {
+          onProgress({ current: Math.min(i + group.length, total), total, currentTitle: group[0].title, status: 'processing' });
+        }
+        const vectors = await this.embedDocuments(group.map(t => t.text));
+        group.forEach((t, j) => results.set(t.id, { embedding: vectors[j], modelId: this.model.id, processingTimeMs: 0 }));
+      }
+      if (onProgress) onProgress({ current: total, total, currentTitle: '', status: 'done' });
+      return results;
     }
 
     const results = new Map<number, EmbeddingResult>();
@@ -346,6 +426,7 @@ export class EmbeddingPipeline {
       try { this.worker.terminate(); } catch { /* ignore */ }
       this.worker = null;
     }
+    this.serverClient = null;
     this.workerReady = false;
     this.ready = false;
     this.initPromise = null;
@@ -401,6 +482,7 @@ export class EmbeddingPipeline {
       this.worker.terminate();
       this.worker = null;
     }
+    this.serverClient = null;
     this.pendingJobs.clear();
   }
 }
