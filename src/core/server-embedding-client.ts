@@ -8,6 +8,27 @@
 
 import { assertLoopbackUrl } from './loopback-url';
 
+declare const Zotero: any;
+
+// Plugin main-thread sandbox (bootstrap loadSubScript) has fetch and URL but
+// lacks the AbortController DOM global. Resolve it once, borrowing from the
+// main window when the bare global is missing (see CLAUDE.md pitfall).
+let abortControllerCtor: any | undefined;
+function getAbortControllerCtor(): any | null {
+  if (abortControllerCtor !== undefined) return abortControllerCtor;
+  if (typeof AbortController !== 'undefined') {
+    abortControllerCtor = AbortController;
+  } else {
+    try {
+      const win = Zotero.getMainWindow?.();
+      abortControllerCtor = win?.AbortController || null;
+    } catch {
+      abortControllerCtor = null;
+    }
+  }
+  return abortControllerCtor;
+}
+
 export interface ServerClientConfig {
   baseUrl: string;
   serverModelName: string;
@@ -42,15 +63,26 @@ export class ServerEmbeddingClient {
   private async request(path: string, init: { method: string; body?: string }, timeoutMs = REQUEST_TIMEOUT_MS): Promise<any> {
     // Loopback validation at request time: the privacy gate, no override.
     const url = assertLoopbackUrl(new URL(path, this.cfg.baseUrl).href);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const AC = getAbortControllerCtor();
+    const ctrl = AC ? new AC() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
     try {
-      const resp = await fetch(url.href, {
+      const doFetch = fetch(url.href, {
         ...init,
         headers: this.headers(),
         redirect: 'error', // a redirect off-loopback must abort, never be followed
-        signal: ctrl.signal,
+        ...(ctrl ? { signal: ctrl.signal } : {}),
       });
+      // Without AbortController the fetch itself is never cancelled, but the
+      // caller still gets a timely timeout error instead of hanging forever.
+      const resp = ctrl
+        ? await doFetch
+        : await Promise.race([
+            doFetch,
+            new Promise<never>((_, rej) =>
+              setTimeout(() => rej(new Error(`Request timed out after ${timeoutMs}ms`)), timeoutMs)
+            ),
+          ]);
       if (!resp.ok) {
         const body = await resp.text().catch(() => '');
         const err: any = new Error(`HTTP ${resp.status}: ${body.slice(0, 300)}`);
@@ -59,7 +91,7 @@ export class ServerEmbeddingClient {
       }
       return await resp.json();
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     }
   }
 

@@ -13,6 +13,7 @@ selfTest.register('task-42c-server-client', async () => {
       } catch (e: any) {
         assertEq(e?.code, 'SERVER_UNAVAILABLE');
         assertTrue(String(e?.message).includes('127.0.0.1:9'), 'message names the URL');
+        assertTrue(!String(e?.message).includes('AbortController'), 'reached network, not an environment error');
       }
     }),
     await scenario('non-loopback baseUrl is rejected before any network I/O', async () => {
