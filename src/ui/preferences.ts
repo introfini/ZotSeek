@@ -240,12 +240,20 @@ async function testServerConnection(doc: any): Promise<void> {
     const popup = els.modelMenu?.querySelector('menupopup');
     if (popup) {
       popup.replaceChildren();
+      // Placeholder first: an unselected XUL menulist sizes itself to nothing (no label to
+      // measure), collapsing to a few px wide. Selecting this placeholder is a safe no-op:
+      // probeServerModel returns early when the selected value is falsy.
+      const placeholder = doc.createXULElement('menuitem');
+      placeholder.setAttribute('value', '');
+      placeholder.setAttribute('label', 'Choose a model...');
+      popup.appendChild(placeholder);
       for (const name of models) {
         const mi = doc.createXULElement('menuitem');
         mi.setAttribute('value', name);
         mi.setAttribute('label', name);
         popup.appendChild(mi);
       }
+      if (els.modelMenu) els.modelMenu.selectedIndex = 0;
     }
     if (els.modelRow) els.modelRow.style.display = 'flex';
     if (els.advanced) els.advanced.style.display = 'block';
