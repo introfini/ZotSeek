@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [1.19.0-beta.1] - Unreleased
+## [1.19.0-beta.1] - 2026-07-24
 
 ### Added
 - Local inference server support: use an embedding model served by LM Studio, Ollama,
