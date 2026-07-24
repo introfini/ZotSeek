@@ -118,6 +118,78 @@ function hasExcludeTag(item: any): boolean {
   }
 }
 
+interface ChunkForEmbedding { id: string; text: string; title: string; }
+interface EmbedChunksResult {
+  embeddings: Map<string, { embedding: number[]; modelId: string }>;
+  failedChunks: number;
+  failedItems: Set<string>;
+}
+
+// One HTTP request carries up to this many chunks on the server runtime.
+const SERVER_EMBED_GROUP = 32;
+
+/**
+ * Embed a list of chunks with the active pipeline. Shared by the three
+ * indexing paths (indexLibrary, auto-index, reindexForActiveModel).
+ *
+ * Worker runtime: per-chunk with one retry; a chunk that fails twice is
+ * skipped and reported (embedding compute is local, failures are per-chunk).
+ *
+ * Server runtime: groups of SERVER_EMBED_GROUP per request. Errors are NOT
+ * swallowed per chunk: the client already retried with backoff, and a dead
+ * server must stop the run cleanly (ServerUnavailableError propagates to the
+ * caller's outer catch). Falling back to the in-process model is forbidden -
+ * it would mix vector spaces under one model_id.
+ *
+ * onProgress(processed) runs after each chunk (worker) or group (server);
+ * it may throw (e.g. 'Cancelled by user') to abort the run.
+ */
+async function embedChunks(
+  chunks: ChunkForEmbedding[],
+  onProgress: (processed: number) => Promise<void> | void,
+): Promise<EmbedChunksResult> {
+  const embeddings = new Map<string, { embedding: number[]; modelId: string }>();
+  let failedChunks = 0;
+  const failedItems = new Set<string>();
+
+  if (embeddingPipeline.isServerBacked()) {
+    const modelId = getActiveModelId();
+    for (let i = 0; i < chunks.length; i += SERVER_EMBED_GROUP) {
+      const group = chunks.slice(i, i + SERVER_EMBED_GROUP);
+      const vectors = await embeddingPipeline.embedDocuments(group.map(c => c.text));
+      group.forEach((c, j) => embeddings.set(c.id, { embedding: vectors[j], modelId }));
+      await onProgress(Math.min(i + group.length, chunks.length));
+    }
+    return { embeddings, failedChunks, failedItems };
+  }
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    try {
+      const result = await embeddingPipeline.embed(chunk.text);
+      if (result) embeddings.set(chunk.id, result);
+    } catch (embedException: any) {
+      // Retry once before giving up on this chunk
+      try {
+        Zotero.debug(`[ZotSeek] Embedding failed for chunk ${chunk.id} ("${chunk.title}"), retrying: ${embedException?.message || embedException}`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const retryResult = await embeddingPipeline.embed(chunk.text);
+        if (retryResult) embeddings.set(chunk.id, retryResult);
+      } catch {
+        failedChunks++;
+        failedItems.add(chunk.title);
+        Zotero.debug(`[ZotSeek] Skipping chunk ${chunk.id} ("${chunk.title}") after retry failure: ${embedException?.message || embedException}`);
+      }
+    }
+    await onProgress(i + 1);
+    // Yield to UI thread periodically
+    if ((i + 1) % 5 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+  return { embeddings, failedChunks, failedItems };
+}
+
 /**
  * Main plugin class
  */
@@ -1247,50 +1319,20 @@ class ZotSeekPlugin {
         progressWindow.setHeadline(getString('indexing-batchEmbedding', { current: batchNumber, total: totalBatches }));
         this.logger.info(`Batch ${batchNumber}/${totalBatches}: Embedding ${batchChunks.length} chunks`);
 
-        const embeddingMap = new Map<string, { embedding: number[]; modelId: string }>();
-        let chunkProcessed = 0;
-
-        let failedChunks = 0;
-        const failedItems = new Set<string>();
-        for (const chunk of batchChunks) {
-          await progressWindow.waitIfPaused();
-          if (progressWindow.isCancelled()) {
-            throw new Error('Cancelled by user');
-          }
-
-          chunkProcessed++;
-          progressWindow.updateProgressWithETA(
-            getString('indexing-batchEmbeddingChunks', { current: batchNumber, total: totalBatches }),
-            batchStart + Math.floor((chunkProcessed / batchChunks.length) * batchItems.length),
-            itemsToIndex.length
-          );
-
-          try {
-            const result = await embeddingPipeline.embed(chunk.text);
-            if (result) {
-              embeddingMap.set(chunk.id, result);
+        const { embeddings: embeddingMap, failedChunks, failedItems } = await embedChunks(
+          batchChunks,
+          async (processed) => {
+            await progressWindow.waitIfPaused();
+            if (progressWindow.isCancelled()) {
+              throw new Error('Cancelled by user');
             }
-          } catch (embedException: any) {
-            // Retry once before giving up on this chunk
-            try {
-              this.logger.warn(`Embedding failed for chunk ${chunk.id} ("${chunk.title}"), retrying: ${embedException?.message || embedException}`);
-              await new Promise(resolve => setTimeout(resolve, 500));
-              const retryResult = await embeddingPipeline.embed(chunk.text);
-              if (retryResult) {
-                embeddingMap.set(chunk.id, retryResult);
-              }
-            } catch {
-              failedChunks++;
-              failedItems.add(chunk.title);
-              this.logger.error(`Skipping chunk ${chunk.id} ("${chunk.title}") after retry failure: ${embedException?.message || embedException}`);
-            }
+            progressWindow.updateProgressWithETA(
+              getString('indexing-batchEmbeddingChunks', { current: batchNumber, total: totalBatches }),
+              batchStart + Math.floor((processed / batchChunks.length) * batchItems.length),
+              itemsToIndex.length
+            );
           }
-
-          // Yield to UI thread periodically
-          if (chunkProcessed % 5 === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0));
-          }
-        }
+        );
 
         if (failedChunks > 0) {
           const itemList = Array.from(failedItems).join(', ');
@@ -1523,35 +1565,12 @@ class ZotSeekPlugin {
       }
 
       // Generate embeddings with progress updates
-      const embeddingMap = new Map<string, { embedding: number[]; modelId: string }>();
-      let processed = 0;
-      let failedChunks = 0;
-
-      const failedItems = new Set<string>();
-      for (const item of textsForEmbedding) {
-        processed++;
-        itemRow.setText(getString('indexing-embedding', { current: processed, total: textsForEmbedding.length }));
-        try {
-          const result = await embeddingPipeline.embed(item.text);
-          if (result) {
-            embeddingMap.set(item.id, result);
-          }
-        } catch (embedException: any) {
-          // Retry once before giving up
-          try {
-            this.logger.warn(`Auto-index embed failed for ${item.id} ("${item.title}"), retrying: ${embedException?.message || embedException}`);
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const retryResult = await embeddingPipeline.embed(item.text);
-            if (retryResult) {
-              embeddingMap.set(item.id, retryResult);
-            }
-          } catch {
-            failedChunks++;
-            failedItems.add(item.title);
-            this.logger.error(`Auto-index skipping chunk ${item.id} ("${item.title}"): ${embedException?.message || embedException}`);
-          }
+      const { embeddings: embeddingMap, failedChunks, failedItems } = await embedChunks(
+        textsForEmbedding,
+        (processed) => {
+          itemRow.setText(getString('indexing-embedding', { current: processed, total: textsForEmbedding.length }));
         }
-      }
+      );
 
       // Store embeddings with chunk metadata
       itemRow.setText(getString('indexing-saving'));
@@ -1942,36 +1961,13 @@ class ZotSeekPlugin {
           }
         }
 
-        const embeddingMap = new Map<string, { embedding: number[]; modelId: string }>();
-        let chunkProcessed = 0;
-        let failedChunks = 0;
-        const failedItems = new Set<string>();
-
         itemRow.setText(`Embedding batch ${batchNumber}/${totalBatches} (${batchChunks.length} chunks)...`);
         this.logger.info(`reindexForActiveModel: batch ${batchNumber}/${totalBatches}: embedding ${batchChunks.length} chunks`);
 
-        for (const chunk of batchChunks) {
-          chunkProcessed++;
-          try {
-            const result = await embeddingPipeline.embed(chunk.text);
-            if (result) embeddingMap.set(chunk.id, result);
-          } catch (embedException: any) {
-            try {
-              this.logger.warn(`reindexForActiveModel: embed failed for ${chunk.id} ("${chunk.title}"), retrying: ${embedException?.message || embedException}`);
-              await new Promise(resolve => setTimeout(resolve, 500));
-              const retryResult = await embeddingPipeline.embed(chunk.text);
-              if (retryResult) embeddingMap.set(chunk.id, retryResult);
-            } catch {
-              failedChunks++;
-              failedItems.add(chunk.title);
-              this.logger.error(`reindexForActiveModel: skipping chunk ${chunk.id} ("${chunk.title}"): ${embedException?.message || embedException}`);
-            }
-          }
-          // Yield to the UI thread periodically to avoid freezing
-          if (chunkProcessed % 5 === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0));
-          }
-        }
+        const { embeddings: embeddingMap, failedChunks, failedItems } = await embedChunks(
+          batchChunks,
+          () => { /* no per-chunk progress text in this path, matches prior behavior */ }
+        );
 
         if (failedChunks > 0) {
           totalFailedChunks += failedChunks;
