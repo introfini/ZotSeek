@@ -1043,9 +1043,14 @@ class ZotSeekPlugin {
     const Z = getZotero();
     if (!Z) return;
 
-    // Get the selected collection using ZoteroPane
+    // Get the selected collection using ZoteroPane. Zotero 10 removed the
+    // singular getter in favour of a plural one for multi-collection selection;
+    // the old name still exists but throws, so feature-detect the new one and
+    // fall back for Zotero 8/9.
     const ZoteroPane = Z.getActiveZoteroPane();
-    const collection = ZoteroPane?.getSelectedCollection();
+    const collection = typeof ZoteroPane?.getSelectedCollections === 'function'
+      ? (ZoteroPane.getSelectedCollections() || [])[0]
+      : ZoteroPane?.getSelectedCollection();
 
     if (!collection) {
       this.showAlert(getString('indexing-selectCollection'));

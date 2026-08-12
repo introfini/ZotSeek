@@ -92,13 +92,13 @@ ZotSeek targets Zotero 8 and newer:
   "applications": {
     "zotero": {
       "strict_min_version": "7.999",
-      "strict_max_version": "9.*"
+      "strict_max_version": "10.0.*"
     }
   }
 }
 ```
 
-> ⚠️ This guide targets **Zotero 8 and 9**. Earlier Zotero versions use a different structure and are no longer supported.
+> ⚠️ This guide targets **Zotero 8, 9 and 10**. Earlier Zotero versions use a different structure and are no longer supported.
 
 ---
 
@@ -184,7 +184,7 @@ Create `manifest.json`:
       "id": "zotseek@zotero.org",
       "update_url": "https://example.com/update.json",
       "strict_min_version": "7.999",
-      "strict_max_version": "9.*"
+      "strict_max_version": "10.0.*"
     }
   }
 }

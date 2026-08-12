@@ -2,6 +2,29 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.19.0] - 2026-08-12
+
+Stable release of the local inference server support introduced in 1.19.0-beta.1
+(detailed below), plus Zotero 10 compatibility.
+
+### Added
+- Zotero 10 support: `strict_max_version` raised to `10.0.*`. Without this, ZotSeek
+  is disabled as incompatible as soon as Zotero 10 is installed.
+
+### Fixed
+- Indexing a collection no longer fails on Zotero 10. That release removed
+  `ZoteroPane.getSelectedCollection()` in favour of `getSelectedCollections()` for
+  multi-collection selection, and the old name now throws. ZotSeek uses the new API
+  when available and falls back on Zotero 8/9. When several collections are selected,
+  the first one is indexed.
+
+### Technical
+- The release script now reads `strict_min_version` and `strict_max_version` from
+  `manifest.json` when generating `update.json` instead of hardcoding them, so the
+  two manifests can no longer drift apart.
+
+---
+
 ## [1.19.0-beta.1] - 2026-07-24
 
 ### Added

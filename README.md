@@ -2,7 +2,7 @@
 
 Find similar papers by **meaning**, not just keywords. 100% local, no data leaves your machine. Now with a built-in **MCP server** for AI agents.
 
-> **Status:** ✅ Stable release · Zotero 8 & 9 · Transformers.js running locally
+> **Status:** ✅ Stable release · Zotero 8, 9 & 10 · Transformers.js running locally
 >
 > **New:** 🤖 **MCP server built in** — Claude Code, Codex, and any MCP client can search your library and cite papers with links that open straight to the matched PDF page. Fully local, read-only, opt-in. [Set it up in one line →](docs/MCP.md)
 
@@ -521,7 +521,7 @@ The same searches are also available as plain REST endpoints for scripts. Everyt
 
 ### For Users
 
-**Requirements:** Zotero 8.0 or newer (Zotero 9.0 supported).
+**Requirements:** Zotero 8.0 or newer (Zotero 9 and Zotero 10 supported).
 
 1. Download the latest `zotseek-X.Y.Z.xpi` from the [Releases page](https://github.com/introfini/ZotSeek/releases/latest).
 2. In Zotero, open **Tools → Plugins**.
@@ -780,10 +780,10 @@ ZotSeek automatically detects and uses **WebGPU** for GPU-accelerated embeddings
 | **WebGPU (GPU)** | If browser/Zotero supports WebGPU | Up to 10-20x faster |
 | **WASM (CPU)** | Fallback when WebGPU unavailable | ~3 seconds per chunk |
 
-**Current status (April 2026):**
+**Current status (August 2026):**
 - Firefox 141 shipped WebGPU on **Windows only** (July 2025)
 - **macOS and Linux** WebGPU support is still in progress at Mozilla
-- Both Zotero 8 and Zotero 9 ship Firefox 140 ESR — one version before the first WebGPU build, so GPU acceleration is still gated on an upstream Firefox ESR bump
+- Zotero 8, 9 and 10 all ship Firefox 140 ESR — one version before the first WebGPU build, so GPU acceleration is still gated on an upstream Firefox ESR bump
 
 **When will GPU work?** Once Zotero upgrades to a Firefox ESR with WebGPU support for your platform, GPU acceleration will automatically activate — no plugin update needed.
 

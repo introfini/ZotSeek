@@ -17,6 +17,13 @@ const GITHUB_REPO = 'ZotSeek';
  * Generate update.json from manifest.json version
  */
 function generateUpdateJson(version) {
+  // Read the compatibility gate from manifest.json rather than hardcoding it.
+  // The update manifest has its own gate, and it is what decides whether an
+  // update is offered at all: if it lags behind the manifest, users on a new
+  // Zotero major stay disabled and never receive the build that fixes them.
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const { strict_min_version, strict_max_version } = manifest.applications.zotero;
+
   const updateJson = {
     addons: {
       'zotseek@zotero.org': {
@@ -26,8 +33,8 @@ function generateUpdateJson(version) {
             update_link: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v${version}/zotseek-${version}.xpi`,
             applications: {
               zotero: {
-                strict_min_version: '7.999',
-                strict_max_version: '9.*'
+                strict_min_version,
+                strict_max_version
               }
             }
           }
@@ -80,9 +87,15 @@ async function createXpi(version) {
 async function release() {
   console.log('ZotSeek Release\n');
 
-  // Step 1: Run bumpp to get new version (interactive)
+  // Step 1: Run bumpp to get new version. Interactive by default; pass an
+  // explicit version as the first argument to run unattended, e.g.
+  //   node scripts/release.js 1.19.0
   console.log('Step 1: Version bump\n');
-  const bumppResult = spawnSync('npx', ['bumpp', '--no-commit', '--no-tag', '--no-push'], {
+  const requestedVersion = process.argv[2];
+  const bumppArgs = requestedVersion
+    ? [requestedVersion, '--yes', '--no-commit', '--no-tag', '--no-push']
+    : ['--no-commit', '--no-tag', '--no-push'];
+  const bumppResult = spawnSync('npx', ['bumpp', ...bumppArgs], {
     cwd: rootDir,
     stdio: 'inherit',
     shell: true
