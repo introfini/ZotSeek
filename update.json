@@ -3,12 +3,12 @@
     "zotseek@zotero.org": {
       "updates": [
         {
-          "version": "1.18.0",
-          "update_link": "https://github.com/introfini/ZotSeek/releases/download/v1.18.0/zotseek-1.18.0.xpi",
+          "version": "1.19.0",
+          "update_link": "https://github.com/introfini/ZotSeek/releases/download/v1.19.0/zotseek-1.19.0.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "7.999",
-              "strict_max_version": "9.*"
+              "strict_max_version": "10.0.*"
             }
           }
         }
