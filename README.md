@@ -517,6 +517,16 @@ The same searches are also available as plain REST endpoints for scripts. Everyt
 
 ---
 
+## Built with ZotSeek
+
+Independent projects built on ZotSeek's local API:
+
+- **[Wordbot](https://github.com/Addy-ad/wordbot)** by [@Addy-ad](https://github.com/Addy-ad) — a Microsoft Word add-in for researchers. It converts LLM output into native Word formatting (tables, equations, code blocks, headings) and grounds it in your library: it runs semantic searches through ZotSeek, then writes text with inline citations that Zotero's own Word plugin recognises, so you can build a unified bibliography from them. Runs entirely offline against a local LLM server. Windows and macOS.
+
+These are third-party projects, maintained by their authors and released under their own licences (Wordbot is non-commercial). Please report problems with them on their own issue trackers.
+
+---
+
 ## Installation
 
 ### For Users
