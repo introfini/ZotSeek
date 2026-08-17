@@ -5,6 +5,8 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 > **Status:** ✅ Stable release · Zotero 8, 9 & 10 · Transformers.js running locally
 >
 > **New:** 🤖 **MCP server built in** — Claude Code, Codex, and any MCP client can search your library and cite papers with links that open straight to the matched PDF page. Fully local, read-only, opt-in. [Set it up in one line →](docs/MCP.md)
+>
+> **New from the same author:** 🔎 [**citefact**](https://github.com/hearthresearch/citefact) — audit your manuscript against your Zotero library: citations exist, quotes are verbatim, claims are supported.
 
 ![ZotSeek Search Dialog](docs/images/search-dialog-by-section-hover.png)
 
@@ -515,6 +517,8 @@ claude mcp add --transport http --scope user zotseek http://localhost:23119/zots
 
 The same searches are also available as plain REST endpoints for scripts. Everything is read-only — nothing can modify your library or index. See [docs/MCP.md](docs/MCP.md) for the full setup, tool reference, REST API, and security notes.
 
+Once the manuscript is written, the complementary tool [citefact](https://github.com/hearthresearch/citefact) closes the loop: point it at the same Zotero collection and it audits the finished draft — citations exist, quotes are verbatim, and each source actually supports the claim citing it.
+
 ---
 
 ## Built with ZotSeek
@@ -844,6 +848,12 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ## License
 
 MIT License - see [LICENSE](LICENSE)
+
+---
+
+## Related Projects
+
+- **[citefact](https://github.com/hearthresearch/citefact)** — CLI that audits a manuscript against the full text of its cited sources, straight from a Zotero collection. ZotSeek helps you *find* the right papers; citefact verifies the final draft actually *uses* them correctly. `uvx citefact check manuscript.md --zotero-collection "My Collection"`.
 
 ---
 
