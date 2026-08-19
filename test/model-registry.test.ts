@@ -21,6 +21,7 @@ import {
   removeServerModel,
   requiresLocalFiles,
   missingModelMessage,
+  brokenSubstitutionMessage,
 } from '../src/core/model-registry';
 
 let zotero = installZoteroStub();
@@ -211,5 +212,33 @@ describe('models that need their weights on disk', () => {
     assert.match(msg, /Settings/i, 'points somewhere the user can act');
     assert.ok(!msg.includes('resource://'), 'does not leak the internal URL scheme');
     assert.ok(!/local_files_only/.test(msg), 'does not leak the Transformers.js wording');
+  });
+});
+
+
+describe('models unreachable because the resource:// mapping is broken', () => {
+  // Downloaded models are loaded over resource://zotseek-models/, a mapping the
+  // plugin registers once at startup. If that registration fails, every
+  // downloaded model becomes unloadable while the bundled one keeps working,
+  // and nothing says so: the failure surfaces much later as a loader error or a
+  // 30-second worker timeout, far from its cause.
+
+  test('the message names the model and says the files are not the problem', () => {
+    const model = MODELS.find((m) => !m.bundled)!;
+    const msg = brokenSubstitutionMessage(model, 'setSubstitution threw');
+    assert.ok(msg.includes(model.label), 'names the model the user chose');
+    assert.match(msg, /download/i, 'tells the user re-downloading will not help');
+  });
+
+  test('the message carries the underlying reason for a bug report', () => {
+    const model = MODELS.find((m) => !m.bundled)!;
+    assert.ok(brokenSubstitutionMessage(model, 'NS_ERROR_FAILURE').includes('NS_ERROR_FAILURE'));
+  });
+
+  test('it stays readable when there is no underlying reason to report', () => {
+    const model = MODELS.find((m) => !m.bundled)!;
+    const msg = brokenSubstitutionMessage(model, null);
+    assert.ok(msg.length > 0);
+    assert.ok(!msg.includes('null') && !msg.includes('undefined'), 'no placeholder leaks into user text');
   });
 });

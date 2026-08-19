@@ -155,6 +155,24 @@ export function missingModelMessage(model: ModelConfig): string {
   );
 }
 
+/**
+ * Message for a model that cannot be reached because the
+ * `resource://zotseek-models/` mapping is not working.
+ *
+ * Distinct from missingModelMessage on purpose: here the files may well be on
+ * disk and perfectly intact, so telling the user to download again would send
+ * them down a dead end. This is an environment problem, not a missing asset.
+ */
+export function brokenSubstitutionMessage(model: ModelConfig, reason: string | null): string {
+  const detail = reason ? ` (${reason})` : '';
+  return (
+    `The "${model.label}" model cannot be loaded because ZotSeek could not map its ` +
+    `storage folder${detail}. Downloading the model again will not help. Restart Zotero, ` +
+    `and if it keeps happening please report it with your Zotero version and operating system. ` +
+    `Meanwhile the built-in model still works.`
+  );
+}
+
 export function modelBasePath(model: ModelConfig): string {
   return model.bundled
     ? 'chrome://zotseek/content/models/'

@@ -6,8 +6,8 @@
 
 import { Logger } from '../utils/logger';
 import { getActiveModel, getModel, ModelConfig, modelBasePath, setActiveModelId, applyPrefix,
-  requiresLocalFiles, missingModelMessage } from './model-registry';
-import { isModelOnDisk } from './model-download';
+  requiresLocalFiles, missingModelMessage, brokenSubstitutionMessage } from './model-registry';
+import { isModelOnDisk, ensureModelsResourceSubstitution } from './model-download';
 import { ServerEmbeddingClient } from './server-embedding-client';
 
 declare const ChromeWorker: any;
@@ -74,9 +74,20 @@ export class EmbeddingPipeline {
         // that URL, which does not tell the user a download is needed or where
         // to start one. Nothing else in the load path checks, because
         // ensureModelDownloaded() is only ever called from the preferences UI.
-        if (requiresLocalFiles(this.model) && !(await isModelOnDisk(this.model))) {
-          this.logger.error(`Model files missing for "${this.model.id}"; refusing to start the worker`);
-          throw new Error(missingModelMessage(this.model));
+        if (requiresLocalFiles(this.model)) {
+          // Files first: absent weights are both the likelier problem and the
+          // one with clear advice. Only if they ARE present does an unusable
+          // mapping become the explanation worth reporting -- telling someone
+          // to re-download a model that is already on disk is a dead end.
+          if (!(await isModelOnDisk(this.model))) {
+            this.logger.error(`Model files missing for "${this.model.id}"; refusing to start the worker`);
+            throw new Error(missingModelMessage(this.model));
+          }
+          const reason = ensureModelsResourceSubstitution();
+          if (reason !== null) {
+            this.logger.error(`resource:// mapping unusable for "${this.model.id}": ${reason}`);
+            throw new Error(brokenSubstitutionMessage(this.model, reason));
+          }
         }
         this.logger.info('Initializing embedding pipeline with Transformers.js');
         await this.initWorker();  // Will throw on failure

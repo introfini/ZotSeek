@@ -33,7 +33,7 @@ import { preferencesManager } from './ui/preferences';
 import { identityFromItem, libraryKeyFromLocalID, localItemIDFromIdentity } from './core/identity-resolver';
 import { getActiveModelId } from './core/model-registry';
 import { initServerManager, shutdownServerManager } from './server/server-manager';
-import { registerModelsResourceSubstitution } from './core/model-download';
+import { registerModelsResourceSubstitution, verifyModelsResourceSubstitution } from './core/model-download';
 // Self-test harness (mounted only when extensions.zotseek.devMode = true)
 import { selfTest as zotseekSelfTest } from './dev/self-test';
 // Task suites: imported for registration side effects only.
@@ -313,8 +313,15 @@ class ZotSeekPlugin {
     // Transformers.js in the ChromeWorker can load downloaded models locally.
     try {
       registerModelsResourceSubstitution();
+      const reason = verifyModelsResourceSubstitution();
+      if (reason !== null) {
+        // Not fatal: the bundled model resolves over chrome:// and still works.
+        // But every downloaded model is unloadable until this is fixed, so say
+        // so at error level rather than leaving it to a later, opaque failure.
+        this.logger.error(`models resource substitution is not usable (${reason}); downloaded models will not load`);
+      }
     } catch (e: any) {
-      this.logger.warn(`models resource substitution failed: ${e?.message || e}`);
+      this.logger.error(`models resource substitution failed: ${e?.message || e}; downloaded models will not load`);
     }
 
     // Local MCP/REST endpoints for AI agents (opt-in via preferences)

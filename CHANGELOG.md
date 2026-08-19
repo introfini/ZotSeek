@@ -37,6 +37,12 @@ multi-collection support that Zotero 10 made possible.
 - The worker initialization timeout now names the model, its size and whether it is
   bundled or downloaded, so a report of that error can be diagnosed without asking for
   a debug log first.
+- Downloaded models are reached through a `resource://` folder mapping registered once
+  at startup. If that registration fails, every downloaded model becomes unloadable
+  while the built-in one keeps working, and previously nothing said so. The mapping is
+  now verified rather than assumed, re-registered automatically when it is missing, and
+  reported at error level at startup and with a distinct message at load time that does
+  not send users off to re-download files they already have.
 
 ### Technical
 - `npm test` runs unit tests for the modules that do not depend on Zotero

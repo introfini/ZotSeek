@@ -72,6 +72,65 @@ export function registerModelsResourceSubstitution(): void {
 }
 
 /**
+ * Check that `resource://zotseek-models/` actually resolves to the models
+ * directory, rather than merely that setSubstitution() did not throw.
+ *
+ * A registration can be absent without anything having failed loudly: the
+ * startup call may have thrown and been swallowed, or the substitution may have
+ * been cleared later. Either way every downloaded model silently becomes
+ * unloadable while the bundled one keeps working, and the user first learns of
+ * it as a loader error or a 30-second worker timeout, far from the cause.
+ *
+ * Returns null when the mapping is usable, or a short reason when it is not.
+ */
+export function verifyModelsResourceSubstitution(): string | null {
+  try {
+    const resProto = Services.io
+      .getProtocolHandler('resource')
+      .QueryInterface(Components.interfaces.nsISubstitutingProtocolHandler);
+
+    // With no substitution registered this throws NS_ERROR_NOT_AVAILABLE
+    // rather than returning anything, so the catch below is the usual path for
+    // a missing mapping. The checks after it cover a registration that exists
+    // but points somewhere unusable.
+    const resolved: string = resProto.resolveURI(
+      Services.io.newURI(`resource://${RES_HOST}/probe`),
+    );
+
+    if (!resolved || resolved.startsWith('resource://')) {
+      return 'no substitution registered';
+    }
+    if (!resolved.startsWith('file://')) {
+      return `unexpected target ${resolved.split('/').slice(0, 3).join('/')}`;
+    }
+    return null;
+  } catch (e: any) {
+    return e?.message || String(e);
+  }
+}
+
+/**
+ * Make sure the mapping is in place, re-registering once if it is not.
+ *
+ * Called before loading a downloaded model rather than trusting the single
+ * startup attempt, so a mapping that never registered or was lost mid-session
+ * repairs itself instead of failing every model load for the rest of the
+ * session. Returns null when usable, or the reason it is not.
+ */
+export function ensureModelsResourceSubstitution(): string | null {
+  const first = verifyModelsResourceSubstitution();
+  if (first === null) return null;
+
+  Zotero.debug(`[ZotSeek] resource://${RES_HOST}/ not usable (${first}); re-registering`);
+  try {
+    registerModelsResourceSubstitution();
+  } catch (e: any) {
+    return e?.message || String(e);
+  }
+  return verifyModelsResourceSubstitution();
+}
+
+/**
  * Returns true when the model's primary ONNX file is present on disk.
  * A model is considered "on disk" when the ONNX file exists; individual
  * JSON config files may still be absent (404 skip) without affecting this.
