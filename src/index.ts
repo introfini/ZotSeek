@@ -358,13 +358,50 @@ class ZotSeekPlugin {
       if (devMode) {
         Z.ZotSeek = Z.ZotSeek || {};
         Z.ZotSeek._selfTest = zotseekSelfTest;
-        this.logger.info('Self-test harness mounted (devMode=true)');
+
+        // Turn on debug capture too. Zotero.debug() output is discarded unless
+        // both of these are set, so without it the harness runs but its logs --
+        // and any swallowed exception it was meant to surface -- are lost.
+        try {
+          Z.Debug.init(true);
+          Z.Debug.setStore(true);
+        } catch (e: any) {
+          this.logger.debug(`Could not enable debug capture: ${e?.message || e}`);
+        }
+
+        this.logger.info('Self-test harness mounted (devMode=true, debug capture on)');
       }
     } catch (e: any) {
       this.logger.warn(`Self-test harness failed to mount: ${e?.message || e}`);
     }
 
     this.logger.info('=== Plugin Started Successfully ===');
+    this.logInstallOrigin();
+  }
+
+  /**
+   * Log where the plugin's code was actually loaded from.
+   *
+   * An installed XPI silently overrides a dev-mode proxy file, even when Zotero
+   * is started with -purgecaches, so a rebuild appears to have no effect and
+   * nothing in the UI says why. `rootURI` tells the two apart at a glance:
+   *
+   *   file:///.../zotseek/build/     proxy file, changes take effect
+   *   jar:file:///...xpi!/           packaged XPI, the build directory is ignored
+   *
+   * Cheap enough to always emit; the alternative is remembering to ask
+   * AddonManager by hand every time something looks stale.
+   */
+  private logInstallOrigin(): void {
+    try {
+      const rootURI = this.info?.rootURI || '';
+      const mode = rootURI.startsWith('jar:')
+        ? 'packaged XPI (rebuilds of the build/ directory will NOT take effect)'
+        : 'unpackaged directory (dev proxy file)';
+      this.logger.info(`Loaded from ${mode}: ${rootURI || 'unknown'}`);
+    } catch (e: any) {
+      this.logger.debug(`Could not determine install origin: ${e?.message || e}`);
+    }
   }
 
   /**

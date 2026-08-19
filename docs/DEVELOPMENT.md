@@ -659,7 +659,27 @@ Run:
 npm run build      # Production build
 npm run build:dev  # Development build (with sourcemaps)
 npm run watch      # Watch mode for development
+npm run typecheck  # Type-check gate (see below)
 ```
+
+### Type Checking
+
+esbuild strips TypeScript types without checking them, so `npm run build`
+succeeds even when the tree has type errors. `npm run typecheck` closes that
+gap. It runs `tsc --noEmit` and compares the result against
+`scripts/typecheck-baseline.json`, a recorded list of known-bad code, failing
+only on errors that are new:
+
+```bash
+npm run typecheck              # fails (exit 1) on any error not in the baseline
+npm run typecheck -- --update  # re-record the baseline
+```
+
+Errors are matched by signature (file + error code + message) with line and
+column numbers stripped, so edits that shift lines around do not cause spurious
+failures. When a baseline error stops occurring the run still passes, but prints
+a reminder to re-record so the improvement is locked in. The list should only
+ever shrink.
 
 ---
 
@@ -779,7 +799,36 @@ For this semantic search plugin with ChromeWorker + Transformers.js, the custom 
 
 ## Testing in Zotero
 
-### Method 1: Extension Proxy File (Recommended for Development)
+### Method 0: `npm run dev:install` (does Method 1 for you)
+
+```bash
+npm run build
+# quit Zotero first: it can remove proxy files it did not create
+npm run dev:install
+open -a Zotero --args -purgecaches -jsconsole
+```
+
+`dev:install` locates the profile via `profiles.ini`, deletes any installed XPI
+with the same plugin ID, clears the extension caches, and writes the proxy file
+pointing at `build/`. Override the profile with the `ZOTERO_PROFILE` environment
+variable if you keep more than one.
+
+```bash
+npm run dev:status   # which one would Zotero load, and why
+```
+
+`dev:status` exits non-zero and says what to do when an XPI is shadowing the
+proxy file, when the plugin is not installed at all, or when the proxy points at
+a different directory. The first of those is the most common reason a rebuild
+appears to have no effect, and it is invisible from inside Zotero. The plugin
+also logs its own origin at startup, so the debug log answers the same question:
+
+```
+[ZotSeek] [INFO] Loaded from unpackaged directory (dev proxy file): file:///.../build/
+[ZotSeek] [INFO] Loaded from packaged XPI (rebuilds ... will NOT take effect): jar:file:///...
+```
+
+### Method 1: Extension Proxy File (manual equivalent)
 
 1. **Find your Zotero profile directory:**
    - macOS: `~/Library/Application Support/Zotero/Profiles/XXXXXXXX.default/`

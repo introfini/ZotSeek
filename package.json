@@ -2,12 +2,15 @@
   "name": "zotseek",
   "version": "1.19.0",
   "description": "ZotSeek - Semantic Search for Zotero using local AI embeddings",
-  "author": "José Fernandes",
+  "author": "Jos\u00e9 Fernandes",
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.js",
     "build:dev": "node scripts/build.js --dev",
+    "typecheck": "node scripts/typecheck.js",
     "watch": "node scripts/build.js --watch",
+    "dev:install": "node scripts/dev-install.js",
+    "dev:status": "node scripts/dev-install.js --status",
     "start": "npm run build && npm run start:zotero",
     "start:zotero": "open -a Zotero --args -purgecaches -ZoteroDebugText -jsconsole",
     "release": "node scripts/release.js"
