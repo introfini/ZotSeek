@@ -1,0 +1,68 @@
+# Gates that cannot be replaced by running the same commands locally:
+# checking code that is not yours (pull requests), and catching the release-day
+# rush where those commands get skipped.
+#
+# Deliberately narrow. This workflow never publishes, never tags, never creates
+# a release, and does not run on every branch. Releases stay manual, which is
+# the right default for a plugin that reaches users through auto-update.
+#
+# It cannot test what actually breaks this plugin most often: everything that
+# depends on the Zotero runtime (attached databases, the ONNX worker,
+# SpiderMonkey quirks in the esbuild bundle). That is what the in-Zotero
+# self-test harness under src/dev/ is for, and it needs a running Zotero.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push supersedes an in-flight run for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Type errors never fail the build: esbuild strips types without checking
+      # them. Compares against scripts/typecheck-baseline.json.
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # package.json, manifest.json and update.json must agree. A mismatch here
+      # fails on a user's machine after a release, not on ours.
+      - name: Release manifest consistency
+        run: npm run check:versions
+
+      - name: Build
+        run: npm run build
+
+      # The build is what Zotero actually loads, so make sure it is not empty or
+      # missing its entry points.
+      - name: Verify build output
+        run: |
+          # content/scripts/index.js is the path bootstrap.js loadSubScripts;
+          # if it is missing the plugin installs and then does nothing.
+          for f in build/manifest.json build/bootstrap.js build/prefs.js \
+                   build/content/scripts/index.js; do
+            test -s "$f" || { echo "Missing or empty: $f"; exit 1; }
+          done
+          echo "Build output present."

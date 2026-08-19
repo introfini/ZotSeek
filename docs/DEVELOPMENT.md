@@ -696,6 +696,31 @@ the `isAllowedOrigin` guard from `http-tools.ts`. Deliberately *not* covered:
 Zotero items. Mocking those would produce tests that always pass and say nothing
 about retrieval quality; that is the eval framework's job.
 
+### Continuous Integration
+
+`.github/workflows/ci.yml` runs the gates below on pull requests and on pushes
+to `main`. It is deliberately narrow: it never publishes, tags, or creates a
+release, and does not run on other branches. Releases stay manual.
+
+It cannot test what breaks this plugin most often. Attached databases, the ONNX
+worker, and the SpiderMonkey quirks of the esbuild bundle all need a running
+Zotero, which is what the self-test harness under `src/dev/` is for. CI covers
+the parts that run anywhere, plus one thing that is easy to get wrong and only
+fails on someone else's machine:
+
+```bash
+npm run check:versions
+```
+
+`package.json`, `manifest.json` and `update.json` must agree on the version, and
+`update.json` must repeat the manifest's `strict_min_version` and
+`strict_max_version` and link to the asset the release actually uploads. Each
+mismatch fails after the release rather than during it: a stale `update.json`
+version means the update is never offered, a stale `strict_max_version` leaves
+users on a newer Zotero disabled without ever receiving the fixed build, and a
+wrong `update_link` is a 404 mid-update. Worth running by hand before a release
+as well.
+
 ### Type Checking
 
 esbuild strips TypeScript types without checking them, so `npm run build`
