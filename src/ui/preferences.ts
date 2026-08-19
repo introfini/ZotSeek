@@ -477,6 +477,7 @@ class PreferencesManager {
       autoIndexDelay: Z.Prefs.get('zotseek.autoIndexDelay', true) ?? 10,
       mcpServer: Z.Prefs.get('zotseek.mcpServer.enabled', true) ?? false,
       indexScope: Z.Prefs.get('zotseek.indexScope', true) || 'user',
+      autoCompact: Z.Prefs.get('zotseek.autoCompact', true) ?? true,
     };
 
     this.logger.debug(`Loaded preferences: ${JSON.stringify(prefs)}`);
@@ -494,6 +495,15 @@ class PreferencesManager {
     this.setCheckboxValue('zotseek-pref-excludeBooks', prefs.excludeBooks);
     this.setCheckboxValue('zotseek-pref-autoIndex', prefs.autoIndex);
     this.setCheckboxValue('zotseek-pref-mcpServer', prefs.mcpServer);
+    this.setCheckboxValue('zotseek-pref-autoCompact', prefs.autoCompact);
+
+    // Automatic compaction rides on Zotero.DB.onIdle, which only exists on
+    // Zotero 10+. Disable the control rather than hide it, so the requirement
+    // in the description text has something to explain.
+    const autoCompactCheckbox = this.window?.document.getElementById('zotseek-pref-autoCompact') as any;
+    if (autoCompactCheckbox && typeof Z?.DB?.onIdle !== 'function') {
+      autoCompactCheckbox.disabled = true;
+    }
 
     this.setInputValue('zotseek-pref-autoIndexDelay', prefs.autoIndexDelay);
 
@@ -670,6 +680,15 @@ class PreferencesManager {
         const checked = excludeBooksCheckbox.checked;
         Z.Prefs.set('zotseek.excludeBooks', checked, true);
         this.logger.info(`Exclude books changed to: ${checked}`);
+      });
+    }
+
+    const autoCompactCheckbox = doc.getElementById('zotseek-pref-autoCompact') as any;
+    if (autoCompactCheckbox) {
+      autoCompactCheckbox.addEventListener('command', () => {
+        const checked = autoCompactCheckbox.checked;
+        Z.Prefs.set('zotseek.autoCompact', checked, true);
+        this.logger.info(`Automatic compaction changed to: ${checked}`);
       });
     }
 

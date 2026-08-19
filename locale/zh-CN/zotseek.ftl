@@ -32,6 +32,9 @@ zotseek-pref-refreshStats =
     .label = 刷新统计
 zotseek-pref-compactDatabase =
     .label = 压缩数据库
+zotseek-pref-autoCompact =
+    .label = Zotero 空闲时自动压缩
+zotseek-pref-autoCompactDesc = 需要 Zotero 10 或更高版本。仅在有足够可回收空间且没有索引任务进行时运行。
 zotseek-pref-indexModeMismatch = 索引模式不匹配
 zotseek-pref-indexModeMismatchDesc = 您的索引是使用{ $indexedMode }模式构建的，但当前设置为{ $currentMode }。
 zotseek-pref-indexModeMismatchAction = 点击下方"重建索引"以应用新的索引模式设置。
@@ -266,6 +269,7 @@ zotseek-indexing-selectCollection = 请先选择一个合集。
 
     （在左侧边栏中点击一个合集）
 zotseek-indexing-emptyCollection = 合集"{ $name }"没有可索引的条目。
+zotseek-indexing-emptyCollections = 选定的 { $count } 个合集没有可索引的条目。
 zotseek-indexing-updateTitle = ZotSeek - 更新文献库索引
 zotseek-indexing-updateConfirmMsg = 这将为{ $scope }中未索引的条目建立语义搜索索引。
 zotseek-indexing-scopeUser = 您的个人文献库
@@ -277,6 +281,7 @@ zotseek-resume-message = 上一次索引被中断。{ $scope }中仍有 { $count
 zotseek-resume-scopeLibrary = 您的所有文献库
 zotseek-resume-scopeUserLibrary = 您的个人文献库
 zotseek-resume-scopeCollection = "{ $name }" 收藏夹
+zotseek-resume-scopeCollections = 选定的 { $count } 个合集
 
     已索引的条目将被跳过。
 

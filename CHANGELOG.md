@@ -2,6 +2,36 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+Zotero 10 does more of its own database maintenance than earlier versions, and
+exposes hooks so plugins can take part. This release uses both, and finishes the
+multi-collection support that Zotero 10 made possible.
+
+### Added
+- Selecting several collections and choosing "Index Collection" now indexes all of
+  them, not just the first. Items appearing in more than one selected collection are
+  indexed once. Requires Zotero 10, which introduced multi-collection selection.
+- The ZotSeek database is now compacted automatically while Zotero is idle, reclaiming
+  the space that re-indexing, model switches and orphan purges leave behind. Runs only
+  when there is at least 10 MB to reclaim and no indexing is in progress. A new
+  "Compact automatically when Zotero is idle" setting under Integrations & Maintenance
+  turns it off; the manual Compact Database button is unchanged. Requires Zotero 10.
+
+### Fixed
+- The ZotSeek database is re-attached as soon as Zotero recycles its database
+  connection, rather than after the first query that fails because of it. Zotero 10
+  runs a backup and vacuum after five minutes of idle, each of which recycles the
+  connection and drops attached databases, so this happens far more often than before.
+  On Zotero 8 and 9 the previous recovery-on-demand behaviour is unchanged.
+- Indexing a collection now includes its subcollections. The crash-resume path always
+  did, so resuming an interrupted run used to index a different set of items than the
+  run that was interrupted.
+- Indexing a collection now honours the "Exclude books from indexing" preference, which
+  it previously ignored even though Index Library and automatic indexing both applied it.
+
+---
+
 ## [1.19.0] - 2026-08-12
 
 Stable release of the local inference server support introduced in 1.19.0-beta.1

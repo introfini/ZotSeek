@@ -32,6 +32,9 @@ zotseek-pref-refreshStats =
     .label = Refresh Stats
 zotseek-pref-compactDatabase =
     .label = Compact Database
+zotseek-pref-autoCompact =
+    .label = Compact automatically when Zotero is idle
+zotseek-pref-autoCompactDesc = Requires Zotero 10 or later. Runs only when there is meaningful space to reclaim and no indexing is in progress.
 zotseek-pref-indexModeMismatch = Index Mode Mismatch
 zotseek-pref-indexModeMismatchDesc = Your index was built with { $indexedMode } mode, but your current setting is { $currentMode }.
 zotseek-pref-indexModeMismatchAction = Click "Rebuild Index" below to apply your new indexing mode setting.
@@ -266,6 +269,7 @@ zotseek-indexing-selectCollection = Please select a collection first.
 
     (Click on a collection in the left sidebar)
 zotseek-indexing-emptyCollection = Collection "{ $name }" has no items to index.
+zotseek-indexing-emptyCollections = The { $count } selected collections have no items to index.
 zotseek-indexing-updateTitle = ZotSeek - Update Library Index
 zotseek-indexing-updateConfirmMsg = This will index all unindexed items in { $scope } for semantic search.
 zotseek-indexing-scopeUser = your personal library
@@ -277,6 +281,7 @@ zotseek-resume-message = A previous indexing run was interrupted. { $count } ite
 zotseek-resume-scopeLibrary = your libraries
 zotseek-resume-scopeUserLibrary = your personal library
 zotseek-resume-scopeCollection = the "{ $name }" collection
+zotseek-resume-scopeCollections = { $count } selected collections
 
     Items that are already indexed will be skipped.
 

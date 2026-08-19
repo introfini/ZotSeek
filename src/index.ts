@@ -53,6 +53,14 @@ import './dev/suites/task-37e-model-download';
 import './dev/suites/task-42a-loopback';
 import './dev/suites/task-42b-server-registry';
 import './dev/suites/task-42c-server-client';
+import './dev/suites/task-47-z10-db-hooks';
+import { collectCollectionItems } from './utils/collection-items';
+
+/**
+ * Don't bother compacting zotseek.sqlite on idle below this much reclaimable
+ * space. Mirrors the threshold the preferences button label uses.
+ */
+const IDLE_COMPACT_MIN_BYTES = 10 * 1024 * 1024;
 
 /**
  * Persisted scope of a bulk-index run, used to offer resume on next startup
@@ -61,7 +69,8 @@ import './dev/suites/task-42c-server-client';
 type BulkScope =
   | { type: 'library'; libraryId: number }
   | { type: 'all-libraries' }
-  | { type: 'collection'; libraryId: number; collectionId: number };
+  | { type: 'collection'; libraryId: number; collectionId: number }
+  | { type: 'collections'; collections: Array<{ libraryId: number; collectionId: number }> };
 
 interface PluginInfo {
   id: string;
@@ -247,6 +256,7 @@ class ZotSeekPlugin {
       'zotseek.embeddingModel': 'nomic-embed-text-v1.5',
       'zotseek.indexScope': 'user', // 'user' (My Library) or 'all' (all libraries)
       'zotseek.serverModels': '[]', // JSON array of server-backed model entries (issue #42)
+      'zotseek.autoCompact': true, // Reclaim space in zotseek.sqlite during Zotero's idle maintenance (Zotero 10+)
     };
 
     for (const [key, defaultValue] of Object.entries(defaults)) {
@@ -336,6 +346,10 @@ class ZotSeekPlugin {
       this.logger.debug(`checkAndOfferResume failed: ${e?.message || e}`);
     });
 
+    // Piggyback on Zotero's idle database maintenance to compact our own
+    // attached database (Zotero 10+; no-op on older versions).
+    this.registerIdleCompaction();
+
     // Register the item-tree index-status column.
     // Needs the vector store to be initialised — do it lazily by ensuring
     // the store is ready first, but only if the user opens it later. To keep
@@ -405,6 +419,67 @@ class ZotSeekPlugin {
   }
 
   /**
+   * Register a callback on Zotero's idle database maintenance so zotseek.sqlite
+   * gets compacted without the user having to find the button in preferences.
+   *
+   * Zotero 10 runs backup + VACUUM after 300s of idle, but its VACUUM only
+   * covers the main database -- Zotero's own source says as much, and offers
+   * onIdle so owners of ATTACHed databases can reclaim their own space in the
+   * same window. `zotseek.sqlite` fragments heavily after re-indexes, model
+   * switches and orphan purges, so this is where that space comes back.
+   *
+   * Absent before Zotero 10, so feature-detected; older versions keep the
+   * manual Compact Database button as the only path.
+   */
+  private registerIdleCompaction(): void {
+    const Z = getZotero();
+    if (typeof Z?.DB?.onIdle !== 'function') {
+      this.logger.debug('Zotero.DB.onIdle unavailable; automatic compaction disabled');
+      return;
+    }
+
+    Z.DB.onIdle(async () => {
+      try {
+        await this.runIdleCompaction();
+      } catch (e: any) {
+        // Never let this escape into Zotero's maintenance loop.
+        this.logger.error(`Idle compaction failed: ${e?.message || e}`);
+      }
+    });
+
+    this.logger.info('Registered Zotero.DB.onIdle hook for automatic compaction');
+  }
+
+  /**
+   * Decide whether an idle pass should compact, and do it if so.
+   *
+   * compactDatabase() runs DETACH -> IOUtils.move -> ATTACH, which would pull
+   * the schema out from under an in-flight indexing run, hence the guards. The
+   * size threshold matches the one the preferences button label already uses:
+   * below ~10 MB the VACUUM costs more than the space it returns.
+   */
+  private async runIdleCompaction(): Promise<void> {
+    const Z = getZotero();
+
+    if (Z?.Prefs.get('zotseek.autoCompact', true) === false) return;
+    if (this.indexing) {
+      this.logger.debug('Idle compaction skipped: indexing in progress');
+      return;
+    }
+    if (!this.vectorStore?.isReady?.()) return;
+
+    const reclaimable = Number(await (this.vectorStore as any).getReclaimableBytes?.()) || 0;
+    if (reclaimable < IDLE_COMPACT_MIN_BYTES) {
+      this.logger.debug(`Idle compaction skipped: only ${reclaimable} bytes reclaimable`);
+      return;
+    }
+
+    this.logger.info(`Idle compaction starting (${reclaimable} bytes reclaimable)`);
+    const { beforeBytes, afterBytes } = await (this.vectorStore as any).compactDatabase();
+    this.logger.info(`Idle compaction done: ${beforeBytes} -> ${afterBytes} bytes`);
+  }
+
+  /**
    * If a previous bulk-indexing run was interrupted, offer the user a chance
    * to resume it. The intent (library or collection) was persisted by
    * `indexItems` when the run started; we only ask if there are still
@@ -446,6 +521,10 @@ class ZotSeekPlugin {
         label = scope.libraryId === userLibraryID
           ? getString('resume-scopeUserLibrary')
           : getString('resume-scopeLibrary');
+      } else if (scope.type === 'collections') {
+        // Same helper as onIndexCollection, so the two can never drift.
+        items = await collectCollectionItems(this.zoteroAPI, scope.collections);
+        label = getString('resume-scopeCollections', { count: scope.collections.length });
       } else {
         items = await this.zoteroAPI.getCollectionItems(scope.collectionId, scope.libraryId);
         const collection = await Z.Collections.getAsync(scope.collectionId);
@@ -1080,34 +1159,45 @@ class ZotSeekPlugin {
     const Z = getZotero();
     if (!Z) return;
 
-    // Get the selected collection using ZoteroPane. Zotero 10 removed the
+    // Get the selected collections using ZoteroPane. Zotero 10 removed the
     // singular getter in favour of a plural one for multi-collection selection;
     // the old name still exists but throws, so feature-detect the new one and
-    // fall back for Zotero 8/9.
+    // fall back for Zotero 8/9, where only one collection can be selected.
     const ZoteroPane = Z.getActiveZoteroPane();
-    const collection = typeof ZoteroPane?.getSelectedCollections === 'function'
-      ? (ZoteroPane.getSelectedCollections() || [])[0]
-      : ZoteroPane?.getSelectedCollection();
+    const collections: any[] = typeof ZoteroPane?.getSelectedCollections === 'function'
+      ? (ZoteroPane.getSelectedCollections() || [])
+      : [ZoteroPane?.getSelectedCollection()].filter(Boolean);
 
-    if (!collection) {
+    if (collections.length === 0) {
       this.showAlert(getString('indexing-selectCollection'));
       return;
     }
 
-    const collectionName = collection.name;
-    const items = collection.getChildItems().filter((item: any) => item.isRegularItem());
+    const items = await collectCollectionItems(
+      this.zoteroAPI,
+      collections.map((c: any) => ({ libraryId: c.libraryID, collectionId: c.id })),
+    );
 
     if (items.length === 0) {
-      this.showAlert(getString('indexing-emptyCollection', { name: collectionName }));
+      this.showAlert(collections.length === 1
+        ? getString('indexing-emptyCollection', { name: collections[0].name })
+        : getString('indexing-emptyCollections', { count: collections.length }));
       return;
     }
 
-    this.logger.info(`Indexing collection "${collectionName}" (${items.length} items)`);
-    await this.indexItems(items, {
-      type: 'collection',
-      libraryId: collection.libraryID,
-      collectionId: collection.id,
-    });
+    // Keep the single-collection scope shape: it is what 1.19.0 wrote, so a
+    // pending marker stays readable across the upgrade, and it gives the
+    // resume prompt a collection name instead of a bare count.
+    const scope: BulkScope = collections.length === 1
+      ? { type: 'collection', libraryId: collections[0].libraryID, collectionId: collections[0].id }
+      : {
+        type: 'collections',
+        collections: collections.map((c: any) => ({ libraryId: c.libraryID, collectionId: c.id })),
+      };
+
+    const label = collections.map((c: any) => `"${c.name}"`).join(', ');
+    this.logger.info(`Indexing ${collections.length} collection(s) ${label} (${items.length} items)`);
+    await this.indexItems(items, scope);
   }
 
   /**

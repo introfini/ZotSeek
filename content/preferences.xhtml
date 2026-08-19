@@ -517,6 +517,15 @@
     <hbox align="center" style="margin-top: 8px;">
       <button id="zotseek-compact-db" label="Compact Database" data-l10n-id="zotseek-pref-compactDatabase" />
     </hbox>
+    <checkbox id="zotseek-pref-autoCompact"
+              label="Compact automatically when Zotero is idle"
+              data-l10n-id="zotseek-pref-autoCompact"
+              native="true"
+              checked="true"
+              style="margin-top: 8px;" />
+    <html:p data-l10n-id="zotseek-pref-autoCompactDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+      Requires Zotero 10 or later. Runs only when there is meaningful space to reclaim and no indexing is in progress.
+    </html:p>
   </html:div>
 </groupbox>
 

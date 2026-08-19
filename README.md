@@ -581,7 +581,9 @@ The interactive release script bumps the version, syncs `manifest.json` and `upd
 
 ### Index Your Library
 
-1. Right-click on a collection → **"Index Current Collection"**
+1. Right-click on a collection → **"Index Current Collection"**. Subcollections are
+   included. On Zotero 10 you can select several collections first and index them in
+   one pass; items filed in more than one of them are indexed once.
 2. Or use **"Update Library Index"** to index all items
 3. A progress window will appear showing:
    - Current item being processed
@@ -589,6 +591,14 @@ The interactive release script bumps the version, syncs `manifest.json` and `upd
    - Estimated time remaining (ETA)
    - Option to cancel at any time
 4. Indexing speed: ~3 seconds per chunk
+
+**Automatic Compaction (Zotero 10+):**
+Re-indexing, switching models and purging orphans all leave free space inside
+ZotSeek's database file. Zotero 10 runs its own database maintenance after a few
+minutes of idle, and ZotSeek reclaims its space in the same window — but only when
+there is a meaningful amount to recover and no indexing is running. Turn it off under
+**Settings → ZotSeek → Integrations & Maintenance**, where the manual **Compact
+Database** button also lives.
 
 **Crash-Resilient Indexing:**
 - Progress is saved every 25 items (checkpoint saving)

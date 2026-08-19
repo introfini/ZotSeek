@@ -126,6 +126,7 @@ export class VectorStoreSQLite {
   private logger: Logger;
   private initialized = false;
   private attached = false;
+  private onConnectRegistered = false;
   private cache: {
     data: Array<{
       itemPk: number;
@@ -237,6 +238,10 @@ export class VectorStoreSQLite {
       this.initialized = true;
       this.logger.info('SQLite store initialized successfully');
 
+      // Zotero 10 lets us learn about connection recycling instead of
+      // discovering it through a failed query (see registerReattachHook).
+      this.registerReattachHook();
+
       // Get count
       const count = await this.getCount();
       const itemCount = await this.getItemCount();
@@ -290,6 +295,57 @@ export class VectorStoreSQLite {
       this.logger.info('Database detached successfully');
     } catch (error: any) {
       this.logger.warn(`Failed to detach database: ${error?.message || error}`);
+    }
+  }
+
+  /**
+   * Ask Zotero to tell us whenever it opens a new database connection, so the
+   * ATTACH is restored immediately rather than on the next failed query.
+   *
+   * Zotero 10 runs a maintenance pass after 300s of idle -- backup, VACUUM,
+   * then `PRAGMA wal_checkpoint(TRUNCATE)` -- which recycles the connection and
+   * silently drops every ATTACHed database (issue #35). What used to be an
+   * occasional accident is now a scheduled event, so the lazy liveness check in
+   * ensureInit() is no longer enough on its own: it only protects code paths
+   * that go through ensureInit(), and only after something has already failed.
+   *
+   * `Zotero.DB.onConnect` landed in 9.0.4 and is absent on Zotero 8, which is
+   * still within our supported range, so it is feature-detected and the
+   * ensureInit() check stays as the fallback there.
+   *
+   * The callback must never throw: Zotero invokes it from inside
+   * _getConnectionAsync(), before the connection is handed out, so an escaping
+   * error would poison every subsequent reconnect. Re-entrancy is safe --
+   * _getConnectionAsync() assigns this._connection well before it runs the
+   * callbacks, so the queries below hit its early return rather than recursing.
+   */
+  private registerReattachHook(): void {
+    if (this.onConnectRegistered) return;
+    if (typeof Zotero.DB?.onConnect !== 'function') {
+      this.logger.debug('Zotero.DB.onConnect unavailable; relying on the ensureInit() liveness check');
+      return;
+    }
+
+    Zotero.DB.onConnect(() => this.recoverAttachment());
+
+    this.onConnectRegistered = true;
+    this.logger.info('Registered Zotero.DB.onConnect hook for automatic re-attach');
+  }
+
+  /**
+   * Restore the ATTACH after Zotero recycled its connection. This is what the
+   * onConnect hook calls, and it never rejects: Zotero runs it from inside
+   * _getConnectionAsync(), so an escaping error would poison every subsequent
+   * reconnect. Also the seam the dev self-test drives.
+   */
+  async recoverAttachment(): Promise<void> {
+    // A reconnect drops the ATTACH, so the `attached` flag is stale by
+    // definition -- but if we never finished init() there is nothing to restore.
+    if (!this.initialized) return;
+    try {
+      await this.reattachAfterConnectionLoss();
+    } catch (e: any) {
+      this.logger.error(`onConnect re-attach failed: ${e?.message || e}`);
     }
   }
 
