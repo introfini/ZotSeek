@@ -662,6 +662,40 @@ npm run watch      # Watch mode for development
 npm run typecheck  # Type-check gate (see below)
 ```
 
+### Unit Tests (`npm test`)
+
+Most of this plugin can only be exercised inside Zotero, which is what the
+self-test harness under `src/dev/` is for. A few modules are pure logic, and
+`chunker.ts` in particular decides what text ever reaches the embedding model,
+so a silent regression there lowers search quality without failing anything.
+Those get a sub-second feedback loop instead of a 40-second Zotero restart:
+
+```bash
+npm test              # all suites
+npm test -- chunker   # only test files whose name matches
+```
+
+Tests live in `test/`, are written in TypeScript, and import from `../src`
+directly. `scripts/test.js` bundles each one to CommonJS with esbuild (already a
+dependency) into the gitignored `.test-build/`, then runs Node's built-in test
+runner. No test framework and no new dependencies.
+
+**Import order matters.** Modules that touch the `Zotero` global while their
+body is being evaluated must be imported *after* `test/helpers/zotero-stub`,
+which installs a stub as an import side effect. A call to `installZoteroStub()`
+placed above an import runs too late, because imports are hoisted:
+
+```ts
+import './helpers/zotero-stub';                        // must come first
+import { isAllowedOrigin } from '../src/server/http-tools';
+```
+
+Currently covered: `chunker.ts`, `model-registry.ts`, `collection-items.ts`, and
+the `isAllowedOrigin` guard from `http-tools.ts`. Deliberately *not* covered:
+`search-engine.ts` and `hybrid-search.ts`, which need real embeddings and real
+Zotero items. Mocking those would produce tests that always pass and say nothing
+about retrieval quality; that is the eval framework's job.
+
 ### Type Checking
 
 esbuild strips TypeScript types without checking them, so `npm run build`
@@ -674,6 +708,12 @@ only on errors that are new:
 npm run typecheck              # fails (exit 1) on any error not in the baseline
 npm run typecheck -- --update  # re-record the baseline
 ```
+
+It checks `src/` and `test/` together via `tsconfig.test.json`, which exists
+only because the main `tsconfig.json` sets `rootDir` to `src/` for the build and
+anything outside it is a hard `TS6059`. It also exits 2 when `tsc` itself fails
+without producing file-level errors (a broken config, a crash), rather than
+mistaking "no error lines" for a clean run.
 
 Errors are matched by signature (file + error code + message) with line and
 column numbers stripped, so edits that shift lines around do not cause spurious

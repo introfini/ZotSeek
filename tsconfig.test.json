@@ -1,0 +1,12 @@
+{
+  // Type-checks the tests alongside the sources. Separate from tsconfig.json
+  // because that one sets rootDir to src/ for the build, and anything outside
+  // it is a hard TS6059 error. Never used to emit; the build is esbuild's job.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "test/**/*"]
+}

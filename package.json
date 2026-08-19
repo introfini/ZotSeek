@@ -8,6 +8,7 @@
     "build": "node scripts/build.js",
     "build:dev": "node scripts/build.js --dev",
     "typecheck": "node scripts/typecheck.js",
+    "test": "node scripts/test.js",
     "watch": "node scripts/build.js --watch",
     "dev:install": "node scripts/dev-install.js",
     "dev:status": "node scripts/dev-install.js --status",

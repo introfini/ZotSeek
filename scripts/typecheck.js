@@ -42,7 +42,7 @@ function parseErrors(stdout) {
 }
 
 function runTsc() {
-  const result = spawnSync('npx', ['tsc', '--noEmit'], {
+  const result = spawnSync('npx', ['tsc', '--noEmit', '--project', 'tsconfig.test.json'], {
     cwd: rootDir,
     encoding: 'utf8',
     shell: process.platform === 'win32',
@@ -51,7 +51,8 @@ function runTsc() {
     console.error(`Could not run tsc: ${result.error.message}`);
     process.exit(2);
   }
-  return parseErrors(`${result.stdout || ''}\n${result.stderr || ''}`);
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  return { errors: parseErrors(output), status: result.status, output };
 }
 
 function byFile(errors) {
@@ -60,7 +61,17 @@ function byFile(errors) {
   return counts;
 }
 
-const current = runTsc();
+const { errors: current, status, output } = runTsc();
+
+// tsc exits non-zero for problems that carry no file position at all -- a bad
+// tsconfig, an unreadable file, a crash. Those produce no parseable error lines,
+// so without this check the gate would report a clean run and pass. A gate that
+// can silently pass is worse than no gate.
+if (status !== 0 && current.length === 0) {
+  console.error('tsc failed without reporting any file-level errors:\n');
+  console.error(output.trim() || `(no output, exit code ${status})`);
+  process.exit(2);
+}
 
 if (shouldUpdate) {
   const baseline = {
