@@ -164,6 +164,13 @@ const result = await Zotero.ZotSeek.compactDatabase();
 
 > **Note:** This method is on `Zotero.ZotSeek` (not `Zotero.ZotSeek.api`).
 
+> **Note:** On Zotero 10 and later, compaction also runs on its own during
+> Zotero's idle database maintenance, so calling this is not the only way space
+> is reclaimed. The automatic pass is skipped unless at least 10 MB can be
+> recovered and no indexing is in progress, and users can turn it off with the
+> `zotseek.autoCompact` preference. Calling this method explicitly still works
+> regardless of that setting.
+
 ### `isReady()`
 
 Check if the embedding pipeline is loaded and ready. Useful to show loading state in your UI, but not required before calling `search()`.

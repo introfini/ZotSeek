@@ -30,6 +30,31 @@ multi-collection support that Zotero 10 made possible.
 - Indexing a collection now honours the "Exclude books from indexing" preference, which
   it previously ignored even though Index Library and automatic indexing both applied it.
 
+### Technical
+- `npm test` runs unit tests for the modules that do not depend on Zotero
+  (`chunker.ts`, `model-registry.ts`, `collection-items.ts`, and the
+  `isAllowedOrigin` guard). esbuild bundles each test to CommonJS and Node's
+  built-in runner executes them, so no test framework or new dependency is
+  involved. Modules that need the Zotero runtime stay with the in-Zotero
+  self-test harness.
+- `npm run typecheck` fails on type errors that are not in
+  `scripts/typecheck-baseline.json`, comparing by error signature rather than by
+  count so that line-shifting edits do not produce false failures. esbuild
+  strips types without checking them, so the build alone never catches these.
+- `npm run dev:install` and `npm run dev:status` set up and diagnose the
+  development proxy-file install. An installed XPI silently overrides the proxy
+  file, and `dev:status` now names that as the cause instead of leaving a
+  rebuild looking like it had no effect. The plugin also logs at startup whether
+  it loaded from a directory or from a packaged XPI.
+- `npm run check:versions` verifies that `package.json`, `manifest.json` and
+  `update.json` agree on the version and the Zotero compatibility range, and
+  that `update_link` names the asset a release actually uploads. Each of these
+  mismatches only fails after a release, on a user's machine.
+- A GitHub Actions workflow runs those checks plus the build on pull requests
+  and on pushes to `main`. It never publishes, tags, or creates releases.
+- Enabling the `zotseek.devMode` preference now also turns on Zotero's debug
+  capture, which the self-test harness output depends on.
+
 ---
 
 ## [1.19.0] - 2026-08-12

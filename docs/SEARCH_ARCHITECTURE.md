@@ -939,10 +939,13 @@ Issue #42 adds a second `runtime` to `ModelConfig` alongside the in-process Chro
 
 ## Database Schema
 
-ZotSeek stores embeddings in a separate SQLite database (`zotseek.sqlite`) attached to Zotero's main connection. The schema is normalized into two tables:
+ZotSeek stores embeddings in a separate SQLite database (`zotseek.sqlite`) attached to Zotero's main connection. The schema is normalized into three tables:
 
-- **`items`** — one row per indexed paper, keyed by an internal autoincrement `item_pk`, with metadata (title, abstract), the model identifier, indexing timestamp, content hash, and truncation/coverage fields (`was_truncated`, `pages_indexed`, `pages_total`).
-- **`chunks`** — one row per embedding chunk, referencing `item_pk`, with the chunk text, source label, base64-encoded Float32 embedding, and location metadata (page, paragraph, char offsets, bbox).
+- **`items`** — one row per indexed paper, keyed by an internal autoincrement `item_pk`, with its stable identity (`library_key`, `item_key`) and metadata (title, abstract).
+- **`chunks`** — one row per embedding chunk per model, referencing `item_pk`, with the chunk text, source label, base64-encoded Float32 embedding, and location metadata (page, paragraph, char offsets, bbox).
+- **`item_models`** — one row per (item, model), holding that pairing's indexing status: timestamp, content hash, and truncation/coverage fields (`was_truncated`, `pages_indexed`, `pages_total`).
+
+The indexing status lives on `item_models` rather than `items` because it is inherently per-model; see [Per-Model Embeddings (Schema v9)](#per-model-embeddings-schema-v9) below.
 
 ### Stable Identity (Schema v8)
 

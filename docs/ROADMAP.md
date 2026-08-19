@@ -17,13 +17,19 @@ Features that have shipped. Kept here for reference.
 | Tag-based exclusion (`zotseek-exclude`) | v1.9.0 | [#17](https://github.com/introfini/ZotSeek/issues/17) |
 | Auto-cleanup on delete/trash | v1.9.0 | — |
 | "Remove from ZotSeek Index" context menu | v1.9.0 | [#17](https://github.com/introfini/ZotSeek/issues/17) |
-| Configurable auto-index delay (debounce, 1-300s) | next | [#21](https://github.com/introfini/ZotSeek/issues/21) |
-| Pause/play and cancel during manual indexing | next | -- |
-| Resilient embedding (skip failed chunks with retry) | next | [#19](https://github.com/introfini/ZotSeek/issues/19) |
-| WebGPU detection with automatic CPU fallback | -- | [#2](https://github.com/introfini/ZotSeek/issues/2) |
-| JavaScript API on `Zotero.ZotSeek.api` (search, findSimilar, indexItems, getStats) | -- | [#13](https://github.com/introfini/ZotSeek/issues/13) |
-| Local MCP server for AI agents (`/zotseek/mcp`, opt-in, zotero:// deep links) | next | [#38](https://github.com/introfini/ZotSeek/issues/38) |
-| Native REST endpoints (`/zotseek/search`, `/similar`, `/stats`) | next | [#32](https://github.com/introfini/ZotSeek/issues/32) |
+| Configurable auto-index delay (debounce, 1-300s) | v1.10.0 | [#21](https://github.com/introfini/ZotSeek/issues/21) |
+| Pause/play and cancel during manual indexing | v1.10.0 | — |
+| Resilient embedding (skip failed chunks with retry) | v1.11.0 | [#19](https://github.com/introfini/ZotSeek/issues/19) |
+| WebGPU detection with automatic CPU fallback | v1.3.0 | [#2](https://github.com/introfini/ZotSeek/issues/2) |
+| JavaScript API on `Zotero.ZotSeek.api` (search, findSimilar, indexItems, getStats) | — | [#13](https://github.com/introfini/ZotSeek/issues/13) |
+| Local MCP server for AI agents (`/zotseek/mcp`, opt-in, zotero:// deep links) | v1.16.0 | [#38](https://github.com/introfini/ZotSeek/issues/38) |
+| Native REST endpoints (`/zotseek/search`, `/similar`, `/stats`) | v1.16.0 | [#32](https://github.com/introfini/ZotSeek/issues/32) |
+| Portable index database (stable `(library_key, item_key)` identity, schema v8) | v1.14.0 | [#18](https://github.com/introfini/ZotSeek/issues/18) |
+| Selectable local embedding models | v1.17.0 | [#37](https://github.com/introfini/ZotSeek/issues/37) |
+| Group-library indexing (opt-in via `zotseek.indexScope`) | v1.18.0 | [#41](https://github.com/introfini/ZotSeek/issues/41) |
+| Local inference server for embeddings | v1.19.0 | [#42](https://github.com/introfini/ZotSeek/issues/42) |
+| Index several selected collections at once (Zotero 10) | next | — |
+| Automatic database compaction during Zotero's idle maintenance (Zotero 10) | next | — |
 
 ## Performance & Indexing
 
@@ -34,11 +40,6 @@ WebGPU detection and CPU fallback are already in place. Actual GPU acceleration 
 
 > GitHub: [#2](https://github.com/introfini/ZotSeek/issues/2)
 
-### Portable index database
-Make `zotseek.sqlite` portable between machines/profiles by using `item_key` (synced across libraries) instead of `item_id` (local numeric ID) as the primary lookup key. This would allow users to build the index on a fast machine and copy it elsewhere.
-
-> GitHub: [#18](https://github.com/introfini/ZotSeek/issues/18)
-
 ## Search Features
 
 ### Nested boolean queries
@@ -47,7 +48,10 @@ Basic multi-query search (up to 4 fields, AND/OR) shipped in v1.7.0. Nested grou
 > GitHub: [#9](https://github.com/introfini/ZotSeek/issues/9)
 
 ### HTTP API / CLI access
-A JavaScript API exists on `Zotero.ZotSeek.api` for plugin-to-plugin use. A user requested an HTTP endpoint for CLI access and AI integration — e.g., embedding external text and querying the index from outside Zotero.
+Shipped: the opt-in local server exposes MCP (`/zotseek/mcp`) and REST
+(`/zotseek/search`, `/similar`, `/stats`) endpoints, documented in
+[MCP.md](MCP.md). Still open from the original request: embedding *external*
+text (text that is not already an item in the library) and querying with it.
 
 > GitHub: [#13](https://github.com/introfini/ZotSeek/issues/13)
 
@@ -74,8 +78,22 @@ Indexing progress pane doesn't minimize properly when Zotero is in the macOS doc
 The paragraph-based chunker has grown complex with section detection, token estimation, and page-aware splitting. Could benefit from a cleaner abstraction or configurable pipeline.
 
 ### Test coverage
-Add automated tests for core components (vector store, search engine, chunker) to catch regressions, especially around edge cases in text extraction and embedding generation.
+Partially addressed.
+
+- ✅ **Chunker** — 59 unit tests via `npm test`, validated by mutation testing
+  (widening the default token, character or chunk limits, changing the token
+  estimate, or moving the abstract threshold all fail the suite).
+- ✅ **Vector store** — covered by the in-Zotero self-test harness
+  (`src/dev/suites/`), which needs a running Zotero and so cannot run in CI.
+- ✅ **Model registry, collection resolution, loopback guard** — unit tested.
+- ❌ **Search engine and hybrid search** — deliberately not unit tested. They
+  need real embeddings and real Zotero items; mocking those produces tests that
+  always pass and say nothing about retrieval quality. Measuring that is the
+  eval framework's job.
+- ⚠️ **Retrieval quality** — no regression net. The eval framework and its
+  citation-pair dataset are not in the repository, so a change that quietly
+  degrades search results would not be caught by anything.
 
 ---
 
-*Last updated: 2026-02-20*
+*Last updated: 2026-08-19*
