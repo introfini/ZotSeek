@@ -29,6 +29,14 @@ multi-collection support that Zotero 10 made possible.
   run that was interrupted.
 - Indexing a collection now honours the "Exclude books from indexing" preference, which
   it previously ignored even though Index Library and automatic indexing both applied it.
+- Selecting a downloaded embedding model whose files are missing now fails immediately
+  with a message naming the model, its download size and where to install it, instead of
+  reporting a Transformers.js internal error about a `resource://` URL. Nothing checked
+  before starting the worker, because the download is only ever triggered from the
+  settings pane.
+- The worker initialization timeout now names the model, its size and whether it is
+  bundled or downloaded, so a report of that error can be diagnosed without asking for
+  a debug log first.
 
 ### Technical
 - `npm test` runs unit tests for the modules that do not depend on Zotero

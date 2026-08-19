@@ -5,7 +5,9 @@
  */
 
 import { Logger } from '../utils/logger';
-import { getActiveModel, getModel, ModelConfig, modelBasePath, setActiveModelId, applyPrefix } from './model-registry';
+import { getActiveModel, getModel, ModelConfig, modelBasePath, setActiveModelId, applyPrefix,
+  requiresLocalFiles, missingModelMessage } from './model-registry';
+import { isModelOnDisk } from './model-download';
 import { ServerEmbeddingClient } from './server-embedding-client';
 
 declare const ChromeWorker: any;
@@ -45,6 +47,11 @@ export class EmbeddingPipeline {
   private consecutiveRecoveries = 0;
   private static MAX_RECOVERIES_PER_EMBED = 2;
 
+  // Time allowed for the worker to report ready. Covers reading the model
+  // off disk and initialising the WASM runtime, both of which scale with
+  // model size and disk speed.
+  private static WORKER_INIT_TIMEOUT_MS = 30000;
+
   constructor() {
     this.logger = new Logger('EmbeddingPipeline');
   }
@@ -62,6 +69,15 @@ export class EmbeddingPipeline {
         this.logger.info(`Initializing server-backed embedding pipeline (${this.model.baseUrl})`);
         await this.initServerClient();  // Will throw on failure (unreachable / dimension mismatch)
       } else {
+        // Downloaded models resolve over resource://zotseek-models/. If the
+        // files are absent, Transformers.js fails with its own wording naming
+        // that URL, which does not tell the user a download is needed or where
+        // to start one. Nothing else in the load path checks, because
+        // ensureModelDownloaded() is only ever called from the preferences UI.
+        if (requiresLocalFiles(this.model) && !(await isModelOnDisk(this.model))) {
+          this.logger.error(`Model files missing for "${this.model.id}"; refusing to start the worker`);
+          throw new Error(missingModelMessage(this.model));
+        }
         this.logger.info('Initializing embedding pipeline with Transformers.js');
         await this.initWorker();  // Will throw on failure
         this.logger.info('Using Transformers.js via ChromeWorker');
@@ -91,8 +107,14 @@ export class EmbeddingPipeline {
         this.worker = new ChromeWorker(workerPath);
 
         const timeout = setTimeout(() => {
-          reject(new Error('Worker initialization timeout'));
-        }, 30000);
+          // Name the model and its size: a timeout on a 570 MB model on a slow
+          // disk means something different from one on a bundled model, and the
+          // bare message made issue #24 impossible to triage from the report.
+          reject(new Error(
+            `Worker initialization timeout after ${EmbeddingPipeline.WORKER_INIT_TIMEOUT_MS / 1000}s ` +
+            `loading "${this.model.label}" (${this.model.approxSizeMB} MB, ${this.model.bundled ? 'bundled' : 'downloaded'})`,
+          ));
+        }, EmbeddingPipeline.WORKER_INIT_TIMEOUT_MS);
 
         this.worker.onmessage = (event: any) => {
           const { type, status, jobId, error, embedding, modelId, processingTimeMs, message, level, data } = event.data;

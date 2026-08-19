@@ -126,6 +126,35 @@ export function setActiveModelId(id: string): void {
   }
 }
 
+/**
+ * Whether this model's weights must already be on disk before the embedding
+ * worker can load it.
+ *
+ * Bundled models ship inside the plugin and resolve over `chrome://`. Server
+ * models keep their weights on the server. Everything else is downloaded into
+ * the profile and resolved over `resource://zotseek-models/`, and is missing
+ * until the user downloads it from Settings.
+ */
+export function requiresLocalFiles(model: ModelConfig): boolean {
+  return model.runtime !== 'server' && !model.bundled;
+}
+
+/**
+ * Message for a model whose downloaded files are not on disk.
+ *
+ * Without this the user sees Transformers.js's own wording, which names a
+ * `resource://` URL and mentions `local_files_only`. That is accurate and
+ * completely unactionable: it does not say which model, that a download is
+ * needed, or where to start one.
+ */
+export function missingModelMessage(model: ModelConfig): string {
+  return (
+    `The "${model.label}" embedding model is selected but its files are not on this computer. ` +
+    `Open Settings, ZotSeek, Models and select it again to download it (about ${model.approxSizeMB} MB), ` +
+    `or switch back to a model that is already installed.`
+  );
+}
+
 export function modelBasePath(model: ModelConfig): string {
   return model.bundled
     ? 'chrome://zotseek/content/models/'

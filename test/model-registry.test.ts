@@ -19,6 +19,8 @@ import {
   getServerModelEntries,
   addServerModel,
   removeServerModel,
+  requiresLocalFiles,
+  missingModelMessage,
 } from '../src/core/model-registry';
 
 let zotero = installZoteroStub();
@@ -175,5 +177,39 @@ describe('server-backed models', () => {
       { ...entry, id: 'server:d', queryPrefix: undefined }, // required prefix missing
     ]));
     assert.deepEqual(getServerModelEntries().map((e) => e.id), ['server:test']);
+  });
+});
+
+
+describe('models that need their weights on disk', () => {
+  // The pipeline starts a ChromeWorker and lets Transformers.js resolve the
+  // model. When a downloaded model's files are absent, that surfaces as an
+  // internal loader string naming a resource:// URL, which tells a user
+  // nothing. These two let the pipeline fail with something actionable first.
+
+  test('bundled models never need a download', () => {
+    const bundled = MODELS.find((m) => m.bundled);
+    assert.ok(bundled, 'the registry should have at least one bundled model');
+    assert.equal(requiresLocalFiles(bundled!), false);
+  });
+
+  test('non-bundled models do need their files present', () => {
+    const downloaded = MODELS.find((m) => !m.bundled);
+    assert.ok(downloaded, 'the registry should have at least one downloadable model');
+    assert.equal(requiresLocalFiles(downloaded!), true);
+  });
+
+  test('server-backed models never need local files', () => {
+    // The weights live on the server; there is nothing to put on disk.
+    assert.equal(requiresLocalFiles({ runtime: 'server', bundled: false } as any), false);
+  });
+
+  test('the message names the model and points at the setting that fixes it', () => {
+    const model = MODELS.find((m) => !m.bundled)!;
+    const msg = missingModelMessage(model);
+    assert.ok(msg.includes(model.label), 'names the model the user chose');
+    assert.match(msg, /Settings/i, 'points somewhere the user can act');
+    assert.ok(!msg.includes('resource://'), 'does not leak the internal URL scheme');
+    assert.ok(!/local_files_only/.test(msg), 'does not leak the Transformers.js wording');
   });
 });
