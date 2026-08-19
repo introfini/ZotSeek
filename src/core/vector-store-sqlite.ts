@@ -302,12 +302,22 @@ export class VectorStoreSQLite {
    * Ask Zotero to tell us whenever it opens a new database connection, so the
    * ATTACH is restored immediately rather than on the next failed query.
    *
-   * Zotero 10 runs a maintenance pass after 300s of idle -- backup, VACUUM,
-   * then `PRAGMA wal_checkpoint(TRUNCATE)` -- which recycles the connection and
-   * silently drops every ATTACHed database (issue #35). What used to be an
-   * occasional accident is now a scheduled event, so the lazy liveness check in
-   * ensureInit() is no longer enough on its own: it only protects code paths
-   * that go through ensureInit(), and only after something has already failed.
+   * Zotero recycles its connection from several paths -- `Zotero.DB.vacuum()`
+   * when it proceeds, an offline backup, a corruption or lock recovery -- and
+   * each one silently drops every ATTACHed database (issue #35).
+   *
+   * Zotero 10 adds a periodic path: an idle observer at 300s runs backup and
+   * vacuum. Note that neither recycles the connection on most passes. The
+   * backup is taken with `online: true`, which copies through the live
+   * connection without closing it, and `vacuum()` returns early unless it has
+   * been ~14 days since the last one (`vacuum.interval`) AND the main database
+   * has at least 10% free pages (`vacuum.freelistThreshold`). So this is a
+   * roughly fortnightly event, not a five-minute one.
+   *
+   * The hook still earns its place: the lazy liveness check in ensureInit()
+   * only protects code paths that go through ensureInit(), and only after
+   * something has already failed. This restores the ATTACH before anything
+   * observes it missing, whenever a recycle happens.
    *
    * `Zotero.DB.onConnect` landed in 9.0.4 and is absent on Zotero 8, which is
    * still within our supported range, so it is feature-detected and the

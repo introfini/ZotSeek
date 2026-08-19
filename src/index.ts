@@ -422,10 +422,13 @@ class ZotSeekPlugin {
    * Register a callback on Zotero's idle database maintenance so zotseek.sqlite
    * gets compacted without the user having to find the button in preferences.
    *
-   * Zotero 10 runs backup + VACUUM after 300s of idle, but its VACUUM only
-   * covers the main database -- Zotero's own source says as much, and offers
-   * onIdle so owners of ATTACHed databases can reclaim their own space in the
-   * same window. `zotseek.sqlite` fragments heavily after re-indexes, model
+   * Zotero 10 runs backup + VACUUM after 300s of idle, and offers onIdle so
+   * owners of ATTACHed databases can reclaim their own space in the same
+   * window -- its own VACUUM covers only the main database, as its source says.
+   *
+   * The callbacks run on every idle pass, even when Zotero's own vacuum
+   * declines to run (it is throttled to roughly fortnightly). Our throttle is
+   * therefore the reclaimable-bytes threshold below, not Zotero's schedule. `zotseek.sqlite` fragments heavily after re-indexes, model
    * switches and orphan purges, so this is where that space comes back.
    *
    * Absent before Zotero 10, so feature-detected; older versions keep the

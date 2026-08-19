@@ -20,10 +20,10 @@ multi-collection support that Zotero 10 made possible.
 
 ### Fixed
 - The ZotSeek database is re-attached as soon as Zotero recycles its database
-  connection, rather than after the first query that fails because of it. Zotero 10
-  runs a backup and vacuum after five minutes of idle, each of which recycles the
-  connection and drops attached databases, so this happens far more often than before.
-  On Zotero 8 and 9 the previous recovery-on-demand behaviour is unchanged.
+  connection, rather than after the first query that fails because of it. Recycling
+  happens on several paths, including Zotero 10's periodic database vacuum, and each
+  one drops attached databases and made indexing fail part-way through on large
+  libraries. On Zotero 8 and 9 the previous recovery-on-demand behaviour is unchanged.
 - Indexing a collection now includes its subcollections. The crash-resume path always
   did, so resuming an interrupted run used to index a different set of items than the
   run that was interrupted.
