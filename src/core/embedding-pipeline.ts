@@ -209,6 +209,9 @@ export class EmbeddingPipeline {
             queryPrefix: this.model.queryPrefix,
             docPrefix: this.model.docPrefix,
             basePath: modelBasePath(this.model),
+            // Worker threads cannot read Zotero prefs; resolve the WebGPU
+            // opt-in here and ship it with the init message.
+            webgpu: this.isWebGPUEnabled(),
           },
         });
 
@@ -379,6 +382,21 @@ export class EmbeddingPipeline {
    */
   isReady(): boolean {
     return this.ready;
+  }
+
+  /**
+   * Whether the user opted into the experimental WebGPU path.
+   * Default false: on Firefox 153 (Zotero 11) WebGPU is measurably slower
+   * than the multithreaded WASM path for embedding workloads, and the GPU
+   * path additionally requires fp16 weights that are not bundled.
+   */
+  private isWebGPUEnabled(): boolean {
+    try {
+      const Z = (globalThis as any).Zotero;
+      return Z?.Prefs?.get('zotseek.webgpu.enabled', true) === true;
+    } catch {
+      return false;
+    }
   }
 
   /**

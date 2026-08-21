@@ -9,6 +9,14 @@ exposes hooks so plugins can take part. This release uses both, and finishes the
 multi-collection support that Zotero 10 made possible.
 
 ### Added
+- Experimental WebGPU support for the embedding worker, ahead of Zotero 11
+  (Firefox 153), the first Zotero whose runtime exposes WebGPU. Opt-in via the
+  hidden `zotseek.webgpu.enabled` preference and off by default: measured on
+  Zotero 11 dev builds, Firefox's current WebGPU is still slower than ZotSeek's
+  multithreaded WASM engine for this workload, and the GPU path needs fp16
+  model weights (`onnx/model_fp16.onnx`) that are not bundled. With the pref on
+  and fp16 weights present the model loads on the GPU; in every other case the
+  worker falls back to the WASM engine with a log line explaining why.
 - Selecting several collections and choosing "Index Collection" now indexes all of
   them, not just the first. Items appearing in more than one selected collection are
   indexed once. Requires Zotero 10, which introduced multi-collection selection.
@@ -19,6 +27,12 @@ multi-collection support that Zotero 10 made possible.
   turns it off; the manual Compact Database button is unchanged. Requires Zotero 10.
 
 ### Fixed
+- The embedding worker now uses all CPU cores. A build-time polyfill meant for
+  the main-thread sandbox also ran at the top of the worker bundle, where its
+  `var navigator` declaration shadowed the worker's real `navigator` object -
+  pinning WASM threading to a hardcoded 4 threads (instead of the machine's
+  actual core count) and hiding `navigator.gpu` from WebGPU detection. The
+  polyfill now augments `globalThis` without shadowing native globals.
 - The ZotSeek database is re-attached as soon as Zotero recycles its database
   connection, rather than after the first query that fails because of it. Recycling
   happens on several paths, including Zotero 10's periodic database vacuum, and each

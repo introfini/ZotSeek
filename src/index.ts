@@ -257,6 +257,12 @@ class ZotSeekPlugin {
       'zotseek.indexScope': 'user', // 'user' (My Library) or 'all' (all libraries)
       'zotseek.serverModels': '[]', // JSON array of server-backed model entries (issue #42)
       'zotseek.autoCompact': true, // Reclaim space in zotseek.sqlite during Zotero's idle maintenance (Zotero 10+)
+      // Experimental: run embeddings on the GPU via WebGPU (Zotero 11+ only).
+      // Off by default: Firefox 153's WebGPU is 6-11x SLOWER than the WASM
+      // path for this workload (measured on Apple Silicon; see issue #2).
+      // The GPU path also needs fp16 weights (onnx/model_fp16.onnx), which
+      // are not bundled.
+      'zotseek.webgpu.enabled': false,
     };
 
     for (const [key, defaultValue] of Object.entries(defaults)) {

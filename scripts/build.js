@@ -122,18 +122,10 @@ function copyTransformersV3Files() {
   }
 }
 
-// Polyfill for Transformers.js - it expects `self` to exist (browser/worker env)
-const polyfillBanner = `
-// Polyfills for Transformers.js in Zotero's privileged context
-if (typeof self === 'undefined') {
-  var self = typeof globalThis !== 'undefined' ? globalThis :
-             typeof window !== 'undefined' ? window :
-             typeof global !== 'undefined' ? global : this;
-}
-if (typeof navigator === 'undefined') {
-  var navigator = { userAgent: 'Zotero', hardwareConcurrency: 4 };
-}
-`;
+// Polyfill for Transformers.js - it expects `self` and `navigator` to exist
+// (browser/worker env). Shared module so tests can pin its semantics: it must
+// never shadow the native worker globals (see scripts/polyfill-banner.js).
+const { polyfillBanner } = require('./polyfill-banner.js');
 
 // Build configuration
 const buildOptions = {

@@ -68,10 +68,17 @@ let CURRENT: {
   queryPrefix: string;
   docPrefix: string;
   basePath: string;
+  webgpu?: boolean;    // experimental opt-in (zotseek.webgpu.enabled)
 } | null = null;
 
 const MODEL_OPTIONS = {
   quantized: true,         // Use quantized model (~130MB)
+  // Every model in the registry ships only onnx/model_quantized.onnx, which
+  // maps to dtype 'q8' in Transformers.js v3 file naming. The legacy
+  // `quantized: true` flag covers the WASM path, but the WebGPU path ignores
+  // it and defaults to fp32 (onnx/model.onnx), a file we do not ship -- so
+  // the dtype must be explicit or GPU loading always fails.
+  dtype: 'q8' as const,
   local_files_only: true,  // Only use local bundled files
 };
 
@@ -102,7 +109,9 @@ async function checkWebGPUAvailability(): Promise<boolean> {
       return false;
     }
 
-    const adapterInfo = await adapter.requestAdapterInfo?.() || {};
+    // adapter.info is the current spec; requestAdapterInfo() was removed
+    // from the spec but may still exist on older engines.
+    const adapterInfo = adapter.info || (await adapter.requestAdapterInfo?.()) || {};
     postMessage({
       type: 'log',
       level: 'info',
@@ -149,8 +158,22 @@ async function initPipeline(): Promise<void> {
   // Apply per-model base path (chrome:// for bundled, resource:// for downloaded)
   env.localModelPath = CURRENT.basePath;
 
-  // Check WebGPU availability
-  useWebGPU = await checkWebGPUAvailability();
+  // WebGPU is opt-in via zotseek.webgpu.enabled (resolved on the main
+  // thread and passed in the init message). Even where WebGPU exists
+  // (Zotero 11+ / Firefox 153), the WASM path is currently faster, so
+  // detection alone must not switch the device.
+  if (CURRENT.webgpu) {
+    useWebGPU = await checkWebGPUAvailability();
+  } else {
+    useWebGPU = false;
+    if (hasWebGPU) {
+      postMessage({
+        type: 'log',
+        level: 'info',
+        message: 'WebGPU detected but not enabled (zotseek.webgpu.enabled is off)',
+      });
+    }
+  }
 
   const deviceType = useWebGPU ? 'webgpu' : 'wasm';
   const deviceLabel = useWebGPU ? 'GPU (WebGPU)' : 'CPU (WASM)';
@@ -167,8 +190,13 @@ async function initPipeline(): Promise<void> {
   // Try WebGPU first, fall back to WASM if it fails
   if (useWebGPU) {
     try {
+      // On WebGPU, q8 weights are a trap: onnxruntime-web has no WebGPU
+      // kernels for the integer-quantized matmuls, so they fall back to CPU
+      // node-by-node with a GPU<->CPU transfer around each -- measured ~11x
+      // SLOWER than plain WASM. GPU needs fp16 weights (model_fp16.onnx).
       embeddingPipeline = await pipeline('feature-extraction', CURRENT.hfPath, {
         ...MODEL_OPTIONS,
+        dtype: 'fp16',
         device: 'webgpu',
       });
 

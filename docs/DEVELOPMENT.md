@@ -1356,7 +1356,7 @@ Transformers.js cannot run directly in Zotero's main thread because:
 
 1. **No `self` global** - Transformers.js expects browser/worker globals
 2. **No `indexedDB`** - Used for model caching
-3. **No `navigator.gpu`** - WebGPU not available
+3. **No `navigator.gpu`** - WebGPU not available (until Zotero 11 / Firefox 153; see the WebGPU section below)
 4. **Cache API crashes Zotero** - DOMCacheThread causes SIGSEGV
 5. **WASM threading issues** - SharedArrayBuffer not fully supported
 
@@ -1687,6 +1687,39 @@ These settings are **critical** for Transformers.js v3 to work in Zotero:
 - **Chunks per paper**: 1-3 (most papers fit in single chunk with 8K context!)
 - **Memory usage**: ~400MB during embedding, lower after
 - **Embedding dimensions**: 768 (Matryoshka - can truncate to 256/128)
+
+### WebGPU (Zotero 11+)
+
+Zotero 11 (Firefox 153 ESR) is the first version whose runtime exposes WebGPU,
+including inside ChromeWorkers (Firefox supports it in all contexts except
+service workers). Platform coverage follows Firefox: Windows since 141, macOS
+on Apple Silicon since 145/147, Linux and Intel Macs not yet.
+
+ZotSeek's worker detects WebGPU and can load the model with `device: 'webgpu'`,
+but the path is **opt-in** via the hidden pref `zotseek.webgpu.enabled`
+(default `false`), for two measured reasons (Zotero 11.0-dev, M-series Mac,
+24 abstract-sized chunks):
+
+| Backend | Wall time | Per chunk |
+|---------|-----------|-----------|
+| WASM (14 threads) | 11.2s | 0.47s |
+| WebGPU, q8 weights | 125.4s | 5.2s |
+| WebGPU, fp16 weights | 65.6s | 2.7s |
+
+1. **Quantized (q8) weights must never run on WebGPU.** onnxruntime-web has no
+   WebGPU kernels for the integer matmuls, so every such node falls back to
+   CPU with a GPU<->CPU transfer around it - 11x slower than plain WASM. The
+   GPU path therefore always requests fp16 weights (`onnx/model_fp16.onnx`),
+   which are not bundled; if the file is absent the worker logs a warning and
+   falls back to WASM.
+2. **Firefox's WebGPU is not competitive yet** even with fp16: a constant
+   ~2.6s per inference (uniform across calls, so not shader warm-up) against
+   ~0.4s on WASM. Mozilla says performance work is ongoing; revisit each ESR
+   bump and flip the default only when GPU actually wins.
+
+The pref is read on the main thread and shipped to the worker in the `init`
+message (workers cannot read Zotero prefs). Changing it takes effect on the
+next worker (re)initialization, i.e. after a restart or model switch.
 
 ### Zotero 8 Compatibility
 
