@@ -844,7 +844,9 @@ Each `ModelConfig` specifies:
 - `pooling` — `mean` averages all token embeddings; `cls` uses the `[CLS]` token. Must match the model's training setup.
 - `queryPrefix` / `docPrefix` — instruction strings prepended to queries and documents respectively. Nomic and E5 use these to shift the embedding towards retrieval mode; MiniLM and BGE-M3 do not need them.
 - `onnxFile` — path within the Hugging Face repo to the quantized ONNX file.
-- `bundled` — `true` only for the default model shipped inside the XPI (`chrome://zotseek/content/models/`). Non-bundled models are served from `resource://zotseek-models/` once downloaded.
+- `bundled` — `true` only for the default model shipped inside the XPI (`chrome://zotseek/content/models/`). Non-bundled models are downloaded into `zotseek-models/` inside the Zotero **profile** directory and served from `resource://zotseek-models/`.
+
+  Downloads used to go to the Zotero **data** directory, and models still there are read from `resource://zotseek-models-legacy/` so they keep working. The data directory is the one users relocate to a NAS, an external drive or a synced folder, and reading hundreds of MB of ONNX weights over a network share stalls the load outright, so weights (which are re-downloadable and are not user data) no longer follow the library.
 
 ### Partitioned Search by Model
 

@@ -22,6 +22,7 @@ import {
   requiresLocalFiles,
   missingModelMessage,
   brokenSubstitutionMessage,
+  legacyLocationMessage,
 } from '../src/core/model-registry';
 
 let zotero = installZoteroStub();
@@ -240,5 +241,41 @@ describe('models unreachable because the resource:// mapping is broken', () => {
     const msg = brokenSubstitutionMessage(model, null);
     assert.ok(msg.length > 0);
     assert.ok(!msg.includes('null') && !msg.includes('undefined'), 'no placeholder leaks into user text');
+  });
+});
+
+
+describe('where a downloaded model lives', () => {
+  // Models used to be stored under the Zotero data directory. That is the
+  // directory people relocate to a NAS or a synced folder, and reading a few
+  // hundred MB of weights over Wi-Fi to a NAS hangs the load (issue #24).
+  // New downloads go to the profile directory instead, which is local in
+  // practice, and the old location stays readable so nobody has to re-download.
+  const downloaded = () => MODELS.find((m) => !m.bundled)!;
+
+  test('bundled models resolve over chrome://, wherever they are asked about', () => {
+    const bundled = MODELS.find((m) => m.bundled)!;
+    assert.match(modelBasePath(bundled), /^chrome:\/\//);
+    assert.match(modelBasePath(bundled, 'legacy'), /^chrome:\/\//,
+      'a bundled model is never in either downloaded location');
+  });
+
+  test('the two download locations resolve to different resource:// hosts', () => {
+    const current = modelBasePath(downloaded(), 'profile');
+    const legacy = modelBasePath(downloaded(), 'legacy');
+    assert.match(current, /^resource:\/\//);
+    assert.match(legacy, /^resource:\/\//);
+    assert.notEqual(current, legacy,
+      'one substitution cannot cover both directories, so the hosts must differ');
+  });
+
+  test('omitting the location keeps the current default', () => {
+    assert.equal(modelBasePath(downloaded()), modelBasePath(downloaded(), 'profile'));
+  });
+
+  test('the legacy notice explains the risk without demanding action', () => {
+    const msg = legacyLocationMessage(downloaded());
+    assert.ok(msg.includes(downloaded().label), 'names the model');
+    assert.match(msg, /network|remote/i, 'says why the old location can be a problem');
   });
 });

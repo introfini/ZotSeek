@@ -6,8 +6,9 @@
 
 import { Logger } from '../utils/logger';
 import { getActiveModel, getModel, ModelConfig, modelBasePath, setActiveModelId, applyPrefix,
-  requiresLocalFiles, missingModelMessage, brokenSubstitutionMessage } from './model-registry';
-import { isModelOnDisk, ensureModelsResourceSubstitution } from './model-download';
+  requiresLocalFiles, missingModelMessage, brokenSubstitutionMessage, legacyLocationMessage,
+  ModelLocation } from './model-registry';
+import { findModelLocation, ensureModelsResourceSubstitution } from './model-download';
 import { ServerEmbeddingClient } from './server-embedding-client';
 
 declare const ChromeWorker: any;
@@ -52,6 +53,11 @@ export class EmbeddingPipeline {
   // model size and disk speed.
   private static WORKER_INIT_TIMEOUT_MS = 30000;
 
+  // Which of the two download directories the active model was found in, so the
+  // worker is pointed at the matching resource:// host. Null for bundled and
+  // server models, which are not in either.
+  private modelLocation: ModelLocation | null = null;
+
   constructor() {
     this.logger = new Logger('EmbeddingPipeline');
   }
@@ -79,9 +85,15 @@ export class EmbeddingPipeline {
           // one with clear advice. Only if they ARE present does an unusable
           // mapping become the explanation worth reporting -- telling someone
           // to re-download a model that is already on disk is a dead end.
-          if (!(await isModelOnDisk(this.model))) {
+          this.modelLocation = await findModelLocation(this.model);
+          if (this.modelLocation === null) {
             this.logger.error(`Model files missing for "${this.model.id}"; refusing to start the worker`);
             throw new Error(missingModelMessage(this.model));
+          }
+          if (this.modelLocation === 'legacy') {
+            // Loads fine from a local data folder, hangs from a network one
+            // (issue #24). Not fatal, so say it once rather than refuse.
+            this.logger.warn(legacyLocationMessage(this.model));
           }
           const reason = ensureModelsResourceSubstitution();
           if (reason !== null) {
@@ -208,7 +220,7 @@ export class EmbeddingPipeline {
             normalize: this.model.normalize,
             queryPrefix: this.model.queryPrefix,
             docPrefix: this.model.docPrefix,
-            basePath: modelBasePath(this.model),
+            basePath: modelBasePath(this.model, this.modelLocation ?? 'profile'),
             // Worker threads cannot read Zotero prefs; resolve the WebGPU
             // opt-in here and ship it with the init message.
             webgpu: this.isWebGPUEnabled(),

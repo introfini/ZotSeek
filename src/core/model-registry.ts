@@ -173,10 +173,41 @@ export function brokenSubstitutionMessage(model: ModelConfig, reason: string | n
   );
 }
 
-export function modelBasePath(model: ModelConfig): string {
-  return model.bundled
-    ? 'chrome://zotseek/content/models/'
+/**
+ * Which of the two download directories a model's files are in.
+ *
+ * 'profile' is the current location, inside the Zotero profile directory.
+ * 'legacy' is the Zotero data directory, where downloads landed before. That
+ * directory is the one people relocate to a NAS or a synced folder, and reading
+ * hundreds of MB of weights from a network share hangs the load (issue #24),
+ * so new downloads no longer go there. Existing ones stay readable.
+ */
+export type ModelLocation = 'profile' | 'legacy';
+
+export function modelBasePath(model: ModelConfig, location: ModelLocation = 'profile'): string {
+  if (model.bundled) return 'chrome://zotseek/content/models/';
+  // A resource:// substitution maps one host to one directory, so supporting
+  // both locations means registering a host for each.
+  return location === 'legacy'
+    ? 'resource://zotseek-models-legacy/'
     : 'resource://zotseek-models/';
+}
+
+/**
+ * Note for a model still sitting in the old data-directory location.
+ *
+ * Deliberately not an error: those files load fine when the data directory is
+ * on a local disk, which is the common case, and forcing a re-download on
+ * everyone to fix a minority's problem is the wrong trade. It says what to do
+ * for the people it does affect.
+ */
+export function legacyLocationMessage(model: ModelConfig): string {
+  return (
+    `"${model.label}" is stored in your Zotero data folder, where ZotSeek used to keep models. ` +
+    `It still works from there. If your data folder is on a network drive or remote storage, ` +
+    `remove and download the model again to move it next to Zotero's profile, which avoids the ` +
+    `stalls that reading large files over a network can cause.`
+  );
 }
 
 export function applyPrefix(text: string, kind: 'query' | 'doc', model: ModelConfig): string {

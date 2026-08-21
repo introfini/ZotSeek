@@ -51,6 +51,12 @@ multi-collection support that Zotero 10 made possible.
 - The worker initialization timeout now names the model, its size and whether it is
   bundled or downloaded, so a report of that error can be diagnosed without asking for
   a debug log first.
+- Downloadable embedding models are now stored next to Zotero's profile rather than in
+  the Zotero data folder. The data folder is the one people relocate to a NAS or a synced
+  folder, and reading model weights from a network share stalls indexing outright, which
+  showed up as "Worker initialization timeout" (#24). Models downloaded by earlier
+  versions keep working where they are; if your data folder is on network storage,
+  removing and re-downloading a model moves it somewhere local.
 - Downloaded models are reached through a `resource://` folder mapping registered once
   at startup. If that registration fails, every downloaded model becomes unloadable
   while the built-in one keeps working, and previously nothing said so. The mapping is

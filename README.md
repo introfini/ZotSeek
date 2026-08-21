@@ -462,6 +462,8 @@ The SQLite backend uses the **ATTACH DATABASE** pattern (inspired by Better BibT
 
 ZotSeek stores its embeddings in `zotseek.sqlite` inside your Zotero data directory. The file is local and is not synced by Zotero's built-in sync.
 
+> **If your Zotero data folder is on a network drive or NAS:** downloadable embedding models are kept next to Zotero's profile instead, not in the data folder, because reading a few hundred megabytes of model weights over a network share can stall indexing. Models downloaded by earlier versions still work from the old location, but if you are on network storage it is worth removing and re-downloading them from **Settings → ZotSeek → Models** so they end up local.
+
 If you use Zotero on multiple machines and want to avoid re-indexing your library on each one, you can copy the file manually:
 
 1. Quit Zotero on both machines.

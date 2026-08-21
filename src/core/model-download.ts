@@ -9,7 +9,7 @@
  * So `resource://zotseek-models/<hfPath>/<file>` resolves correctly.
  */
 
-import { ModelConfig, isAllowedHfPath } from './model-registry';
+import { ModelConfig, ModelLocation, isAllowedHfPath } from './model-registry';
 
 declare const Zotero: any;
 declare const Services: any;
@@ -19,12 +19,29 @@ declare const PathUtils: any;
 
 const HF_BASE = 'https://huggingface.co';
 const RES_HOST = 'zotseek-models';
+const RES_HOST_LEGACY = 'zotseek-models-legacy';
 
 /**
- * Absolute path to the models storage directory:
- * `<Zotero data directory>/zotseek-models`
+ * Where new model downloads are stored: `<Zotero profile directory>/zotseek-models`.
+ *
+ * The profile directory rather than the data directory, because the data
+ * directory is the one people relocate to a NAS, an external drive or a synced
+ * folder. Reading hundreds of MB of ONNX weights over Wi-Fi to a NAS hangs the
+ * load outright (issue #24), while the profile directory is local in practice.
+ * Model weights are re-downloadable and are not user data, so they do not
+ * belong wherever the library goes.
  */
 export function getModelsDir(): string {
+  return PathUtils.join(Zotero.Profile.dir, 'zotseek-models');
+}
+
+/**
+ * The previous location, `<Zotero data directory>/zotseek-models`.
+ *
+ * Still read so that existing downloads keep working; nothing is written here
+ * any more. See getModelsDir() for why it moved.
+ */
+export function getLegacyModelsDir(): string {
   return PathUtils.join(Zotero.DataDirectory.dir, 'zotseek-models');
 }
 
@@ -35,8 +52,28 @@ export function getModelsDir(): string {
  * Mirrors the hfPath layout so `resource://zotseek-models/<hfPath>/<file>`
  * resolves to the correct local file.
  */
-function modelDir(model: ModelConfig): string {
-  return PathUtils.join(getModelsDir(), ...model.hfPath.split('/'));
+function modelDir(model: ModelConfig, location: ModelLocation = 'profile'): string {
+  const root = location === 'legacy' ? getLegacyModelsDir() : getModelsDir();
+  return PathUtils.join(root, ...model.hfPath.split('/'));
+}
+
+/**
+ * Which location holds this model's weights, or null when neither does.
+ *
+ * The current location wins when both have a copy, so a model re-downloaded to
+ * the profile is used even if an old copy is still sitting in the data folder.
+ */
+export async function findModelLocation(model: ModelConfig): Promise<ModelLocation | null> {
+  for (const location of ['profile', 'legacy'] as ModelLocation[]) {
+    const onnxPath = PathUtils.join(modelDir(model, location), ...model.onnxFile.split('/'));
+    try {
+      if (await IOUtils.exists(onnxPath)) return location;
+    } catch {
+      // An unreadable path is treated as absent: this runs on the main thread
+      // and the legacy directory may be a stalled network mount.
+    }
+  }
+  return null;
 }
 
 /**
@@ -48,27 +85,31 @@ function modelDir(model: ModelConfig): string {
  * Safe to call even if the models directory does not yet exist — the substitution
  * is just a URL mapping; file access happens on demand.
  */
-export function registerModelsResourceSubstitution(): void {
-  const dir = getModelsDir();
-
-  // Build an nsIFile for the models directory path.
-  // The directory need not exist yet — initWithPath only sets the path string.
+function setSubstitutionFor(host: string, dir: string, createIfAbsent: boolean): void {
+  // The directory need not exist yet -- initWithPath only sets the path string.
   const f = Components.classes['@mozilla.org/file/local;1']
     .createInstance(Components.interfaces.nsIFile);
   f.initWithPath(dir);
-  if (!f.exists()) {
+  if (createIfAbsent && !f.exists()) {
     f.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
   }
-
-  const fileURI = Services.io.newFileURI(f);
 
   const resProto = Services.io
     .getProtocolHandler('resource')
     .QueryInterface(Components.interfaces.nsISubstitutingProtocolHandler);
 
-  resProto.setSubstitution(RES_HOST, fileURI);
+  resProto.setSubstitution(host, Services.io.newFileURI(f));
+  Zotero.debug(`[ZotSeek] resource://${host}/ -> ${dir}`);
+}
 
-  Zotero.debug(`[ZotSeek] resource://${RES_HOST}/ -> ${dir}`);
+export function registerModelsResourceSubstitution(): void {
+  setSubstitutionFor(RES_HOST, getModelsDir(), true);
+
+  // The legacy directory is mapped too, so models downloaded before the move
+  // keep loading. Never created: if it is not there, there is nothing to read,
+  // and creating a directory inside the data folder (which may be a network
+  // mount) would be both pointless and slow.
+  setSubstitutionFor(RES_HOST_LEGACY, getLegacyModelsDir(), false);
 }
 
 /**
@@ -96,6 +137,8 @@ export function verifyModelsResourceSubstitution(): string | null {
     const resolved: string = resProto.resolveURI(
       Services.io.newURI(`resource://${RES_HOST}/probe`),
     );
+    // Only the current host is required. The legacy one is best-effort: a user
+    // with no old downloads has nothing there, and that is not a fault.
 
     if (!resolved || resolved.startsWith('resource://')) {
       return 'no substitution registered';
@@ -137,12 +180,7 @@ export function ensureModelsResourceSubstitution(): string | null {
  */
 export async function isModelOnDisk(model: ModelConfig): Promise<boolean> {
   if (model.runtime === 'server') return true; // nothing on disk; the server hosts the weights
-  const onnxPath = PathUtils.join(modelDir(model), ...model.onnxFile.split('/'));
-  try {
-    return await IOUtils.exists(onnxPath);
-  } catch {
-    return false;
-  }
+  return (await findModelLocation(model)) !== null;
 }
 
 /**
@@ -248,6 +286,16 @@ export async function ensureModelDownloaded(
  * Silently succeeds if the directory is already absent.
  */
 export async function removeModelFiles(model: ModelConfig): Promise<void> {
-  const dir = modelDir(model);
-  await IOUtils.remove(dir, { recursive: true, ignoreAbsent: true });
+  // Both locations: a model downloaded before the move lives in the legacy
+  // directory, and removing only the current one would silently do nothing --
+  // which would break the "remove it and download again" advice given to
+  // people whose data folder is on a network drive.
+  for (const location of ['profile', 'legacy'] as ModelLocation[]) {
+    try {
+      await IOUtils.remove(modelDir(model, location), { recursive: true, ignoreAbsent: true });
+    } catch (e: any) {
+      // Never let an unreachable legacy directory block removing the local copy.
+      Zotero.debug(`[ZotSeek] could not remove ${location} copy of ${model.id}: ${e?.message || e}`);
+    }
+  }
 }
