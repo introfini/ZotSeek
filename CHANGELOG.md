@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.20.0] - 2026-08-21
 
 Zotero 10 does more of its own database maintenance than earlier versions, and
 exposes hooks so plugins can take part. This release uses both, and finishes the
