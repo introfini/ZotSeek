@@ -2,6 +2,16 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Technical
+- `npm run dev:status` now detects a stale plugin registration, the condition
+  that silently replaces a dev proxy install with the published XPI. Zotero
+  records the version it first read for a proxy install and never refreshes it on
+  rebuild, so once a release overtakes that number the background update check
+  installs the released XPI on top of the proxy, with no prompt, and rebuilt code
+  stops taking effect. Developer tooling only; nothing in the plugin changed.
+
 ## [1.21.0] - 2026-08-27
 
 Hybrid search returns results from two engines, and only one of them produced a

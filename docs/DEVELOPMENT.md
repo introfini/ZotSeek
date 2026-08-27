@@ -883,9 +883,31 @@ npm run dev:status   # which one would Zotero load, and why
 ```
 
 `dev:status` exits non-zero and says what to do when an XPI is shadowing the
-proxy file, when the plugin is not installed at all, or when the proxy points at
-a different directory. The first of those is the most common reason a rebuild
-appears to have no effect, and it is invisible from inside Zotero. The plugin
+proxy file, when the plugin is not installed at all, when the proxy points at a
+different directory, or when Zotero's registration for the plugin has gone
+stale. The first of those is the most common reason a rebuild appears to have no
+effect, and it is invisible from inside Zotero.
+
+The last one is how the first one happens. Zotero records the version it first
+read for a proxy install and does not refresh it when you rebuild, so once a
+release overtakes that number, `update.json` looks newer than what Zotero thinks
+it has, and the background update check installs the published XPI right on top
+of the proxy — mid-session, with no prompt:
+
+```
+STALE REGISTRATION. The proxy file is correct, but Zotero's record of
+this plugin disagrees with the build directory:
+  Zotero has -> 1.20.0
+  build is   -> 1.21.0
+```
+
+Run `dev:status` after every release, which is exactly when the published
+version overtakes the registration. `dev:install` clears it, because the
+registration lives in `extensions.json` and `addonStartup.json.lz4`, both of
+which it deletes. Note that `-purgecaches` alone does **not**: it clears
+compiled scripts, not the extension registry.
+
+The plugin
 also logs its own origin at startup, so the debug log answers the same question:
 
 ```
