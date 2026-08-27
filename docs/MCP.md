@@ -69,6 +69,8 @@ For `index_status`, `ready` is `true` when the index contains papers; the embedd
   "authors": "Vaswani et al.",
   "year": 2017,
   "score": 0.016,
+  "semanticScore": 0.763,
+  "keywordScore": 0.65,
   "source": "both",
   "matchedChunk": {
     "snippet": "The Transformer relies entirely on self-attention to compute representations...",
@@ -91,6 +93,7 @@ Notes on the shape:
 - `authors` is a formatted string for `search` results and an array of strings for `find_similar` results.
 - `matchedChunk` is `null` when no excerpt or page is available; `page` and `textSource` may be absent within it. In `hybrid` mode this is now rare: hits found only by the keyword engine are matched against the item's own chunks before the response is built, so they carry an excerpt like any other result. It stays `null` for items that match on Zotero metadata but have never been indexed by ZotSeek.
 - `score` is a relevance score (RRF score for `search`, cosine similarity for `find_similar`), rounded to three decimals. RRF scores are small by construction (typically 0.005-0.03) and only meaningful for ranking within a single result set; don't read them as percentages. Cosine scores (semantic mode, `find_similar`) range 0-1.
+- `semanticScore` and `keywordScore` are the two values behind a fused `search` result: the cosine similarity (0-1) and the normalised keyword relevance. Either is `null` when that engine did not find the item, matching `source`. Use `semanticScore` whenever you need to compare results **across** searches — pooling several query variations, applying your own threshold, or explaining to a user why a source was retrieved. `score` cannot do that: it is a rank-fusion value, so a rank-1 result from a weak query looks identical to a rank-1 result from a good one.
 
 #### `minSimilarity`
 

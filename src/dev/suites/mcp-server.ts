@@ -154,6 +154,35 @@ selfTest.register('mcp-server', async () => {
     assertTrue(Array.isArray(parseToolPayload(json).results), 'results array');
   }));
 
+  scenarios.push(await scenario('hybrid results expose both component scores (#45)', async () => {
+    // The fused RRF value only ranks within one result set, so a client pooling
+    // several queries needs the underlying cosine to compare across them.
+    const { json } = await callMcp('tools/call', {
+      name: 'search',
+      arguments: { query: 'trust in automated decisions', max_results: 5, mode: 'hybrid', min_similarity: 0 },
+    });
+    const results = parseToolPayload(json).results;
+    assertTrue(results.length > 0, 'no results to inspect');
+
+    for (const r of results) {
+      assertTrue('semanticScore' in r, `${r.itemKey} has no semanticScore field`);
+      assertTrue('keywordScore' in r, `${r.itemKey} has no keywordScore field`);
+      // Whichever leg the source names must carry a number, and a cosine is 0-1.
+      if (r.source === 'semantic' || r.source === 'both') {
+        assertTrue(
+          typeof r.semanticScore === 'number' && r.semanticScore >= 0 && r.semanticScore <= 1,
+          `${r.itemKey} (${r.source}) has semanticScore ${r.semanticScore}`
+        );
+      }
+      if (r.source === 'keyword' || r.source === 'both') {
+        assertTrue(
+          typeof r.keywordScore === 'number',
+          `${r.itemKey} (${r.source}) has keywordScore ${r.keywordScore}`
+        );
+      }
+    }
+  }));
+
   scenarios.push(await scenario('min_similarity filters results monotonically', async () => {
     const args = (min: number) => ({
       name: 'search',

@@ -21,6 +21,14 @@ number. This release makes both legs comparable.
   the MCP/REST server. Previously they had nothing citable, which on entity-like
   queries (an author surname, an acronym) could be most of the result set.
 
+### Added
+- Hybrid search results served over the MCP/REST endpoints now carry
+  `semanticScore` and `keywordScore` alongside the fused `score`. The fused value
+  is a rank-fusion number that only orders one result set, so a client running
+  several query variations and pooling the results had nothing comparable to rank
+  on, and a rank-1 hit from a weak query looked as authoritative as one from a
+  good query. Either field is `null` when that engine did not find the item.
+
 ### Technical
 - The query is embedded once per hybrid search and shared between the semantic leg
   and the new back-fill, rather than twice. On a server-backed model that is one HTTP

@@ -43,6 +43,10 @@ export interface ToolResultItem {
   authors?: string[] | string;
   year?: number;
   score: number;
+  /** Cosine similarity 0-1, or null when the semantic leg did not find the item. Hybrid results only. */
+  semanticScore?: number | null;
+  /** Normalised keyword relevance, or null when the keyword leg did not find the item. Hybrid results only. */
+  keywordScore?: number | null;
   source?: 'both' | 'semantic' | 'keyword';
   matchedChunk: MatchedChunk | null;
   links?: ResultLinks;
@@ -101,6 +105,25 @@ function prefAutoAdjustWeights(): boolean {
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+/**
+ * The two scores behind a fused hybrid result, rounded like `score` itself.
+ *
+ * The RRF value a consumer sees is only comparable inside one result set, so a
+ * client that runs several queries and pools the results has nothing to rank on
+ * (issue #45). These are: the cosine (0-1) and the normalised keyword
+ * relevance. `null` means that leg did not find the item — which is not the
+ * same fact as a score of zero, so zero is preserved.
+ */
+export function componentScores(r: {
+  semanticScore: number | null;
+  keywordScore: number | null;
+}): { semanticScore: number | null; keywordScore: number | null } {
+  return {
+    semanticScore: typeof r.semanticScore === 'number' ? round3(r.semanticScore) : null,
+    keywordScore: typeof r.keywordScore === 'number' ? round3(r.keywordScore) : null,
+  };
 }
 
 function chunkOf(r: { chunkText?: string; pageNumber?: number; textSource?: string }): MatchedChunk | null {
@@ -172,6 +195,7 @@ async function mapHybridResult(r: HybridSearchResult): Promise<ToolResultItem> {
     authors: r.creators || undefined,
     year: r.year || undefined,
     score: round3(r.rrfScore),
+    ...componentScores(r),
     source: r.source,
     matchedChunk: chunkOf(r),
     links: await buildLinks(libraryKey, r.itemKey, r.pageNumber),

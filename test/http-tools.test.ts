@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 // installs the stub as a side effect and MUST stay above the one below: import
 // hoisting means a function call here would run too late.
 import './helpers/zotero-stub';
-import { isAllowedOrigin } from '../src/server/http-tools';
+import { isAllowedOrigin, componentScores } from '../src/server/http-tools';
 
 // Only the pure guard is exercised here; the search tools themselves need a
 // real index and live in the in-Zotero suite (src/dev/suites/mcp-server.ts).
@@ -58,5 +58,36 @@ describe('isAllowedOrigin', () => {
   test('rejects non-http schemes pointing at loopback', () => {
     assert.equal(isAllowedOrigin('file://localhost'), false);
     assert.equal(isAllowedOrigin('ws://localhost:23119'), false);
+  });
+});
+
+describe('componentScores', () => {
+  test('reports both legs, rounded to three decimals', () => {
+    // A consumer merging several searches needs a comparable number; the fused
+    // RRF score is only meaningful inside one result set.
+    assert.deepEqual(
+      componentScores({ semanticScore: 0.7712345, keywordScore: 0.4204 }),
+      { semanticScore: 0.771, keywordScore: 0.42 },
+    );
+  });
+
+  test('reports null for the leg that did not contribute', () => {
+    assert.deepEqual(
+      componentScores({ semanticScore: 0.5, keywordScore: null }),
+      { semanticScore: 0.5, keywordScore: null },
+    );
+    assert.deepEqual(
+      componentScores({ semanticScore: null, keywordScore: 0.5 }),
+      { semanticScore: null, keywordScore: 0.5 },
+    );
+  });
+
+  test('keeps a genuine zero as zero, not as "did not contribute"', () => {
+    // A chunk orthogonal to the query scores 0. Reporting that as null would
+    // claim the semantic leg never saw the item, which is a different fact.
+    assert.deepEqual(
+      componentScores({ semanticScore: 0, keywordScore: 0 }),
+      { semanticScore: 0, keywordScore: 0 },
+    );
   });
 });
