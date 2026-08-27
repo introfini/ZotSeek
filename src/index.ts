@@ -56,6 +56,7 @@ import './dev/suites/task-42c-server-client';
 import './dev/suites/task-47-z10-db-hooks';
 import './dev/suites/task-44-hybrid-backfill';
 import { collectCollectionItems } from './utils/collection-items';
+import { isSearchInProgress } from './core/search-activity';
 
 /**
  * Don't bother compacting zotseek.sqlite on idle below this much reclaimable
@@ -471,7 +472,8 @@ class ZotSeekPlugin {
    * Decide whether an idle pass should compact, and do it if so.
    *
    * compactDatabase() runs DETACH -> IOUtils.move -> ATTACH, which would pull
-   * the schema out from under an in-flight indexing run, hence the guards. The
+   * the schema out from under an in-flight indexing run or search, hence the
+   * guards. The
    * size threshold matches the one the preferences button label already uses:
    * below ~10 MB the VACUUM costs more than the space it returns.
    */
@@ -481,6 +483,13 @@ class ZotSeekPlugin {
     if (Z?.Prefs.get('zotseek.autoCompact', true) === false) return;
     if (this.indexing) {
       this.logger.debug('Idle compaction skipped: indexing in progress');
+      return;
+    }
+    if (isSearchInProgress()) {
+      // The idle observer needs 300s without user input, so a human searching
+      // in the dialog cannot collide with this. An agent searching over the
+      // MCP/REST server while the user is away from the machine can.
+      this.logger.debug('Idle compaction skipped: search in progress');
       return;
     }
     if (!this.vectorStore?.isReady?.()) return;

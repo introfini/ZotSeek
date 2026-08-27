@@ -20,6 +20,13 @@ number. This release makes both legs comparable.
   show a snippet in the search dialog and give an AI agent something to quote through
   the MCP/REST server. Previously they had nothing citable, which on entity-like
   queries (an author surname, an acronym) could be most of the result set.
+- Automatic idle compaction no longer runs while a search is in flight. Compaction
+  detaches and moves `zotseek.sqlite`, and the guard covered bulk indexing only.
+  Zotero's idle maintenance needs 300 seconds without user input, so someone
+  searching in the dialog was never at risk, but an agent searching through the
+  MCP/REST server while the user is away from the machine was: the search could
+  fail once with a database error. No data was ever at risk, since compaction is
+  atomic and the database re-attaches itself.
 
 ### Added
 - Hybrid search results served over the MCP/REST endpoints now carry

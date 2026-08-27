@@ -14,6 +14,7 @@ import { EmbeddingPipeline, embeddingPipeline } from './embedding-pipeline';
 import { identityFromItem } from './identity-resolver';
 import { getActiveModelId } from './model-registry';
 import { bestChunkPerItem, ChunkMatch } from './keyword-backfill';
+import { trackSearch } from './search-activity';
 
 declare const Zotero: any;
 
@@ -131,6 +132,10 @@ export class SearchEngine {
    * Uses MaxSim aggregation: returns max similarity across all chunks per document
    */
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+    return trackSearch(() => this.searchInternal(query, options));
+  }
+
+  private async searchInternal(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
     this.logger.info(`Searching for: "${query.substring(0, 50)}..."`);
@@ -202,6 +207,14 @@ export class SearchEngine {
    * Zotero item.
    */
   async findSimilarByIdentity(
+    libraryKey: string,
+    itemKey: string,
+    options: SearchOptions = {}
+  ): Promise<SearchResult[]> {
+    return trackSearch(() => this.findSimilarByIdentityInternal(libraryKey, itemKey, options));
+  }
+
+  private async findSimilarByIdentityInternal(
     libraryKey: string,
     itemKey: string,
     options: SearchOptions = {}
@@ -781,6 +794,14 @@ export class SearchEngine {
     options: { libraryId?: number } = {}
   ): Promise<Map<number, ChunkMatch>> {
     if (itemIds.length === 0) return new Map();
+    return trackSearch(() => this.scoreItemsInternal(queryEmbedding, itemIds, options));
+  }
+
+  private async scoreItemsInternal(
+    queryEmbedding: Float32Array,
+    itemIds: number[],
+    options: { libraryId?: number }
+  ): Promise<Map<number, ChunkMatch>> {
 
     const wanted = new Set(itemIds);
     const embeddings = await this.loadCandidateEmbeddings(options.libraryId);
@@ -800,7 +821,7 @@ export class SearchEngine {
     const store = this.getStore();
     if (typeof (store as VectorStoreSQLite).getChunkTexts !== 'function') return new Map();
     try {
-      return await (store as VectorStoreSQLite).getChunkTexts(pairs);
+      return await trackSearch(() => (store as VectorStoreSQLite).getChunkTexts(pairs));
     } catch (e) {
       this.logger.debug(`fetchChunkTexts failed (non-fatal): ${e}`);
       return new Map();

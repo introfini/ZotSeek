@@ -1,5 +1,7 @@
 import { selfTest, scenario, assertTrue, assertEq } from '../self-test';
 import { collectCollectionItems } from '../../utils/collection-items';
+import { searchEngine } from '../../core/search-engine';
+import { isSearchInProgress } from '../../core/search-activity';
 
 declare const Zotero: any;
 
@@ -102,6 +104,20 @@ selfTest.register('task-47-z10-db-hooks', async () => {
       assertTrue(back.some((d: any) => d.name === 'zotseek'), 'schema was re-attached');
       const stats = await store.getStats();
       assertTrue(Number(stats.totalPapers) >= 0, 'store is queryable again');
+    }),
+
+    await scenario('a running search is visible to the idle-compaction guard', async () => {
+      // Compaction takes zotseek.sqlite through DETACH -> move -> ATTACH. The
+      // idle observer needs 300s without user input, so a human searching cannot
+      // collide with it, but an agent searching over the MCP/REST server while
+      // the user is away can. The guard reads this flag.
+      assertTrue(!isSearchInProgress(), 'a stale flag was left set before this scenario');
+
+      const pending = searchEngine.search('trust in automated decisions', { topK: 3 });
+      assertTrue(isSearchInProgress(), 'the search did not register as in progress');
+
+      await pending;
+      assertTrue(!isSearchInProgress(), 'the flag did not clear when the search finished');
     }),
 
     await scenario('ensureInit still recovers on its own (Zotero 8/9 fallback)', async () => {
