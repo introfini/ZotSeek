@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.21.0] - 2026-08-27
 
 Hybrid search returns results from two engines, and only one of them produced a
 number. This release makes both legs comparable.
