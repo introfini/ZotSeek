@@ -13,6 +13,7 @@
 
 import { selfTest, scenario, assertEq, assertTrue } from '../self-test';
 import { vectorStoreSQLite } from '../../core/vector-store-sqlite';
+import { getActiveModelId } from '../../core/model-registry';
 
 declare const Zotero: any;
 
@@ -46,12 +47,16 @@ async function pickKnownIndexedItem(): Promise<KnownItem | null> {
 
 async function pickMultiChunkItem(): Promise<KnownItem | null> {
   // Find a non-orphan item with >1 chunks
+  // Count within one model: an item holding one chunk under each of two models
+  // is not a multi-chunk item for this purpose, and picking it would make the
+  // scenario below assert nothing.
   const rows = await Zotero.DB.columnQueryAsync(
     `SELECT c.item_pk FROM ${DB}.chunks c
      INNER JOIN ${DB}.items i ON c.item_pk = i.item_pk
-     WHERE i.library_key != 'orphan'
+     WHERE i.library_key != 'orphan' AND c.model_id = ?
      GROUP BY c.item_pk HAVING COUNT(*) > 1
-     ORDER BY c.item_pk LIMIT 1`
+     ORDER BY c.item_pk LIMIT 1`,
+    [getActiveModelId()]
   );
   if (!rows || !rows.length) return null;
   const pk = Number(rows[0]);
@@ -88,10 +93,13 @@ selfTest.register('task-8-reads', async () => {
 
     await scenario('getItemChunksByIdentity returns all chunks for an item', async () => {
       assertTrue(multi, 'no multi-chunk non-orphan item available');
+      // Count under the active model only: since schema v9 the same item can
+      // hold chunks for several models, and getItemChunksByIdentity returns
+      // just the active one so find_similar never mixes dimensions.
       const expected = Number(
         await Zotero.DB.valueQueryAsync(
-          `SELECT COUNT(*) FROM ${DB}.chunks WHERE item_pk = ?`,
-          [multi!.itemPk]
+          `SELECT COUNT(*) FROM ${DB}.chunks WHERE item_pk = ? AND model_id = ?`,
+          [multi!.itemPk, getActiveModelId()]
         )
       );
       const chunks = await vectorStoreSQLite.getItemChunksByIdentity(

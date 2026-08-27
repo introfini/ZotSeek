@@ -15,6 +15,7 @@
 import { Logger } from '../utils/logger';
 import { SearchEngine, SearchResult } from './search-engine';
 import { TextSourceType } from './vector-store-sqlite';
+import { applyMinSimilarity, ChunkMatch } from './keyword-backfill';
 
 declare const Zotero: any;
 
@@ -128,9 +129,13 @@ export class HybridSearchEngine {
       return this.keywordOnlySearch(query, opts);
     }
 
+    // Embed the query once. The semantic leg needs it, and so does the keyword
+    // back-fill below; embedding twice would double the inference cost.
+    const queryEmbedding = await this.semanticSearch.embedQueryNormalized(query);
+
     // Run both searches in parallel
     const [semanticResults, keywordResults] = await Promise.all([
-      this.semanticSearchQuery(query, opts),
+      this.semanticSearchQuery(query, opts, queryEmbedding),
       this.keywordSearchQuery(query, opts),
     ]);
 
@@ -143,11 +148,104 @@ export class HybridSearchEngine {
       opts
     );
 
-    // Populate metadata for top results
-    await this.populateItemMetadata(fusedResults.slice(0, opts.finalTopK));
+    // Give the keyword-only hits the similarity and the chunk they arrived
+    // without, so the threshold below applies to the whole set instead of
+    // half of it (issue #44).
+    const backfilled = await this.backfillKeywordHits(fusedResults, queryEmbedding, opts);
 
-    // Return top K
-    return fusedResults.slice(0, opts.finalTopK);
+    const kept = applyMinSimilarity(fusedResults, opts.minSimilarity);
+    const top = kept.slice(0, opts.finalTopK);
+
+    await Promise.all([
+      this.populateItemMetadata(top),
+      this.populateBackfilledChunkText(top, backfilled),
+    ]);
+
+    return top;
+  }
+
+  /**
+   * Give keyword-only hits the similarity and location they arrived without.
+   *
+   * Zotero's quick search matches at item level, so its hits carry no chunk and
+   * no score. That left `minSimilarity` gating only the semantic leg, and left
+   * those results with nothing citable (issue #44). The item is indexed and the
+   * query is already embedded, so recovering both is a cosine over that item's
+   * own chunks, read from the cache the semantic leg just used.
+   *
+   * Runs over the whole fused set rather than the top K, because the scores it
+   * produces are what the threshold is applied to next. Items with no chunks
+   * under the active model stay unscored and are exempt from the threshold.
+   *
+   * @returns the matched chunk per item ID, for the chunk-text fetch afterwards.
+   */
+  private async backfillKeywordHits(
+    results: HybridSearchResult[],
+    queryEmbedding: Float32Array,
+    opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>> & HybridSearchOptions
+  ): Promise<Map<number, ChunkMatch>> {
+    const needing = results.filter(
+      r => r.semanticScore === null && typeof r.itemId === 'number' && r.itemId > 0
+    );
+    if (needing.length === 0) return new Map();
+
+    let matches: Map<number, ChunkMatch>;
+    try {
+      matches = await this.semanticSearch.scoreItems(
+        queryEmbedding,
+        needing.map(r => r.itemId),
+        { libraryId: opts.libraryId }
+      );
+    } catch (e) {
+      // A failed back-fill must not fail the search: results simply stay as
+      // they were before the fix.
+      this.logger.error('Keyword back-fill failed:', e);
+      return new Map();
+    }
+
+    for (const result of needing) {
+      const match = matches.get(result.itemId);
+      if (!match) continue;
+      result.semanticScore = match.similarity;
+      result.chunkIndex = match.chunkIndex;
+      if (match.textSource !== undefined) result.textSource = match.textSource;
+      if (match.pageNumber !== undefined) result.pageNumber = match.pageNumber;
+      if (match.paragraphIndex !== undefined) result.paragraphIndex = match.paragraphIndex;
+    }
+
+    this.logger.info(`Back-filled ${matches.size}/${needing.length} keyword-only hits`);
+    return matches;
+  }
+
+  /**
+   * Fetch the chunk text for back-filled results, so they have a snippet to
+   * show and an agent has something to quote.
+   *
+   * Deliberately runs after the threshold and the top-K slice: chunk text is one
+   * query per row, and only the rows actually being returned need it.
+   */
+  private async populateBackfilledChunkText(
+    results: HybridSearchResult[],
+    matches: Map<number, ChunkMatch>
+  ): Promise<void> {
+    if (matches.size === 0) return;
+
+    const pending: Array<{ result: HybridSearchResult; itemPk: number; chunkIndex: number }> = [];
+    for (const result of results) {
+      if (result.chunkText) continue;
+      const match = matches.get(result.itemId);
+      if (!match || match.itemPk === undefined) continue;
+      pending.push({ result, itemPk: match.itemPk, chunkIndex: match.chunkIndex });
+    }
+    if (pending.length === 0) return;
+
+    const texts = await this.semanticSearch.fetchChunkTexts(
+      pending.map(p => ({ itemPk: p.itemPk, chunkIndex: p.chunkIndex }))
+    );
+    for (const p of pending) {
+      const text = texts.get(`${p.itemPk}:${p.chunkIndex}`);
+      if (text) p.result.chunkText = text;
+    }
   }
 
   /**
@@ -214,7 +312,8 @@ export class HybridSearchEngine {
    */
   private async semanticSearchQuery(
     query: string,
-    opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>> & HybridSearchOptions
+    opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>> & HybridSearchOptions,
+    queryEmbedding?: Float32Array
   ): Promise<Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; chunkText?: string; pageNumber?: number; paragraphIndex?: number }>> {
     try {
       // Initialize search engine if needed
@@ -227,6 +326,7 @@ export class HybridSearchEngine {
         minSimilarity: opts.minSimilarity,
         libraryId: opts.libraryId,
         returnAllChunks: opts.returnAllChunks,
+        queryEmbedding,
       });
 
       // Drop orphan results (no resolved local itemId) — hybrid search needs a

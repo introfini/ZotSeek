@@ -89,8 +89,14 @@ Notes on the shape:
 - `source` (`"both"` | `"semantic"` | `"keyword"`) is present on `search` results only — it reports which engine found the item.
 - `libraryKey` is `"user"` or `"group:<groupID>"`, or `null` for items that can no longer be resolved locally (e.g. indexed on another machine and not present in this library); a `null` `libraryKey` also means no `links` are emitted.
 - `authors` is a formatted string for `search` results and an array of strings for `find_similar` results.
-- `matchedChunk` is `null` when no excerpt or page is available; `page` and `textSource` may be absent within it.
+- `matchedChunk` is `null` when no excerpt or page is available; `page` and `textSource` may be absent within it. In `hybrid` mode this is now rare: hits found only by the keyword engine are matched against the item's own chunks before the response is built, so they carry an excerpt like any other result. It stays `null` for items that match on Zotero metadata but have never been indexed by ZotSeek.
 - `score` is a relevance score (RRF score for `search`, cosine similarity for `find_similar`), rounded to three decimals. RRF scores are small by construction (typically 0.005-0.03) and only meaningful for ranking within a single result set; don't read them as percentages. Cosine scores (semantic mode, `find_similar`) range 0-1.
+
+#### `minSimilarity`
+
+`minSimilarity` drops every result whose similarity to the query falls below it. In `semantic` mode and in `hybrid` mode that covers the whole result set, including hits the keyword engine contributed. In `keyword` mode nothing is compared against the query vector, so the parameter has no effect there.
+
+Items that cannot be scored at all — matched on Zotero metadata but never indexed by ZotSeek — are exempt rather than dropped: there is no vector to compare, and removing them would silently discard metadata matches that hybrid search has always returned. They are recognisable by a `null` `matchedChunk`.
 
 ### Deep links
 
@@ -113,7 +119,7 @@ The same operations and result shapes are available as plain `GET` endpoints for
 
 | Endpoint | Query parameters |
 |----------|------------------|
-| `GET /zotseek/search` | `q` *(required)*, `topK`, `mode`, `granularity`, `minSimilarity` (0–1), `libraryKey` (`user` or `group:N`, omit to search all indexed libraries) |
+| `GET /zotseek/search` | `q` *(required)*, `topK`, `mode`, `granularity`, `minSimilarity` (0–1, see below), `libraryKey` (`user` or `group:N`, omit to search all indexed libraries) |
 | `GET /zotseek/similar` | `itemKey` *(required)*, `libraryKey` (`user` or `group:N`), `topK` |
 | `GET /zotseek/stats` | *(none)* |
 | `GET /zotseek/open` | `target` (`select` \| `pdf`) *(required)*, `key` *(required)*, `library` (`user` or `group:N`), `page` (pdf only) — selects the item or opens the PDF directly in Zotero and returns a confirmation page (`404` if the item isn't in this library) |

@@ -13,6 +13,7 @@ import { VectorStoreSQLite, TextSourceType } from './vector-store-sqlite';
 import { EmbeddingPipeline, embeddingPipeline } from './embedding-pipeline';
 import { identityFromItem } from './identity-resolver';
 import { getActiveModelId } from './model-registry';
+import { bestChunkPerItem, ChunkMatch } from './keyword-backfill';
 
 declare const Zotero: any;
 
@@ -44,9 +45,16 @@ export interface SearchOptions {
   libraryId?: number;
   excludeItemIds?: number[];
   returnAllChunks?: boolean;  // If true, return all matching chunks instead of MaxSim aggregation
+  /**
+   * Pre-computed, L2-normalized query vector. Lets a caller that already
+   * embedded the query (hybrid search, which reuses it to back-fill its keyword
+   * leg) skip a second inference — a whole extra HTTP round trip on a
+   * server-backed model.
+   */
+  queryEmbedding?: Float32Array;
 }
 
-const DEFAULT_OPTIONS: Required<Omit<SearchOptions, 'libraryId' | 'excludeItemIds'>> = {
+const DEFAULT_OPTIONS: Required<Omit<SearchOptions, 'libraryId' | 'excludeItemIds' | 'queryEmbedding'>> = {
   topK: 20,
   minSimilarity: 0.3,
   returnAllChunks: false,
@@ -128,85 +136,9 @@ export class SearchEngine {
     this.logger.info(`Searching for: "${query.substring(0, 50)}..."`);
     const startTime = Date.now();
 
-    // Auto-initialize pipeline if needed (supports cold-start from API)
-    if (!this.pipeline.isReady()) {
-      this.logger.info('Auto-initializing embedding pipeline for search...');
-      await this.pipeline.init();
-    }
+    const queryFloat32 = opts.queryEmbedding ?? (await this.embedQueryNormalized(query));
 
-    // Use embedQuery for search queries (applies search_query: prefix)
-    const { embedding: queryEmbedding } = await this.pipeline.embedQuery(query);
-    
-    // Convert query embedding to normalized Float32Array for fast comparison
-    const queryFloat32 = new Float32Array(queryEmbedding);
-    let queryNorm = 0;
-    for (let i = 0; i < queryFloat32.length; i++) {
-      queryNorm += queryFloat32[i] * queryFloat32[i];
-    }
-    queryNorm = Math.sqrt(queryNorm);
-    if (queryNorm > 0) {
-      for (let i = 0; i < queryFloat32.length; i++) {
-        queryFloat32[i] /= queryNorm;
-      }
-    }
-
-    // Get cached embeddings for fast search
-    const store = this.getStore();
-    let embeddings: Array<{
-      itemPk: number;
-      libraryKey: string;
-      itemKey: string;
-      itemId?: number;
-      libraryId?: number;
-      chunkIndex: number;
-      title: string;
-      textSource: TextSourceType;
-      modelId: string;
-      embedding: Float32Array;
-      pageNumber?: number;
-      paragraphIndex?: number;
-    }>;
-
-    if (opts.libraryId !== undefined) {
-      // For library-specific search, we still need to use the non-cached method
-      // Convert to the cached format
-      const paperEmbeddings = await store.getByLibrary(opts.libraryId);
-      embeddings = paperEmbeddings.map(e => {
-        const float32Embedding = new Float32Array(e.embedding);
-        let norm = 0;
-        for (let i = 0; i < float32Embedding.length; i++) {
-          norm += float32Embedding[i] * float32Embedding[i];
-        }
-        norm = Math.sqrt(norm);
-        if (norm > 0) {
-          for (let i = 0; i < float32Embedding.length; i++) {
-            float32Embedding[i] /= norm;
-          }
-        }
-        return {
-          itemPk: e.itemPk!,
-          libraryKey: e.libraryKey,
-          itemKey: e.itemKey,
-          itemId: e.itemId,
-          libraryId: e.libraryId,
-          chunkIndex: e.chunkIndex,
-          title: e.title,
-          textSource: e.textSource,
-          modelId: e.modelId,
-          embedding: float32Embedding,
-          pageNumber: e.pageNumber,
-          paragraphIndex: e.paragraphIndex,
-        };
-      });
-    } else {
-      // Use cached embeddings for global search (SQLite with in-memory cache)
-      embeddings = await (store as VectorStoreSQLite).getAllCached();
-    }
-
-    // Filter candidates to only those indexed by the currently active embedding model.
-    // This prevents dimension mismatches when the user switches models.
-    const activeModelId = getActiveModelId();
-    embeddings = embeddings.filter((e: any) => e.modelId === activeModelId);
+    let embeddings = await this.loadCandidateEmbeddings(opts.libraryId);
 
     // Filter out excluded items (by resolved local itemId; orphans are never excluded here)
     if (opts.excludeItemIds && opts.excludeItemIds.length > 0) {
@@ -735,6 +667,144 @@ export class SearchEngine {
     }
 
     return results;
+  }
+
+  /**
+   * Load every chunk vector eligible for scoring, L2-normalized and restricted
+   * to the active embedding model (mixing models would compare vectors of
+   * different dimensions).
+   *
+   * Global searches read the in-memory cache; a library-scoped search reads
+   * that library's rows, which the cache does not partition.
+   */
+  private async loadCandidateEmbeddings(libraryId?: number): Promise<Array<{
+    itemPk: number;
+    libraryKey: string;
+    itemKey: string;
+    itemId?: number;
+    libraryId?: number;
+    chunkIndex: number;
+    title: string;
+    textSource: TextSourceType;
+    modelId: string;
+    embedding: Float32Array;
+    pageNumber?: number;
+    paragraphIndex?: number;
+  }>> {
+    const store = this.getStore();
+    let embeddings;
+
+    if (libraryId !== undefined) {
+      // For library-specific search, we still need to use the non-cached method
+      // Convert to the cached format
+      const paperEmbeddings = await store.getByLibrary(libraryId);
+      embeddings = paperEmbeddings.map(e => {
+        const float32Embedding = new Float32Array(e.embedding);
+        let norm = 0;
+        for (let i = 0; i < float32Embedding.length; i++) {
+          norm += float32Embedding[i] * float32Embedding[i];
+        }
+        norm = Math.sqrt(norm);
+        if (norm > 0) {
+          for (let i = 0; i < float32Embedding.length; i++) {
+            float32Embedding[i] /= norm;
+          }
+        }
+        return {
+          itemPk: e.itemPk!,
+          libraryKey: e.libraryKey,
+          itemKey: e.itemKey,
+          itemId: e.itemId,
+          libraryId: e.libraryId,
+          chunkIndex: e.chunkIndex,
+          title: e.title,
+          textSource: e.textSource,
+          modelId: e.modelId,
+          embedding: float32Embedding,
+          pageNumber: e.pageNumber,
+          paragraphIndex: e.paragraphIndex,
+        };
+      });
+    } else {
+      // Use cached embeddings for global search (SQLite with in-memory cache)
+      embeddings = await (store as VectorStoreSQLite).getAllCached();
+    }
+
+    // Filter candidates to only those indexed by the currently active embedding model.
+    // This prevents dimension mismatches when the user switches models.
+    const activeModelId = getActiveModelId();
+    return embeddings.filter((e: any) => e.modelId === activeModelId);
+  }
+
+  /**
+   * Embed a search query and return it L2-normalized, so a dot product against
+   * a stored chunk vector is the cosine similarity.
+   */
+  async embedQueryNormalized(query: string): Promise<Float32Array> {
+    // Auto-initialize pipeline if needed (supports cold-start from API)
+    if (!this.pipeline.isReady()) {
+      this.logger.info('Auto-initializing embedding pipeline for search...');
+      await this.pipeline.init();
+    }
+
+    // Use embedQuery for search queries (applies search_query: prefix)
+    const { embedding } = await this.pipeline.embedQuery(query);
+
+    const vector = new Float32Array(embedding);
+    let norm = 0;
+    for (let i = 0; i < vector.length; i++) {
+      norm += vector[i] * vector[i];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < vector.length; i++) {
+        vector[i] /= norm;
+      }
+    }
+    return vector;
+  }
+
+  /**
+   * Score a specific set of items against an already-embedded query, returning
+   * each item's closest chunk (MaxSim). No threshold is applied: the caller
+   * decides what to do with a low score, and an item missing from the result
+   * means it has no chunks under the active model at all.
+   *
+   * This exists for hybrid search's keyword leg, whose hits arrive with no
+   * vector attached (issue #44). It reads the same in-memory embedding cache
+   * the semantic leg used, so it costs a dot product per chunk of the requested
+   * items and touches neither the model nor the database.
+   */
+  async scoreItems(
+    queryEmbedding: Float32Array,
+    itemIds: number[],
+    options: { libraryId?: number } = {}
+  ): Promise<Map<number, ChunkMatch>> {
+    if (itemIds.length === 0) return new Map();
+
+    const wanted = new Set(itemIds);
+    const embeddings = await this.loadCandidateEmbeddings(options.libraryId);
+    const candidates = embeddings.filter(e => e.itemId !== undefined && wanted.has(e.itemId));
+
+    return bestChunkPerItem(queryEmbedding, candidates, wanted);
+  }
+
+  /**
+   * Batch-fetch chunk texts by (itemPk, chunkIndex). Best-effort: a store that
+   * cannot serve them yields an empty map rather than failing the search.
+   */
+  async fetchChunkTexts(
+    pairs: Array<{ itemPk: number; chunkIndex: number }>
+  ): Promise<Map<string, string>> {
+    if (pairs.length === 0) return new Map();
+    const store = this.getStore();
+    if (typeof (store as VectorStoreSQLite).getChunkTexts !== 'function') return new Map();
+    try {
+      return await (store as VectorStoreSQLite).getChunkTexts(pairs);
+    } catch (e) {
+      this.logger.debug(`fetchChunkTexts failed (non-fatal): ${e}`);
+      return new Map();
+    }
   }
 
   /**

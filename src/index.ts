@@ -54,6 +54,7 @@ import './dev/suites/task-42a-loopback';
 import './dev/suites/task-42b-server-registry';
 import './dev/suites/task-42c-server-client';
 import './dev/suites/task-47-z10-db-hooks';
+import './dev/suites/task-44-hybrid-backfill';
 import { collectCollectionItems } from './utils/collection-items';
 
 /**

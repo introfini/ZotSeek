@@ -2,6 +2,34 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+Hybrid search returns results from two engines, and only one of them produced a
+number. This release makes both legs comparable.
+
+### Fixed
+- `minSimilarity` now filters the whole of a hybrid search, not just its semantic
+  half. Results found only by the keyword engine used to arrive with no similarity
+  at all, so no threshold could ever exclude them: raising the setting removed the
+  semantically-grounded results and kept the rest, which is the opposite of what it
+  promises. Those results are now matched against the item's own chunks first, so
+  every indexed hit carries a real score and the threshold applies uniformly. Items
+  that ZotSeek has never indexed cannot be scored and stay exempt, so metadata
+  matches are not silently dropped.
+- Keyword-only hits now carry the matched passage, its page and its section, so they
+  show a snippet in the search dialog and give an AI agent something to quote through
+  the MCP/REST server. Previously they had nothing citable, which on entity-like
+  queries (an author surname, an acronym) could be most of the result set.
+
+### Technical
+- The query is embedded once per hybrid search and shared between the semantic leg
+  and the new back-fill, rather than twice. On a server-backed model that is one HTTP
+  round trip saved per search.
+- New `src/core/keyword-backfill.ts` holds the scoring and threshold logic as pure
+  functions, unit-tested in Node; `SearchEngine` gained `embedQueryNormalized()`,
+  `scoreItems()` and `fetchChunkTexts()`, and its candidate loading moved into a
+  reusable `loadCandidateEmbeddings()`.
+
 ## [1.20.0] - 2026-08-21
 
 Zotero 10 does more of its own database maintenance than earlier versions, and
