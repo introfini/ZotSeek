@@ -4,6 +4,14 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 
 ## [Unreleased]
 
+### Fixed
+- On macOS, the indexing progress window now hides when the main Zotero window is
+  minimized and reappears when it is restored (#14). Zotero 10 stopped the popup
+  from floating over every application, but on macOS it still lingered on screen
+  after minimizing Zotero, because Firefox's Cocoa widget ignores the `dependent`
+  window feature for top-level windows. ZotSeek now mirrors the main window's
+  minimize/restore onto the popup itself.
+
 ### Technical
 - `npm run dev:status` now detects a stale plugin registration, the condition
   that silently replaces a dev proxy install with the published XPI. Zotero

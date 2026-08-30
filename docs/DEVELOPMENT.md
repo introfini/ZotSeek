@@ -3292,6 +3292,8 @@ progress.complete('Done!', true);  // auto-close after 4s
 
 **Best practices:** Always support cancellation for ops > 5s, show ETA, don't auto-close on errors.
 
+**macOS minimize behavior:** the popup does not follow the main window's minimize on macOS. Firefox's Cocoa widget ignores the `dependent` window feature for top-level windows (Bugzilla [385714](https://bugzilla.mozilla.org/show_bug.cgi?id=385714)), so a popup left alone lingers on screen over other applications. `StableProgressWindow` compensates by attaching `src/utils/minimize-follower.ts`, which listens for the main window's `sizemodechange` and hides/shows the popup through `nsIBaseWindow.visibility`. Caveat when touching that code: the `visibility` getter does not read back what the setter wrote, so only ever write it, and verify hiding externally (the OS-level window list, not Gecko state).
+
 🔗 [ProgressWindowHelper API](https://windingwind.github.io/zotero-plugin-toolkit/reference/Class.ProgressWindowHelper.html)
 
 ### 19. VirtualizedTableHelper: Native Zotero Tables

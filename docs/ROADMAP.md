@@ -68,7 +68,7 @@ ZotSeek's own UI only has English strings — this is expected. However, a user 
 > GitHub: [#16](https://github.com/introfini/ZotSeek/issues/16)
 
 ### macOS dock minimization
-Indexing progress pane doesn't minimize properly when Zotero is in the macOS dock.
+Fixed, ships in the next release. Zotero 10 stopped the progress popup from floating over other applications, but on macOS it still lingered on screen when Zotero was minimized, because Firefox's Cocoa widget ignores the `dependent` window feature for top-level windows (Bugzilla [385714](https://bugzilla.mozilla.org/show_bug.cgi?id=385714), unfixed since 2007). ZotSeek now mirrors the main window's minimize/restore onto the popup itself (`src/utils/minimize-follower.ts`).
 
 > GitHub: [#14](https://github.com/introfini/ZotSeek/issues/14)
 
@@ -80,9 +80,10 @@ The paragraph-based chunker has grown complex with section detection, token esti
 ### Test coverage
 Partially addressed.
 
-- ✅ **Chunker** — 59 unit tests via `npm test`, validated by mutation testing
-  (widening the default token, character or chunk limits, changing the token
-  estimate, or moving the abstract threshold all fail the suite).
+- ✅ **Chunker** — 25 unit tests via `npm test` (102 across the whole suite),
+  validated by mutation testing (widening the default token, character or chunk
+  limits, changing the token estimate, or moving the abstract threshold all
+  fail the suite).
 - ✅ **Vector store** — covered by the in-Zotero self-test harness
   (`src/dev/suites/`), which needs a running Zotero and so cannot run in CI.
 - ✅ **Model registry, collection resolution, loopback guard** — unit tested.
@@ -96,4 +97,4 @@ Partially addressed.
 
 ---
 
-*Last updated: 2026-08-19*
+*Last updated: 2026-08-30*

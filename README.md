@@ -616,6 +616,7 @@ Database** button also lives.
 - ⏱️ ETA countdown
 - ⏸ Pause/resume button (pauses at batch boundaries, all progress saved)
 - ✕ Cancel button (shows quiet notification, no error alert)
+- 🪟 Hides while Zotero is minimized and reappears on restore (macOS)
 
 ### Find Similar Documents
 

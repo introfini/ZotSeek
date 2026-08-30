@@ -5,8 +5,25 @@
 
 import { ProgressWindowHelper } from 'zotero-plugin-toolkit';
 import { Logger } from './logger';
+import { attachMinimizeFollower } from './minimize-follower';
 
 declare const Services: any;
+
+/**
+ * Hide or show a chrome window without closing it, via nsIBaseWindow.
+ * Note: the visibility getter does not read back the value set here, so
+ * callers must track the intended state themselves and only ever write.
+ */
+function setChromeWindowVisibility(win: any, visible: boolean): void {
+  try {
+    const ci =
+      win.Ci ?? (globalThis as any).Ci ?? (globalThis as any).Components?.interfaces;
+    const baseWin = win.docShell?.treeOwner?.QueryInterface?.(ci.nsIBaseWindow);
+    if (baseWin) baseWin.visibility = visible;
+  } catch {
+    // The popup may be mid-teardown; losing one visibility toggle is harmless
+  }
+}
 
 // Set default icon for all progress windows
 ProgressWindowHelper.setIconURI(
@@ -50,6 +67,9 @@ export class StableProgressWindow {
   private checkpointTexts: string[] = [];
   private checkpointStartIndex: number = -1; // Index of first checkpoint line in toolkit's lines array
   private checkpointLineCount = 0; // Lines actually created (capped at MAX_CHECKPOINT_LINES)
+
+  // Detach function for the macOS minimize follower (null when not attached)
+  private detachMinimizeFollower: (() => void) | null = null;
   
   constructor(options: StableProgressOptions) {
     this.logger = new Logger('StableProgress');
@@ -88,6 +108,17 @@ export class StableProgressWindow {
         mainWindow.setTimeout(doInitialResize, 100);
       } else if (typeof setTimeout !== 'undefined') {
         setTimeout(doInitialResize, 100);
+      }
+
+      // On macOS the popup does not follow the main window's minimize (the
+      // `dependent` window feature is a no-op for top-level windows in the
+      // Cocoa widget), so mirror minimize/restore onto it ourselves
+      if (Z?.isMac && mainWindow) {
+        this.detachMinimizeFollower = attachMinimizeFollower({
+          mainWindow,
+          findPopupWindow: () => this.findProgressWindow(),
+          setPopupVisible: setChromeWindowVisibility,
+        });
       }
 
       this.logger.debug(`Progress window created: ${options.title}`);
@@ -280,6 +311,8 @@ export class StableProgressWindow {
    */
   close(): void {
     try {
+      this.detachMinimizeFollower?.();
+      this.detachMinimizeFollower = null;
       if (this.progressWindow) {
         this.progressWindow.close();
         this.logger.debug('Progress window closed');
