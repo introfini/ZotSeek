@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.21.1] - 2026-08-30
 
 ### Fixed
 - On macOS, the indexing progress window now hides when the main Zotero window is
