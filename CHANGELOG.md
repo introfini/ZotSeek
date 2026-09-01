@@ -2,6 +2,24 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Indexing progress windows no longer pollute each other (#49). Starting a new
+  indexing run while a previous run's popup was still on screen made the new run
+  adopt the old window: it resized it, re-anchored it, and injected an extra
+  pair of pause/cancel buttons into it on every run. The duplicated buttons did
+  nothing when clicked, or worse, silently cancelled the run actually in
+  progress. Each run now positively identifies its own popup instead of
+  guessing by window title.
+- The progress popup now always closes after a completed run. Zotero cancels
+  its close timer when the mouse touches the popup and re-arms it only after a
+  fragile screen-coordinate check, which could leave the "Indexing completed
+  successfully!" window on screen indefinitely. ZotSeek now schedules a backup
+  close from the main window that cannot be cancelled by hovering.
+- The pause/cancel buttons are removed from the popup once a run completes;
+  they only apply while indexing is running.
+
 ## [1.21.1] - 2026-08-30
 
 ### Fixed

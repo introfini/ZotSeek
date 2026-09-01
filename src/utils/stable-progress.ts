@@ -6,8 +6,30 @@
 import { ProgressWindowHelper } from 'zotero-plugin-toolkit';
 import { Logger } from './logger';
 import { attachMinimizeFollower } from './minimize-follower';
+import { pickOwnPopupWindow, removeInjectedControls } from './progress-window-claim';
 
-declare const Services: any;
+// Popup windows already claimed by a StableProgressWindow instance. A claim
+// retry must never adopt a sibling instance's popup (issue #49).
+const claimedPopupWindows = new WeakSet<object>();
+
+function enumerateWindows(Svc: any): any[] {
+  const wins: any[] = [];
+  const en = Svc.wm.getEnumerator(null);
+  while (en.hasMoreElements()) wins.push(en.getNext());
+  return wins;
+}
+
+// A window can be our popup while it is still loading (about:blank) or once
+// it has loaded progressWindow.xhtml. Anything else is foreign.
+function canBeProgressPopup(win: any): boolean {
+  try {
+    const href = win.location?.href;
+    return href === 'about:blank'
+      || (typeof href === 'string' && href.includes('progressWindow.xhtml'));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Hide or show a chrome window without closing it, via nsIBaseWindow.
@@ -70,29 +92,54 @@ export class StableProgressWindow {
 
   // Detach function for the macOS minimize follower (null when not attached)
   private detachMinimizeFollower: (() => void) | null = null;
-  
+
+  // Windows that existed before show() opened our popup; the popup is the one
+  // window not in this set (issue #49)
+  private preShowWindows: WeakSet<object> | null = null;
+  // Once our claimed popup is gone, never claim another window
+  private popupLost = false;
+  // Set by complete(); blocks pause/cancel injection after the run is over
+  private completed = false;
+  // Fallback close timer living on the main window, immune to the popup's
+  // own mouseover-cancelled timer (issue #49)
+  private fallbackCloseWin: any = null;
+  private fallbackCloseId: any = null;
+
   constructor(options: StableProgressOptions) {
     this.logger = new Logger('StableProgress');
     this.title = options.title;
     this.cancelCallback = options.cancelCallback;
     this.startTime = Date.now();
-    
+
     try {
+      // Snapshot the open windows so the popup created by show() below can be
+      // positively identified as the one window missing from this set
+      const Svc = this.getServices();
+      if (Svc?.wm) {
+        this.preShowWindows = new WeakSet();
+        for (const w of enumerateWindows(Svc)) this.preShowWindows.add(w);
+      }
+
       // Create the progress window with toolkit
       this.progressWindow = new ProgressWindowHelper(options.title, {
         closeOnClick: options.closeOnClick ?? false,
         closeTime: -1, // Don't auto-close
       });
-      
+
       // Create initial progress line
       this.currentLine = this.progressWindow.createLine({
         text: 'Initializing...',
         type: 'default',
         progress: 0,
       });
-      
+
       // Show the window
       this.progressWindow.show();
+
+      // Claim our popup in the same tick as show(): openDialog registers the
+      // window in the window mediator synchronously, so the enumeration diff
+      // against the snapshot is exactly our popup and nothing else
+      this.findProgressWindow();
 
       // Resize the window after it loads
       // Must use setTimeout because the window isn't ready immediately after show()
@@ -257,8 +304,12 @@ export class StableProgressWindow {
    */
   complete(message?: string, autoClose = true): void {
     if (this.cancelled) return;
-    
+
     try {
+      // The run is over: pause/cancel no longer apply
+      this.completed = true;
+      this.removeControls();
+
       if (this.progressWindow) {
         // Update to success state
         this.progressWindow.changeLine({
@@ -271,6 +322,10 @@ export class StableProgressWindow {
         // Auto-close after delay (15 seconds to allow reading stats)
         if (autoClose) {
           this.progressWindow.startCloseTimer(15000);
+          // Zotero cancels that timer on mouseover and only re-arms it after
+          // a fragile mouseout coordinate check (issue #49), so force the
+          // close from the main window's event loop as well
+          this.scheduleFallbackClose(16000);
         }
       } else {
         this.logger.info(`Complete: ${message || 'Done'}`);
@@ -297,6 +352,7 @@ export class StableProgressWindow {
         // Keep error visible longer
         if (autoClose) {
           this.progressWindow.startCloseTimer(8000);
+          this.scheduleFallbackClose(9000);
         }
       } else {
         this.logger.error(`Error shown: ${message}`);
@@ -311,6 +367,7 @@ export class StableProgressWindow {
    */
   close(): void {
     try {
+      this.clearFallbackClose();
       this.detachMinimizeFollower?.();
       this.detachMinimizeFollower = null;
       if (this.progressWindow) {
@@ -419,9 +476,13 @@ export class StableProgressWindow {
 
   /**
    * Find the progress window belonging to this instance.
-   * Returns the most recently created 'Progress' window (last in the
-   * window manager enumeration) to avoid targeting stale popups left
-   * over from previous operations.
+   *
+   * The window is claimed once, by diffing the window enumeration against
+   * the pre-show() snapshot; matching by the 'Progress' title is forbidden,
+   * because every Zotero.ProgressWindow popup carries that title and a title
+   * match adopts stale popups from earlier runs (issue #49: duplicate dead
+   * pause/cancel buttons, the wrong window resized). Once the claimed popup
+   * is gone this instance has no window, ever.
    */
   private findProgressWindow(): any {
     // Validate cached reference is still open
@@ -433,23 +494,24 @@ export class StableProgressWindow {
       }
       this.progressWin = null;
       this.pauseButton = null; // Button was in the old window
+      this.popupLost = true;
     }
+    if (this.popupLost) return null;
 
     try {
       const Svc = this.getServices();
-      if (!Svc?.wm) return null;
-      const windows = Svc.wm.getEnumerator(null);
-      let lastMatch: any = null;
-      while (windows.hasMoreElements()) {
-        const win = windows.getNext();
-        if (win.document?.title === 'Progress') {
-          lastMatch = win;
-        }
+      if (!Svc?.wm || !this.preShowWindows) return null;
+      const win = pickOwnPopupWindow({
+        preExisting: this.preShowWindows,
+        windows: enumerateWindows(Svc),
+        isClaimed: (w) => claimedPopupWindows.has(w),
+        matches: canBeProgressPopup,
+      });
+      if (win) {
+        claimedPopupWindows.add(win);
+        this.progressWin = win;
       }
-      if (lastMatch) {
-        this.progressWin = lastMatch;
-      }
-      return lastMatch;
+      return win;
     } catch {
       // Ignore errors
     }
@@ -525,6 +587,7 @@ export class StableProgressWindow {
    */
   private injectPauseButton(): void {
     try {
+      if (this.completed) return;
       const win = this.findProgressWindow();
       if (!win) return;
       if (this.pauseButton) return;
@@ -567,6 +630,56 @@ export class StableProgressWindow {
     } catch (error) {
       this.logger.debug(`Could not inject control buttons: ${error}`);
     }
+  }
+
+  /**
+   * Remove the injected pause/cancel controls from our popup
+   */
+  private removeControls(): void {
+    try {
+      const win = this.findProgressWindow();
+      if (win?.document) removeInjectedControls(win.document);
+    } catch {
+      // Popup may already be gone
+    }
+    this.pauseButton = null;
+  }
+
+  /**
+   * Schedule a close() from the main window's event loop. The popup's own
+   * close timer can be cancelled by a mouseover and never re-armed (issue
+   * #49); this one cannot. Harmless if Zotero's timer wins the race:
+   * close() on a closed window is a no-op.
+   */
+  private scheduleFallbackClose(ms: number): void {
+    this.clearFallbackClose();
+    try {
+      const Z = (globalThis as any).Zotero;
+      const mainWindow = Z?.getMainWindow?.();
+      const setT = mainWindow?.setTimeout?.bind(mainWindow)
+        ?? (typeof setTimeout !== 'undefined' ? setTimeout : null);
+      if (!setT) return;
+      this.fallbackCloseWin = mainWindow ?? null;
+      this.fallbackCloseId = setT(() => {
+        this.fallbackCloseId = null;
+        this.close();
+      }, ms);
+    } catch {
+      // Zotero's own close timer remains the only close path
+    }
+  }
+
+  private clearFallbackClose(): void {
+    if (this.fallbackCloseId == null) return;
+    try {
+      const clearT = this.fallbackCloseWin?.clearTimeout?.bind(this.fallbackCloseWin)
+        ?? (typeof clearTimeout !== 'undefined' ? clearTimeout : null);
+      clearT?.(this.fallbackCloseId);
+    } catch {
+      // Ignore: a fired or unclearable timer just means one extra no-op close()
+    }
+    this.fallbackCloseId = null;
+    this.fallbackCloseWin = null;
   }
 
   /**
