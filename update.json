@@ -3,8 +3,8 @@
     "zotseek@zotero.org": {
       "updates": [
         {
-          "version": "1.21.1",
-          "update_link": "https://github.com/introfini/ZotSeek/releases/download/v1.21.1/zotseek-1.21.1.xpi",
+          "version": "1.21.2",
+          "update_link": "https://github.com/introfini/ZotSeek/releases/download/v1.21.2/zotseek-1.21.2.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "7.999",

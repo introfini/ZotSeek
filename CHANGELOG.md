@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.21.2] - 2026-09-01
 
 ### Fixed
 - Indexing progress windows no longer pollute each other (#49). Starting a new
