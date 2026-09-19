@@ -694,7 +694,20 @@ export function chunkNoteText(
   if (!text) return [];
 
   const chunks = splitTextIntoChunks(text, title, opts.maxTokens, 'note');
-  return chunks.slice(0, opts.maxChunks).map((chunk, i) => ({ ...chunk, index: i }));
+  return chunks.slice(0, opts.maxChunks).map((chunk, i) => ({
+    ...chunk,
+    index: i,
+    // splitTextIntoChunks always stamps offsets and an estimated page number,
+    // which are meaningful for PDF text and fiction for a note: the estimate
+    // climbs one "page" per ~3000 characters of NOTE text. Those values are
+    // persisted and consumed — the results table renders "p. 1, ¶1" and a
+    // double-click would open the PDF at an unrelated page — so a note chunk
+    // carries no location at all and callers fall back to opening the item.
+    pageNumber: undefined,
+    paragraphIndex: undefined,
+    startChar: undefined,
+    endChar: undefined,
+  }));
 }
 
 /**

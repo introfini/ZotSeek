@@ -260,4 +260,26 @@ describe('chunkNoteText', () => {
     const chunks = chunkNoteText('Paper title', paragraphs(200), { maxTokens: 100, maxChunks: 5 });
     assert.equal(chunks.length, 5);
   });
+
+  test('carries no location data: a note has no pages or source offsets', () => {
+    // splitTextIntoChunks stamps an estimated pageNumber plus char offsets,
+    // which for note text are fiction. They are persisted and consumed (the
+    // Location column, opening the PDF at a page, the MCP payload), so a note
+    // chunk must carry none of them.
+    const single = chunkNoteText('Paper title', 'A single short note.');
+    assert.equal(single.length, 1);
+    assert.equal(single[0].pageNumber, undefined);
+    assert.equal(single[0].paragraphIndex, undefined);
+    assert.equal(single[0].startChar, undefined);
+    assert.equal(single[0].endChar, undefined);
+
+    const many = chunkNoteText('Paper title', paragraphs(40), { maxTokens: 200 });
+    assert.ok(many.length > 1);
+    for (const chunk of many) {
+      assert.equal(chunk.pageNumber, undefined, 'note chunks must not claim a page');
+      assert.equal(chunk.paragraphIndex, undefined);
+      assert.equal(chunk.startChar, undefined);
+      assert.equal(chunk.endChar, undefined);
+    }
+  });
 });
