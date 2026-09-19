@@ -8,6 +8,8 @@
  *  - deleteItem removes both items and chunks rows in one transaction
  *  - putBatch dedups items across multiple chunks (1 item, N chunks)
  *  - putBatch handles multiple distinct items in one transaction
+ *  - putBatch({replaceItems:true}) replaces the item's chunks for that model
+ *    only, atomically, and leaves other models' chunks alone
  *
  * The dev DB has thousands of real indexed items. To avoid polluting it,
  * every scenario picks (or creates) an UNINDEXED item, runs its assertions,
@@ -287,6 +289,104 @@ selfTest.register('task-6-write-delete', async () => {
       } finally {
         await vectorStoreSQLite.deleteItem('user', a.key);
         await vectorStoreSQLite.deleteItem('user', b.key);
+      }
+    }),
+
+    await scenario('putBatch without replaceItems leaves old chunks in place', async () => {
+      assertTrue(sample, 'no unindexed user-library item available');
+      await vectorStoreSQLite.deleteItem('user', sample.key);
+      try {
+        await vectorStoreSQLite.putBatch([
+          makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'old-0' }),
+          makeEmbedding(sample.key, { chunkIndex: 1, chunkText: 'old-1' }),
+          makeEmbedding(sample.key, { chunkIndex: 2, chunkText: 'old-2' }),
+        ]);
+        await vectorStoreSQLite.putBatch([
+          makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'new-0' }),
+        ]);
+        const pk = await lookupItemPk(sample.key);
+        assertTrue(pk !== null, 'item row missing');
+        assertEq(await chunkCountForPk(pk!), 3, 'append semantics: chunks 1 and 2 survive');
+      } finally {
+        await vectorStoreSQLite.deleteItem('user', sample.key);
+      }
+    }),
+
+    await scenario('putBatch with replaceItems drops the previous chunks for that model', async () => {
+      assertTrue(sample, 'no unindexed user-library item available');
+      await vectorStoreSQLite.deleteItem('user', sample.key);
+      try {
+        await vectorStoreSQLite.putBatch([
+          makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'old-0' }),
+          makeEmbedding(sample.key, { chunkIndex: 1, chunkText: 'old-1' }),
+          makeEmbedding(sample.key, { chunkIndex: 2, chunkText: 'old-2' }),
+        ]);
+        await vectorStoreSQLite.putBatch(
+          [makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'new-0' })],
+          { replaceItems: true }
+        );
+        const pk = await lookupItemPk(sample.key);
+        assertTrue(pk !== null, 'item row missing');
+        assertEq(await chunkCountForPk(pk!), 1, 'a shrinking re-index must not leave orphans');
+        const text = await Zotero.DB.valueQueryAsync(
+          `SELECT chunk_text FROM ${DB}.chunks WHERE item_pk = ?`, [pk]
+        );
+        assertEq(String(text), 'new-0', 'surviving chunk should be the new one');
+      } finally {
+        await vectorStoreSQLite.deleteItem('user', sample.key);
+      }
+    }),
+
+    await scenario('replaceItems scopes the delete to the batch model', async () => {
+      assertTrue(sample, 'no unindexed user-library item available');
+      await vectorStoreSQLite.deleteItem('user', sample.key);
+      try {
+        await vectorStoreSQLite.putBatch([
+          makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'other-0', modelId: 'other-model' }),
+          makeEmbedding(sample.key, { chunkIndex: 1, chunkText: 'other-1', modelId: 'other-model' }),
+        ]);
+        await vectorStoreSQLite.putBatch([
+          makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'mine-0' }),
+        ]);
+        await vectorStoreSQLite.putBatch(
+          [makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'mine-0b' })],
+          { replaceItems: true }
+        );
+        const pk = await lookupItemPk(sample.key);
+        assertTrue(pk !== null, 'item row missing');
+        const otherCount = Number(await Zotero.DB.valueQueryAsync(
+          `SELECT COUNT(*) FROM ${DB}.chunks WHERE item_pk = ? AND model_id = 'other-model'`, [pk]
+        ));
+        assertEq(otherCount, 2, "another model's chunks must survive a replace");
+        const mineCount = Number(await Zotero.DB.valueQueryAsync(
+          `SELECT COUNT(*) FROM ${DB}.chunks WHERE item_pk = ? AND model_id = 'test-model'`, [pk]
+        ));
+        assertEq(mineCount, 1, 'only the batch model is replaced');
+      } finally {
+        await vectorStoreSQLite.deleteItem('user', sample.key);
+      }
+    }),
+
+    await scenario('replaceItems keeps the item_models row for the model', async () => {
+      assertTrue(sample, 'no unindexed user-library item available');
+      await vectorStoreSQLite.deleteItem('user', sample.key);
+      try {
+        await vectorStoreSQLite.putBatch([
+          makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'old-0' }),
+        ]);
+        await vectorStoreSQLite.putBatch(
+          [makeEmbedding(sample.key, { chunkIndex: 0, chunkText: 'new-0', contentHash: 'hash-2' })],
+          { replaceItems: true }
+        );
+        const pk = await lookupItemPk(sample.key);
+        assertTrue(pk !== null, 'item row missing');
+        const hash = await Zotero.DB.valueQueryAsync(
+          `SELECT content_hash FROM ${DB}.item_models WHERE item_pk = ? AND model_id = 'test-model'`,
+          [pk]
+        );
+        assertEq(String(hash), 'hash-2', 'item_models must be re-upserted, never deleted');
+      } finally {
+        await vectorStoreSQLite.deleteItem('user', sample.key);
       }
     }),
   ];

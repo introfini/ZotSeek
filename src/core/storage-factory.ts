@@ -21,7 +21,7 @@ export interface IVectorStore {
   init(): Promise<void>;
 
   // Identity-keyed methods (preferred)
-  putBatch(embeddings: import('./vector-store-sqlite').PaperEmbedding[]): Promise<void>;
+  putBatch(embeddings: import('./vector-store-sqlite').PaperEmbedding[], options?: { replaceItems?: boolean }): Promise<void>;
   put(embedding: import('./vector-store-sqlite').PaperEmbedding): Promise<void>;
   getByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding | undefined>;
   getItemChunksByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
@@ -29,7 +29,7 @@ export interface IVectorStore {
   deleteItem(libraryKey: string, itemKey: string): Promise<void>;
   deleteChunksForItem(libraryKey: string, itemKey: string, modelId?: string): Promise<void>;
   isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean>;
-  needsReindexByIdentity(libraryKey: string, itemKey: string, contentHash: string): Promise<boolean>;
+  needsReindexByIdentity(libraryKey: string, itemKey: string, contentHash: string, modelId?: string): Promise<boolean>;
   getChunkCountByIdentity(libraryKey: string, itemKey: string): Promise<number>;
   getIndexStatusByIdentity(identities: Array<{libraryKey: string; itemKey: string}>): Promise<Map<string, import('./vector-store-sqlite').ItemIndexStatus>>;
   getByLibraryKey(libraryKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;

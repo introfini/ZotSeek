@@ -1817,8 +1817,16 @@ export class VectorStoreSQLite {
    *
    * Resolves all unique (libraryKey, itemKey) identities to item_pks first
    * (dedup'd in-process), then writes chunks pointing at those pks.
+   *
+   * @param options.replaceItems Re-index semantics: each item in the batch has
+   *   its existing chunks for the same model deleted before the new ones are
+   *   written, inside this method's transaction. Doing the delete outside is
+   *   not safe on a re-index path — an interruption between the delete and the
+   *   write (a crash, a quit, a dropped ATTACH, a throwing insert) would leave
+   *   the item with no chunks at all. `item_models` is deliberately left alone:
+   *   the write re-upserts it, so an aborted transaction changes nothing.
    */
-  async putBatch(embeddings: PaperEmbedding[]): Promise<void> {
+  async putBatch(embeddings: PaperEmbedding[], options?: { replaceItems?: boolean }): Promise<void> {
     await this.ensureInit();
     if (embeddings.length === 0) return;
 
@@ -1859,6 +1867,24 @@ export class VectorStoreSQLite {
           wasTruncated: e.wasTruncated, pagesIndexed: e.pagesIndexed, pagesTotal: e.pagesTotal,
         });
         pkByIdent.set(key, pk);
+      }
+
+      // Re-index: drop the old chunks for every (item, model) pair in the
+      // batch before any new chunk row is written, so the replace is atomic.
+      // Once per unique pair, not once per chunk.
+      if (options?.replaceItems) {
+        const replaced = new Set<string>();
+        for (const e of embeddings) {
+          const pk = pkByIdent.get(`${e.libraryKey}|${e.itemKey}`);
+          if (!pk) continue;
+          const replaceKey = `${pk}|${e.modelId}`;
+          if (replaced.has(replaceKey)) continue;
+          replaced.add(replaceKey);
+          await Zotero.DB.queryAsync(
+            `DELETE FROM ${DB_NAME}.chunks WHERE item_pk = ? AND model_id = ?`,
+            [pk, e.modelId]
+          );
+        }
       }
 
       // Write chunks

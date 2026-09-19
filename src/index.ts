@@ -1560,9 +1560,6 @@ class ZotSeekPlugin {
 
         const batchEmbeddings: PaperEmbedding[] = [];
         for (const extracted of extractedBatch) {
-          // Delete existing chunks for the active model only — other models' chunks are preserved
-          await this.vectorStore!.deleteItemChunks(extracted.itemId, getActiveModelId());
-
           if (extracted.wasTruncated) {
             totalItemsTruncated++;
             truncatedTitles.push(extracted.title);
@@ -1611,8 +1608,11 @@ class ZotSeekPlugin {
           }
         }
 
-        // Save this batch to database
-        await this.vectorStore!.putBatch(batchEmbeddings);
+        // Save this batch to database. replaceItems makes the delete of any
+        // pre-existing chunks for the active model part of the same
+        // transaction as the write, so an interruption can never leave an
+        // item with its old chunks gone and no new ones.
+        await this.vectorStore!.putBatch(batchEmbeddings, { replaceItems: true });
 
         // Refresh the index-status column for the items we just touched
         itemTreeIndexColumn.invalidate(extractedBatch.map(e => e.itemId));
@@ -1795,11 +1795,6 @@ class ZotSeekPlugin {
       let autoTruncatedCount = 0;
 
       for (const extracted of extractedItems) {
-        // Delete existing chunks for the active model only — this is a
-        // re-index path once note edits trigger auto-index, and without this
-        // an item whose chunk count shrank keeps orphaned high-index chunks.
-        await this.vectorStore!.deleteItemChunks(extracted.itemId, getActiveModelId());
-
         if (extracted.wasTruncated) {
           autoTruncatedCount++;
           const coverage = extracted.pagesTotal > 0
@@ -1847,7 +1842,13 @@ class ZotSeekPlugin {
       }
 
       // Store in vector store
-      await this.vectorStore!.putBatch(paperEmbeddings);
+      // replaceItems: this is a re-index path once note edits trigger
+      // auto-index, so an item whose chunk count shrank must not keep orphaned
+      // high-index chunks. Doing the delete here, inside putBatch's own
+      // transaction, means an interruption mid-run cannot leave an item with
+      // its old chunks deleted and no new ones written. An item that produced
+      // no embeddings at all is not in this batch, so it is never deleted.
+      await this.vectorStore!.putBatch(paperEmbeddings, { replaceItems: true });
 
       // Refresh column status for the items we just indexed
       itemTreeIndexColumn.invalidate(extractedItems.map(e => e.itemId));
