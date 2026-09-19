@@ -32,10 +32,16 @@ export function noteHtmlToText(html: string): string {
   text = text.replace(/<br\s*\/?>/gi, '\n');
   text = text.replace(/<hr\b[^>]*\/?>/gi, '\n\n');
   text = text.replace(/<li\b[^>]*>/gi, '- ');
-  // td/th are in the list because Better Notes tables are a stated use case:
-  // without them `<td>a</td><td>b</td>` collapses to `ab` and the chunker sees
-  // one run-on word instead of two cells.
-  text = text.replace(/<\/(p|div|li|h[1-6]|blockquote|tr|td|th|pre|ul|ol)>/gi, '\n\n');
+  // td/th get a single newline, not a paragraph break: Better Notes tables are
+  // a stated use case, and without separating them at all
+  // `<td>a</td><td>b</td>` collapses to `ab`, a run-on word instead of two
+  // cells. But splitting them into their own paragraphs fragments a table row
+  // into cells short enough (often well under 50 characters) to be discarded
+  // by the chunker's short-paragraph filter, silently losing the row. A plain
+  // `\n` keeps cells readably separated while `</tr>` still closes the row as
+  // one paragraph, long enough to survive that filter.
+  text = text.replace(/<\/(td|th)>/gi, '\n');
+  text = text.replace(/<\/(p|div|li|h[1-6]|blockquote|tr|pre|ul|ol)>/gi, '\n\n');
   text = text.replace(/<[^>]*>/g, '');
   text = unescapeEntities(text);
 

@@ -12,6 +12,7 @@ import {
   getChunkOptionsFromPrefs,
   getIndexingMode,
 } from '../src/utils/chunker';
+import { noteHtmlToText } from '../src/utils/note-text';
 
 /**
  * Prose with real sentence boundaries. The chunker can only split an oversized
@@ -281,5 +282,34 @@ describe('chunkNoteText', () => {
       assert.equal(chunk.startChar, undefined);
       assert.equal(chunk.endChar, undefined);
     }
+  });
+
+  test('keeps a table row alive when the note is long enough to force splitting across chunks', () => {
+    // Regression coverage for the note-text.ts fix: a table row rendered as
+    // one paragraph survives splitTextIntoChunks's >50-char filter
+    // (chunker.ts:357), but only once the note is long enough to take the
+    // multi-chunk split branch — a short note takes the single-chunk branch,
+    // which never filters, so this failure is invisible without forcing a
+    // split. This exercises the full note-text -> chunker path, not
+    // chunkNoteText in isolation, because that is exactly the seam the bug
+    // slipped through: note-text.ts tests never reach the chunker, and
+    // chunker tests never fed it note-shaped table text.
+    const fillerParagraphs = paragraphs(40)
+      .split('\n\n')
+      .map((p) => `<p>${p}</p>`)
+      .join('');
+    const html =
+      `${fillerParagraphs}<table><tr>` +
+      '<td>Sensitivity 0.82</td><td>Specificity 0.79</td><td>AUC 0.91 across all folds</td>' +
+      '</tr></table>';
+    const noteText = noteHtmlToText(html);
+
+    const chunks = chunkNoteText('Paper title', noteText, { maxTokens: 200 });
+    assert.ok(chunks.length > 1, 'note must be long enough to force splitting across chunks');
+
+    const combined = chunks.map((c) => c.text).join('\n');
+    assert.match(combined, /Sensitivity 0\.82/);
+    assert.match(combined, /Specificity 0\.79/);
+    assert.match(combined, /AUC 0\.91 across all folds/);
   });
 });

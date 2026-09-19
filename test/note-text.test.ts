@@ -50,15 +50,34 @@ describe('noteHtmlToText', () => {
     assert.equal(out, 'a\n\nb');
   });
 
-  test('separates table cells instead of gluing them together', () => {
+  test('separates table cells without breaking the row into separate paragraphs', () => {
     const html = '<table><tr><td>alpha</td><td>beta</td></tr><tr><td>gamma</td></tr></table>';
     const out = noteHtmlToText(html);
-    assert.equal(out, 'alpha\n\nbeta\n\ngamma');
+    // Cells within a row are joined by a single newline (readable, not glued
+    // together), while rows themselves stay separated by a paragraph break.
+    assert.equal(out, 'alpha\nbeta\n\ngamma');
   });
 
-  test('treats header cells as cells too', () => {
+  test('treats header cells as cells too, joined within the row by a single newline', () => {
     const out = noteHtmlToText('<table><tr><th>Year</th><th>Result</th></tr></table>');
-    assert.equal(out, 'Year\n\nResult');
+    assert.equal(out, 'Year\nResult');
+  });
+
+  test('keeps a whole table row as one paragraph, not one paragraph per cell', () => {
+    // This is the regression this test pins: an earlier fix made `</td>`/`</th>`
+    // produce a paragraph break (`\n\n`), which stopped cells from gluing
+    // together but fragmented every row into its own short paragraph. Those
+    // fragments are exactly the kind the chunker's short-paragraph filter
+    // discards downstream (chunker.ts:357), so a row survived here only to be
+    // silently dropped later. A row must come out as a single paragraph: no
+    // `\n\n` inside it, only between rows.
+    const html =
+      '<table><tr><td>alpha</td><td>beta</td><td>gamma</td></tr><tr><td>delta</td></tr></table>';
+    const out = noteHtmlToText(html);
+    const paragraphs = out.split('\n\n');
+    assert.equal(paragraphs.length, 2);
+    assert.equal(paragraphs[0], 'alpha\nbeta\ngamma');
+    assert.equal(paragraphs[1], 'delta');
   });
 
   test('turns a horizontal rule into a paragraph break', () => {
