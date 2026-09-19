@@ -194,20 +194,28 @@ export class AutoIndexManager {
         const item = await Zotero.Items.getAsync(itemId);
         if (!item) continue;
 
-        // A note edit re-indexes the item the note belongs to. shouldProcess()
-        // rejects notes themselves, so this has to run first.
+        // A note add/modify/trash re-indexes the item the note belongs to.
+        // shouldProcess() rejects notes themselves, so this has to run first.
+        // Skip when the parent is itself trashed: trashing a parent cascades
+        // trash events to its child notes, and re-indexing a trashed item
+        // that Update Index would skip anyway is pointless.
         if (item.isNote() && item.parentID) {
           const parent = await Zotero.Items.getAsync(item.parentID as number);
-          if (parent && this.shouldProcess(parent)) {
-            this.logger.info(`Note edited on: ${parent.getField('title')}`);
+          if (parent && !parent.deleted && this.shouldProcess(parent)) {
+            const verb = event === 'trash' ? 'Note trashed on' : event === 'modify' ? 'Note edited on' : 'Note added on';
+            this.logger.info(`${verb}: ${parent.getField('title')}`);
             this.pendingItems.add(parent.id as number);
             this.scheduleBatch(this.noteDelaySeconds());
           }
           continue;
         }
 
-        // Handle new top-level items (not attachments/notes)
-        if (this.shouldProcess(item)) {
+        // Handle a genuinely new top-level item (not attachments/notes). This
+        // branch must stay 'add'-only: 'modify'/'trash' are only widened above
+        // for notes, and Zotero fires 'modify' for many ids at once during sync
+        // or bulk metadata edits, which would otherwise serialize a 2s delay
+        // per touched item inside this loop.
+        if (event === 'add' && this.shouldProcess(item)) {
           this.logger.info(`New item detected: ${item.getField('title')}`);
           // Small delay to let attachments arrive
           await this.delay(2000);
