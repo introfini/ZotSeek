@@ -5,12 +5,13 @@
 ## Context menu items
 
 zotseek-menu-findSimilar = 查找相似文献
-zotseek-menu-openZotSeek = 打开 ZotSeek...
-zotseek-menu-indexSelected = 为 ZotSeek 索引选中项
+zotseek-menu-submenu = ZotSeek
+zotseek-menu-openZotSeek = 搜索文献库...
+zotseek-menu-indexSelected = 索引选中项
 zotseek-menu-indexCollection = 索引当前合集
-zotseek-menu-updateLibrary = 更新文献库索引
-zotseek-menu-backfillNotes = 将笔记文本加入索引
-zotseek-menu-removeFromIndex = 从 ZotSeek 索引中移除
+zotseek-menu-updateLibrary = 更新整个文献库索引
+zotseek-menu-backfillNotes = 为已索引项目添加笔记文本
+zotseek-menu-removeFromIndex = 从索引中移除
 zotseek-menu-findRelated = 查找相关文献
 
 ## Toolbar

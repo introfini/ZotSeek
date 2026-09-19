@@ -5,12 +5,13 @@
 ## Context menu items
 
 zotseek-menu-findSimilar = Find Similar Documents
-zotseek-menu-openZotSeek = Open ZotSeek...
-zotseek-menu-indexSelected = Index Selected for ZotSeek
+zotseek-menu-submenu = ZotSeek
+zotseek-menu-openZotSeek = Search Library...
+zotseek-menu-indexSelected = Index Selected Items
 zotseek-menu-indexCollection = Index Current Collection
-zotseek-menu-updateLibrary = Update Library Index
-zotseek-menu-backfillNotes = Add Note Text to Index
-zotseek-menu-removeFromIndex = Remove from ZotSeek Index
+zotseek-menu-updateLibrary = Update Entire Library
+zotseek-menu-backfillNotes = Add Note Text to Existing Items
+zotseek-menu-removeFromIndex = Remove from Index
 zotseek-menu-findRelated = Find Related Documents
 
 ## Toolbar

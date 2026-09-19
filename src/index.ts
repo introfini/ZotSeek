@@ -1031,17 +1031,31 @@ class ZotSeekPlugin {
     const separator = doc.createXULElement('menuseparator');
     separator.id = 'zotseek-separator';
 
-    // Create "Find Similar Documents" menu item
+    // Create "Find Similar Documents" menu item (stays at top level: the one
+    // action that operates on the specific right-clicked item, and the most
+    // frequently used, so it should not cost an extra hover)
     const findSimilarItem = doc.createXULElement('menuitem');
     findSimilarItem.id = 'zotseek-find-similar';
     findSimilarItem.setAttribute('label', getString('menu-findSimilar'));
     findSimilarItem.addEventListener('command', () => this.onFindSimilar());
+
+    // Create the "ZotSeek" submenu that holds every other action
+    const submenu = doc.createXULElement('menu');
+    submenu.id = 'zotseek-submenu';
+    submenu.setAttribute('label', getString('menu-submenu'));
+
+    const submenuPopup = doc.createXULElement('menupopup');
+    submenuPopup.id = 'zotseek-submenu-popup';
+    submenu.appendChild(submenuPopup);
 
     // Create "Open ZotSeek" menu item for general search
     const openSearchItem = doc.createXULElement('menuitem');
     openSearchItem.id = 'zotseek-open-dialog';
     openSearchItem.setAttribute('label', getString('menu-openZotSeek'));
     openSearchItem.addEventListener('command', () => searchDialogWithVTable.open());
+
+    const submenuSeparator1 = doc.createXULElement('menuseparator');
+    submenuSeparator1.id = 'zotseek-submenu-separator-1';
 
     // Create "Index Selected" menu item
     const indexSelectedItem = doc.createXULElement('menuitem');
@@ -1067,20 +1081,27 @@ class ZotSeekPlugin {
     backfillNotesItem.setAttribute('label', getString('menu-backfillNotes'));
     backfillNotesItem.addEventListener('command', () => this.onBackfillNotes());
 
+    const submenuSeparator2 = doc.createXULElement('menuseparator');
+    submenuSeparator2.id = 'zotseek-submenu-separator-2';
+
     // Create "Remove from Index" menu item
     const removeFromIndexItem = doc.createXULElement('menuitem');
     removeFromIndexItem.id = 'zotseek-remove-from-index';
     removeFromIndexItem.setAttribute('label', getString('menu-removeFromIndex'));
     removeFromIndexItem.addEventListener('command', () => this.onRemoveFromIndex());
 
+    submenuPopup.appendChild(openSearchItem);
+    submenuPopup.appendChild(submenuSeparator1);
+    submenuPopup.appendChild(indexSelectedItem);
+    submenuPopup.appendChild(indexCollectionItem);
+    submenuPopup.appendChild(indexLibraryItem);
+    submenuPopup.appendChild(backfillNotesItem);
+    submenuPopup.appendChild(submenuSeparator2);
+    submenuPopup.appendChild(removeFromIndexItem);
+
     itemMenu.appendChild(separator);
     itemMenu.appendChild(findSimilarItem);
-    itemMenu.appendChild(openSearchItem);
-    itemMenu.appendChild(indexSelectedItem);
-    itemMenu.appendChild(indexCollectionItem);
-    itemMenu.appendChild(indexLibraryItem);
-    itemMenu.appendChild(backfillNotesItem);
-    itemMenu.appendChild(removeFromIndexItem);
+    itemMenu.appendChild(submenu);
 
     this.logger.info('Context menu registered successfully');
   }
@@ -2382,11 +2403,7 @@ class ZotSeekPlugin {
     const doc = window.document;
     const ids = [
       'zotseek-find-similar',
-      'zotseek-open-dialog',
-      'zotseek-index-selected',
-      'zotseek-index-collection',
-      'zotseek-index-library',
-      'zotseek-remove-from-index',
+      'zotseek-submenu',
       'zotseek-separator',
     ];
     for (const id of ids) {
