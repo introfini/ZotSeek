@@ -12,7 +12,7 @@
 export interface Chunk {
   index: number;
   text: string;
-  type: 'summary' | 'methods' | 'findings' | 'content';
+  type: 'summary' | 'methods' | 'findings' | 'content' | 'note';
   tokenCount?: number;
 
   // Passage-level location (Phase 2: evidence linking)
@@ -321,7 +321,7 @@ function splitTextIntoChunks(
   text: string,
   titlePrefix: string,
   maxTokens: number,
-  type: 'methods' | 'findings' | 'content',
+  type: 'methods' | 'findings' | 'content' | 'note',
   sourceStartOffset: number = 0,
   paragraphStartIndex: number = 0,
   pageContext?: PageEstimationContext
@@ -676,6 +676,25 @@ export function chunkDocumentEx(
     pagesIndexed: distinctPages.size,
     pagesTotal: opts.totalPages || 0,
   };
+}
+
+/**
+ * Chunk a child note's plain text. Unlike chunkDocument*, this produces no
+ * summary chunk: the note is body text belonging to an item that already has
+ * one. The title is prefixed to every chunk so a note hit still carries the
+ * paper it belongs to.
+ */
+export function chunkNoteText(
+  title: string,
+  noteText: string,
+  options: ChunkOptions = {}
+): Chunk[] {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const text = (noteText || '').trim();
+  if (!text) return [];
+
+  const chunks = splitTextIntoChunks(text, title, opts.maxTokens, 'note');
+  return chunks.slice(0, opts.maxChunks).map((chunk, i) => ({ ...chunk, index: i }));
 }
 
 /**

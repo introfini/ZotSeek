@@ -4,6 +4,7 @@ import {
   estimateTokens,
   chunkDocument,
   chunkDocumentEx,
+  chunkNoteText,
   createPageEstimationContext,
   estimatePageNumber,
   estimatePageForRange,
@@ -225,5 +226,38 @@ describe('preference reading', () => {
     assert.equal(getIndexingMode(fakeZotero({})), 'abstract');
     assert.equal(getIndexingMode(fakeZotero({ 'zotseek.indexingMode': 'nonsense' })), 'abstract');
     assert.equal(getIndexingMode(undefined), 'abstract');
+  });
+});
+
+describe('chunkNoteText', () => {
+  test('returns no chunks for empty or whitespace-only note text', () => {
+    assert.deepEqual(chunkNoteText('Paper title', ''), []);
+    assert.deepEqual(chunkNoteText('Paper title', '   \n\n '), []);
+  });
+
+  test('tags every chunk as note', () => {
+    const chunks = chunkNoteText('Paper title', paragraphs(6));
+    assert.ok(chunks.length > 0);
+    for (const chunk of chunks) {
+      assert.equal(chunk.type, 'note');
+    }
+  });
+
+  test('prefixes the paper title so a note chunk carries its context', () => {
+    const chunks = chunkNoteText('Paper title', 'A single short note.');
+    assert.equal(chunks.length, 1);
+    assert.ok(chunks[0].text.startsWith('Paper title'));
+    assert.match(chunks[0].text, /A single short note\./);
+  });
+
+  test('numbers chunks from zero with no gaps', () => {
+    const chunks = chunkNoteText('Paper title', paragraphs(40), { maxTokens: 200 });
+    assert.ok(chunks.length > 1);
+    chunks.forEach((chunk, i) => assert.equal(chunk.index, i));
+  });
+
+  test('honours the maxChunks ceiling so one runaway note cannot flood an item', () => {
+    const chunks = chunkNoteText('Paper title', paragraphs(200), { maxTokens: 100, maxChunks: 5 });
+    assert.equal(chunks.length, 5);
   });
 });

@@ -29,14 +29,15 @@ declare const PathUtils: any;
 declare const IOUtils: any;
 
 // Text source types - now includes specific section types for better retrieval info
-export type TextSourceType = 
+export type TextSourceType =
   | 'abstract'      // Title + abstract (summary chunk)
   | 'fulltext'      // Legacy: generic full text
   | 'title_only'    // Title only (no abstract available)
   | 'summary'       // Same as abstract, from chunker
   | 'methods'       // Introduction, Background, Methods, etc.
   | 'findings'      // Results, Discussion, Conclusions, etc.
-  | 'content';      // Generic content (fallback when sections not detected)
+  | 'content'       // Generic content (fallback when sections not detected)
+  | 'note';         // Child note text (issue #50)
 
 export interface PaperEmbedding {
   // Internal surrogate PK (assigned by SQLite on insert). Optional on input,
