@@ -690,8 +690,12 @@ import './helpers/zotero-stub';                        // must come first
 import { isAllowedOrigin } from '../src/server/http-tools';
 ```
 
-Currently covered: `chunker.ts`, `model-registry.ts`, `collection-items.ts`, and
-the `isAllowedOrigin` guard from `http-tools.ts`. Deliberately *not* covered:
+Currently covered: `chunker.ts`, `model-registry.ts`, `collection-items.ts`,
+`note-text.ts`, `embedding-reuse.ts`, `note-backfill.ts`, `search-activity.ts`,
+`keyword-backfill.ts`, `progress-window-claim.ts`, `minimize-follower.ts`, the
+`isAllowedOrigin` guard from `http-tools.ts`, the esbuild polyfill banner
+(`worker-polyfill.test.ts`, which pins the no-top-level-`var` rule), and the
+dev-install proxy checks (`dev-install.test.ts`). Deliberately *not* covered:
 `search-engine.ts` and `hybrid-search.ts`, which need real embeddings and real
 Zotero items. Mocking those would produce tests that always pass and say nothing
 about retrieval quality; that is the eval framework's job.

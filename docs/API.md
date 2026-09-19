@@ -60,7 +60,7 @@ interface SearchResult {
   itemKey: string;         // Portable Zotero item key (syncs across libraries)
   title: string;
   similarity: number;      // 0–1 cosine similarity score
-  textSource: string;      // "summary" | "methods" | "findings" | "content" | "abstract"
+  textSource: string;      // "summary" | "methods" | "findings" | "content" | "abstract" | "note"
   matchedChunkIndex?: number;
   chunkIndex?: number;     // Present when returnAllChunks=true
   authors?: string[];
@@ -69,6 +69,11 @@ interface SearchResult {
   paragraphIndex?: number; // 0-based paragraph index within page
 }
 ```
+
+`textSource` is `"note"` when the match came from a note attached to the item rather than
+from its abstract or its PDF. Note-sourced results carry no location data: `pageNumber` and
+`paragraphIndex` are always absent, because a note has no page in the document. Treat a
+falsy `pageNumber` as "no location" rather than as page zero.
 
 Results are ranked by similarity (descending). When `returnAllChunks` is `false` (default), MaxSim aggregation is used: each paper appears once with the score of its best-matching chunk.
 
