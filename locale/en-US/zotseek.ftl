@@ -9,6 +9,7 @@ zotseek-menu-openZotSeek = Open ZotSeek...
 zotseek-menu-indexSelected = Index Selected for ZotSeek
 zotseek-menu-indexCollection = Index Current Collection
 zotseek-menu-updateLibrary = Update Library Index
+zotseek-menu-backfillNotes = Add Note Text to Index
 zotseek-menu-removeFromIndex = Remove from ZotSeek Index
 zotseek-menu-findRelated = Find Related Documents
 
@@ -288,6 +289,22 @@ zotseek-resume-scopeLibrary = your libraries
 zotseek-resume-scopeUserLibrary = your personal library
 zotseek-resume-scopeCollection = the "{ $name }" collection
 zotseek-resume-scopeCollections = { $count } selected collections
+zotseek-resume-scopeNotes = indexed items that have notes
+
+# "Add Note Text to Index": re-indexes items that are ALREADY indexed so their
+# note text is added. Update Library Index skips them, so without this the
+# preference only ever applies to items indexed after it was switched on.
+zotseek-notesBackfill-disabled = "Also index child notes" is turned off, so there is no note text to add.
+
+    Turn it on in Settings → ZotSeek first, then run this again.
+zotseek-notesBackfill-scanning = Looking for indexed items that have notes...
+zotseek-notesBackfill-none = No indexed items have notes to add. Items that are not indexed yet already pick up their notes through Update Library Index.
+zotseek-notesBackfill-title = ZotSeek - Add Note Text to Index
+zotseek-notesBackfill-confirmMsg = { $count } indexed item(s) have notes that are not in the index yet.
+
+    Their notes will be indexed and the rest of their content reused, so this is much faster than a full re-index.
+
+    Continue?
 
     Items that are already indexed will be skipped.
 
@@ -321,6 +338,7 @@ zotseek-indexing-completeChunks = ✓ Total chunks: { $count }
 zotseek-indexing-completeAvg = ✓ Avg chunks/item: { $avg }
 zotseek-indexing-completeDuration = ✓ Duration: { $duration }
 zotseek-indexing-completeNoContent = ⚠ No content: { $count } items
+zotseek-indexing-completeUnchanged = ✓ Left untouched: { $count } item(s) already up to date, or kept because their document text could not be read
 zotseek-indexing-completeTruncated = ⚠ Partial content: { $count } item(s) hit the Max Chunks per Paper limit. Raise the limit or switch to Summary mode to index the full text.
 zotseek-indexing-completeSuccess = Indexing completed successfully!
 zotseek-indexing-cancelled = Indexing cancelled

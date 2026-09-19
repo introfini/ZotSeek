@@ -25,7 +25,7 @@ type IndexCallback = (items: any[]) => Promise<void>;
  * class compiled into this project's esbuild IIFE bundle; see CLAUDE.md
  * pitfall #6.
  */
-function isNoteIndexingEnabled(): boolean {
+export function isNoteIndexingEnabled(): boolean {
   try {
     return Zotero.Prefs.get('zotseek.indexNotes', true) === true;
   } catch (e) {

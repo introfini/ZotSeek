@@ -19,7 +19,7 @@ import { textExtractor, ExtractedText, ExtractedChunks } from './core/text-extra
 import { ZoteroAPI } from './utils/zotero-api';
 import { getIndexingMode } from './utils/chunker';
 import { getZotero } from './utils/zotero-helper';
-import { autoIndexManager } from './core/auto-index-manager';
+import { autoIndexManager, isNoteIndexingEnabled } from './core/auto-index-manager';
 import { getString } from './utils/locale';
 // Use stable progress window from toolkit to avoid crashes
 import { StableProgressWindow, showQuickNotification } from './utils/stable-progress';
@@ -58,6 +58,7 @@ import './dev/suites/task-42c-server-client';
 import './dev/suites/task-47-z10-db-hooks';
 import './dev/suites/task-44-hybrid-backfill';
 import { collectCollectionItems } from './utils/collection-items';
+import { collectNoteBackfillItems, NoteBackfillDeps } from './utils/note-backfill';
 import { isSearchInProgress } from './core/search-activity';
 
 /**
@@ -74,7 +75,12 @@ type BulkScope =
   | { type: 'library'; libraryId: number }
   | { type: 'all-libraries' }
   | { type: 'collection'; libraryId: number; collectionId: number }
-  | { type: 'collections'; collections: Array<{ libraryId: number; collectionId: number }> };
+  | { type: 'collections'; collections: Array<{ libraryId: number; collectionId: number }> }
+  // Backfill of note text into items that are ALREADY indexed. The libraries
+  // are resolved from zotseek.indexScope when the run starts and travel with
+  // the marker, so a resumed run covers the libraries it began with even if
+  // the preference changed in between.
+  | { type: 'notes-backfill'; libraryIds: number[] };
 
 interface PluginInfo {
   id: string;
@@ -129,6 +135,23 @@ function hasExcludeTag(item: any): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Wire the notes-backfill selection to the live Zotero and the vector store.
+ *
+ * Module-level rather than a class method: it needs no `this`, and SpiderMonkey
+ * does not reliably register methods added to the class compiled into this
+ * esbuild IIFE bundle.
+ */
+function makeNoteBackfillDeps(store: IVectorStore): NoteBackfillDeps {
+  return {
+    hasExcludeTag,
+    identityOf: (item: any) => identityFromItem(item),
+    isIndexed: (libraryKey: string, itemKey: string) => store.isIndexedByIdentity(libraryKey, itemKey),
+    getNote: (noteId: number) => Zotero.Items.getAsync(noteId),
+    onError: (message: string) => Zotero.debug(`[ZotSeek] ${message}`),
+  };
 }
 
 interface ChunkForEmbedding { id: string; text: string; title: string; }
@@ -302,10 +325,14 @@ async function hasPDFAttachment(item: any): Promise<boolean> {
 }
 
 /**
- * Decide which of the freshly extracted items the SILENT (auto-index) path may
- * write. That path replaces an item's chunks rather than adding to them, and it
- * runs unattended off an ordinary user action, so it has to be more careful
- * than the bulk path the user explicitly asked for.
+ * Decide which of the freshly extracted items a RE-INDEX path may write.
+ *
+ * Two paths replace an already-indexed item's chunks rather than adding to
+ * them: the auto-index path, which runs unattended off an ordinary user
+ * action, and the notes backfill, whose candidate set is by definition items
+ * that already have chunks under the active model. Both are more exposed than
+ * ordinary bulk indexing, which only ever writes items that have no chunks
+ * yet and so can never overwrite anything.
  *
  * Two guards, both drops rather than partial writes:
  *
@@ -319,7 +346,7 @@ async function hasPDFAttachment(item: any): Promise<boolean> {
  *    damage, because item_models survives so the item still reads as indexed
  *    and every bulk path skips it afterwards. Only clearing and rebuilding the
  *    index repairs that. This guard only applies to a genuine re-index: an
- *    item's first auto-index pass falls through and is written abstract-only,
+ *    item's first indexing pass falls through and is written abstract-only,
  *    same as before this guard existed, so a scanned/image-only PDF (which
  *    never has extractable text) or an ordinary PDF whose extraction simply
  *    hasn't finished yet still gets its imperfect-but-real abstract-only
@@ -328,7 +355,7 @@ async function hasPDFAttachment(item: any): Promise<boolean> {
  * Module-level rather than a class method: SpiderMonkey does not reliably
  * register methods added to the class compiled into this esbuild IIFE bundle.
  */
-async function filterSilentReindexTargets(
+async function filterReindexTargets(
   store: IVectorStore,
   extracted: ExtractedChunks[],
   indexingMode: string,
@@ -370,7 +397,7 @@ async function filterSilentReindexTargets(
 
       if (alreadyIndexed && item && await hasPDFAttachment(item)) {
         logger.warn(
-          `Skipping auto re-index of "${e.title}": full mode produced no document text ` +
+          `Skipping re-index of "${e.title}": full mode produced no document text ` +
           `although the item has a PDF and was already indexed (file unreachable or ` +
           `extraction failed). Keeping the existing chunks rather than replacing them ` +
           `with a summary.`
@@ -724,7 +751,18 @@ class ZotSeekPlugin {
     let items: any[] = [];
     let label = '';
     try {
-      if (scope.type === 'all-libraries') {
+      if (scope.type === 'notes-backfill') {
+        // Rebuilt through the same selection the menu action uses, so a
+        // resumed backfill works from the same rules as the run it resumes.
+        await this.ensureStoreReady();
+        if (!this.vectorStore) return;
+        items = await collectNoteBackfillItems(
+          this.zoteroAPI,
+          scope.libraryIds,
+          makeNoteBackfillDeps(this.vectorStore),
+        );
+        label = getString('resume-scopeNotes');
+      } else if (scope.type === 'all-libraries') {
         items = await this.zoteroAPI.getAllLibraryItems();
         label = getString('resume-scopeLibrary');
       } else if (scope.type === 'library') {
@@ -756,13 +794,23 @@ class ZotSeekPlugin {
     if (!this.vectorStore) return;
 
     const pending: any[] = [];
-    for (const item of items) {
-      if (!item?.isRegularItem?.()) continue;
-      if (hasExcludeTag(item)) continue;
-      const identity = identityFromItem(item);
-      if (!identity) continue;
-      const indexed = await this.vectorStore.isIndexedByIdentity(identity.libraryKey, identity.itemKey);
-      if (!indexed) pending.push(item);
+    if (scope.type === 'notes-backfill') {
+      // Every backfill candidate is already indexed by definition, so the
+      // not-indexed filter below would throw the whole list away. The scope's
+      // own selection has already applied the equivalent rules. Items the
+      // interrupted run had already reached are re-listed here and dropped
+      // after extraction by the unchanged-content guard, so they cost a second
+      // extraction but are never re-embedded or re-written.
+      pending.push(...items);
+    } else {
+      for (const item of items) {
+        if (!item?.isRegularItem?.()) continue;
+        if (hasExcludeTag(item)) continue;
+        const identity = identityFromItem(item);
+        if (!identity) continue;
+        const indexed = await this.vectorStore.isIndexedByIdentity(identity.libraryKey, identity.itemKey);
+        if (!indexed) pending.push(item);
+      }
     }
 
     if (pending.length === 0) {
@@ -1013,6 +1061,12 @@ class ZotSeekPlugin {
     indexLibraryItem.setAttribute('label', getString('menu-updateLibrary'));
     indexLibraryItem.addEventListener('command', () => this.onIndexLibrary());
 
+    // Create "Add Note Text to Index" menu item
+    const backfillNotesItem = doc.createXULElement('menuitem');
+    backfillNotesItem.id = 'zotseek-backfill-notes';
+    backfillNotesItem.setAttribute('label', getString('menu-backfillNotes'));
+    backfillNotesItem.addEventListener('command', () => this.onBackfillNotes());
+
     // Create "Remove from Index" menu item
     const removeFromIndexItem = doc.createXULElement('menuitem');
     removeFromIndexItem.id = 'zotseek-remove-from-index';
@@ -1025,6 +1079,7 @@ class ZotSeekPlugin {
     itemMenu.appendChild(indexSelectedItem);
     itemMenu.appendChild(indexCollectionItem);
     itemMenu.appendChild(indexLibraryItem);
+    itemMenu.appendChild(backfillNotesItem);
     itemMenu.appendChild(removeFromIndexItem);
 
     this.logger.info('Context menu registered successfully');
@@ -1471,6 +1526,65 @@ class ZotSeekPlugin {
   }
 
   /**
+   * Backfill note text into items that are already in the index.
+   *
+   * Update Library Index decides what to skip by presence, not by content, so
+   * switching note indexing on leaves an already-indexed library exactly as it
+   * was: the items whose notes are missing are precisely the ones that path
+   * refuses to touch. This is the one bulk action that re-indexes items that
+   * are already there, and it is limited to the items that can gain from it.
+   */
+  private async onBackfillNotes(): Promise<void> {
+    if (this.indexing) {
+      this.showAlert(getString('indexing-alreadyInProgress'));
+      return;
+    }
+
+    const Z = getZotero();
+    if (!Z) return;
+
+    // With note indexing off, every candidate would be re-indexed to produce
+    // exactly the chunks it already has. Nothing to do but say so.
+    if (!isNoteIndexingEnabled()) {
+      this.showAlert(getString('notesBackfill-disabled'));
+      return;
+    }
+
+    // Same scope rule as Update Library Index, resolved to concrete library
+    // ids so the resume marker is not at the mercy of a later pref change.
+    const libraryIds = this.getIndexScope() === 'all'
+      ? this.zoteroAPI.getAllLibraries().map((lib) => lib.libraryID)
+      : [Z.Libraries.userLibraryID];
+
+    await this.ensureStoreReady();
+    if (!this.vectorStore) return;
+
+    showQuickNotification(getString('notesBackfill-scanning'), 'default');
+    const candidates = await collectNoteBackfillItems(
+      this.zoteroAPI,
+      libraryIds,
+      makeNoteBackfillDeps(this.vectorStore),
+    );
+    this.logger.info(
+      `Notes backfill: ${candidates.length} indexed item(s) with notes across ${libraryIds.length} library/libraries`
+    );
+
+    if (candidates.length === 0) {
+      this.showAlert(getString('notesBackfill-none'));
+      return;
+    }
+
+    const confirmed = Services.prompt.confirm(
+      Z.getMainWindow(),
+      getString('notesBackfill-title'),
+      getString('notesBackfill-confirmMsg', { count: candidates.length })
+    );
+    if (!confirmed) return;
+
+    await this.indexItems(candidates, { type: 'notes-backfill', libraryIds });
+  }
+
+  /**
    * Remove selected items from the ZotSeek index
    */
   private async onRemoveFromIndex(): Promise<void> {
@@ -1525,6 +1639,14 @@ class ZotSeekPlugin {
     this.indexing = true;
     const Z = getZotero();
 
+    // A notes backfill is the only run that re-indexes items already in the
+    // index, so it is the only one that skips the already-indexed filter and
+    // needs the overwrite guards. Derived from the scope marker rather than
+    // from a caller-supplied flag: no other path can reach either behaviour,
+    // and the crash-resume path gets both for free because it replays the
+    // same marker.
+    const isNoteBackfill = scope?.type === 'notes-backfill';
+
     // Persist intent for auto-resume after crash/sleep. Only bother for runs
     // big enough that resuming saves real time — single-item indexing doesn't
     // need to survive a restart.
@@ -1574,6 +1696,12 @@ class ZotSeekPlugin {
         }
         const identity = identityFromItem(item);
         if (!identity) continue;
+        if (isNoteBackfill) {
+          // Every candidate is already indexed; that filter is exactly what
+          // makes the backfill necessary, so it must not run here.
+          itemsToIndex.push(item);
+          continue;
+        }
         const isIndexed = await this.vectorStore!.isIndexedByIdentity(identity.libraryKey, identity.itemKey);
         if (!isIndexed) {
           itemsToIndex.push(item);
@@ -1610,6 +1738,7 @@ class ZotSeekPlugin {
       let totalItemsIndexed = 0;
       let totalChunksIndexed = 0;
       let totalItemsSkipped = 0; // Items with no extractable content
+      let totalItemsGuarded = 0; // Re-index targets dropped by filterReindexTargets
       let totalItemsTruncated = 0; // Items where maxChunksPerPaper cut content
       const truncatedTitles: string[] = []; // For end-of-run summary log
 
@@ -1629,7 +1758,7 @@ class ZotSeekPlugin {
         progressWindow.setHeadline(getString('indexing-batchExtracting', { current: batchNumber, total: totalBatches }));
         this.logger.info(`Batch ${batchNumber}/${totalBatches}: Extracting ${batchItems.length} items`);
 
-        const extractedBatch = await textExtractor.extractChunksFromItems(
+        const extractedRaw = await textExtractor.extractChunksFromItems(
           batchItems,
           indexingMode,
           undefined,
@@ -1645,8 +1774,21 @@ class ZotSeekPlugin {
           }
         );
 
-        const batchSkipped = batchItems.length - extractedBatch.length;
+        const batchSkipped = batchItems.length - extractedRaw.length;
         totalItemsSkipped += batchSkipped;
+
+        // A backfill overwrites items that are already indexed, so it carries
+        // the same two drops the auto-index path does: an unchanged content
+        // hash (the notes are already in the index and the write would be
+        // byte-identical), and a full-mode run that produced no document text
+        // for an item that has a PDF, where writing would replace a whole
+        // paper with a summary plus its notes because the file is unreachable.
+        // Ordinary bulk indexing only writes items with no chunks at all, so
+        // it has nothing to overwrite and skips the check.
+        const extractedBatch = isNoteBackfill
+          ? await filterReindexTargets(this.vectorStore!, extractedRaw, indexingMode, this.logger)
+          : extractedRaw;
+        totalItemsGuarded += extractedRaw.length - extractedBatch.length;
 
         // === STEP 2: Generate embeddings for this batch ===
         const batchChunks: Array<{ id: string; text: string; title: string }> = [];
@@ -1679,8 +1821,12 @@ class ZotSeekPlugin {
             );
           },
           // Phase 1 kept only items isIndexedByIdentity said were NOT indexed
-          // under the active model, so there is nothing to reuse here.
-          { knownUnindexed: true }
+          // under the active model, so there is nothing to reuse there and the
+          // lookup would be a guaranteed miss. A notes backfill is the
+          // opposite case: every item already has chunks under the active
+          // model and only its note chunks are new, so the lookup pays for
+          // itself and the document chunks are never re-embedded.
+          { knownUnindexed: !isNoteBackfill }
         );
 
         if (failedChunks > 0) {
@@ -1788,6 +1934,10 @@ class ZotSeekPlugin {
 
       if (totalItemsSkipped > 0) {
         progressWindow.addLine(getString('indexing-completeNoContent', { count: totalItemsSkipped }));
+      }
+
+      if (totalItemsGuarded > 0) {
+        progressWindow.addLine(getString('indexing-completeUnchanged', { count: totalItemsGuarded }));
       }
 
       if (totalItemsTruncated > 0) {
@@ -1914,7 +2064,7 @@ class ZotSeekPlugin {
         return;
       }
 
-      const extractedItems = await filterSilentReindexTargets(
+      const extractedItems = await filterReindexTargets(
         this.vectorStore!, allExtracted, indexingMode, this.logger
       );
       if (extractedItems.length === 0) {

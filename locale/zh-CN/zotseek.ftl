@@ -9,6 +9,7 @@ zotseek-menu-openZotSeek = 打开 ZotSeek...
 zotseek-menu-indexSelected = 为 ZotSeek 索引选中项
 zotseek-menu-indexCollection = 索引当前合集
 zotseek-menu-updateLibrary = 更新文献库索引
+zotseek-menu-backfillNotes = 将笔记文本加入索引
 zotseek-menu-removeFromIndex = 从 ZotSeek 索引中移除
 zotseek-menu-findRelated = 查找相关文献
 
@@ -288,6 +289,21 @@ zotseek-resume-scopeLibrary = 您的所有文献库
 zotseek-resume-scopeUserLibrary = 您的个人文献库
 zotseek-resume-scopeCollection = "{ $name }" 收藏夹
 zotseek-resume-scopeCollections = 选定的 { $count } 个合集
+zotseek-resume-scopeNotes = 已索引且含笔记的条目
+
+# “将笔记文本加入索引”：重新索引已在索引中的条目，以加入其笔记文本。
+# “更新文献库索引”会跳过这些条目，因此若不使用此功能，该偏好设置只会对开启之后才索引的条目生效。
+zotseek-notesBackfill-disabled = “同时索引子笔记”已关闭，没有可加入的笔记文本。
+
+    请先在“设置 → ZotSeek”中开启，然后再运行一次。
+zotseek-notesBackfill-scanning = 正在查找已索引且含笔记的条目...
+zotseek-notesBackfill-none = 没有已索引的条目需要加入笔记。尚未索引的条目会在“更新文献库索引”时一并索引其笔记。
+zotseek-notesBackfill-title = ZotSeek - 将笔记文本加入索引
+zotseek-notesBackfill-confirmMsg = 有 { $count } 个已索引的条目，其笔记尚未进入索引。
+
+    将索引这些笔记，并复用条目其余内容，因此比完整重新索引快得多。
+
+    继续？
 
     已索引的条目将被跳过。
 
@@ -321,6 +337,7 @@ zotseek-indexing-completeChunks = ✓ 总分块数：{ $count }
 zotseek-indexing-completeAvg = ✓ 平均分块/条目：{ $avg }
 zotseek-indexing-completeDuration = ✓ 时长：{ $duration }
 zotseek-indexing-completeNoContent = ⚠ 无内容：{ $count } 个条目
+zotseek-indexing-completeUnchanged = ✓ 保持不变：{ $count } 个条目已是最新，或因无法读取其正文而予以保留
 zotseek-indexing-completeTruncated = ⚠ 部分内容：{ $count } 个条目达到每篇最大分块数限制。请提高限制或切换至摘要模式以索引完整文本。
 zotseek-indexing-completeSuccess = 索引已成功完成！
 zotseek-indexing-cancelled = 索引已取消

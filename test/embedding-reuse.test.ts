@@ -65,6 +65,28 @@ describe('splitReusable', () => {
     assert.deepEqual(result.reused.get('custom-key'), { embedding: [0.1], modelId: MODEL });
   });
 
+  test('a notes backfill re-embeds only the appended note chunks', () => {
+    // The backfill re-runs the whole extraction for an item that is already
+    // indexed: its document chunks come back byte-identical and only the note
+    // chunks are new. That is what makes backfilling a whole library
+    // affordable, so it is worth pinning rather than assuming.
+    const storedDocs = new Map([[1, new Map([
+      ['title + abstract', [0.1]],
+      ['page one body', [0.2]],
+      ['page two body', [0.3]],
+    ])]]);
+    const chunks = [
+      candidate(1, 0, 'title + abstract'),
+      candidate(1, 1, 'page one body'),
+      candidate(1, 2, 'page two body'),
+      candidate(1, 3, 'my note, first paragraph'),
+      candidate(1, 4, 'my note, second paragraph'),
+    ];
+    const result = splitReusable(chunks, stored(MODEL, storedDocs), MODEL);
+    assert.deepEqual(result.toEmbed.map(c => c.id), ['1_3', '1_4']);
+    assert.deepEqual([...result.reused.keys()], ['1_0', '1_1', '1_2']);
+  });
+
   test('produces a clean miss when the stored model differs', () => {
     const chunks = [candidate(1, 0, 'text'), candidate(1, 1, 'other')];
     const byItem = new Map([[1, new Map([['text', [0.5, 0.6]], ['other', [0.7, 0.8]]])]]);
