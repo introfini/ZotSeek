@@ -260,6 +260,8 @@ class ZotSeekPlugin {
       'zotseek.indexScope': 'user', // 'user' (My Library) or 'all' (all libraries)
       'zotseek.serverModels': '[]', // JSON array of server-backed model entries (issue #42)
       'zotseek.autoCompact': true, // Reclaim space in zotseek.sqlite during Zotero's idle maintenance (Zotero 10+)
+      'zotseek.indexNotes': false,      // Index child note text with the parent item (issue #50)
+      'zotseek.noteIndexDelay': 60,     // Quiet period in seconds before re-indexing after a note edit
       // Experimental: run embeddings on the GPU via WebGPU (Zotero 11+ only).
       // Off by default: Firefox 153's WebGPU is 6-11x SLOWER than the WASM
       // path for this workload (measured on Apple Silicon; see issue #2).

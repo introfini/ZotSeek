@@ -14,12 +14,44 @@ import {
   IndexingMode,
   chunkDocumentEx,
   chunkDocumentWithPagesEx,
+  chunkNoteText,
   getChunkOptionsFromPrefs,
   getIndexingMode
 } from '../utils/chunker';
+import { noteHtmlToText } from '../utils/note-text';
 import { TextSourceType } from './vector-store-sqlite';
 
 declare const Zotero: any;
+
+/**
+ * Read every child note of an item, convert HTML to plain text, and chunk
+ * the combined note text. Module-level (not a class method) because
+ * SpiderMonkey does not reliably register all class methods added to
+ * TextExtractor in this project's esbuild IIFE bundle (see CLAUDE.md).
+ */
+async function collectNoteChunks(
+  item: ZoteroItem,
+  title: string,
+  options: ChunkOptions
+): Promise<Chunk[]> {
+  if (!Zotero.Prefs.get('zotseek.indexNotes', true)) return [];
+
+  const getNotes = (item as any).getNotes;
+  if (typeof getNotes !== 'function') return [];
+  const noteIds: number[] = getNotes.call(item) || [];
+  if (noteIds.length === 0) return [];
+
+  const parts: string[] = [];
+  for (const noteId of noteIds) {
+    const note = await Zotero.Items.getAsync(noteId);
+    if (!note || note.deleted) continue;
+    const text = noteHtmlToText(note.getNote() || '');
+    if (text) parts.push(text);
+  }
+  if (parts.length === 0) return [];
+
+  return chunkNoteText(title, parts.join('\n\n'), options);
+}
 
 export interface ExtractedText {
   itemId: number;
@@ -161,6 +193,12 @@ export class TextExtractor {
         wasTruncated = result.wasTruncated;
         pagesIndexed = result.pagesIndexed;
         pagesTotal = result.pagesTotal;
+      }
+
+      const noteChunks = await collectNoteChunks(item, title, chunkOptions);
+      if (noteChunks.length > 0) {
+        const base = chunks.length;
+        chunks = chunks.concat(noteChunks.map((c, i) => ({ ...c, index: base + i })));
       }
 
       if (chunks.length === 0) {
