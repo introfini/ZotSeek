@@ -255,6 +255,102 @@ async function embedChunksWithReuse(
 }
 
 /**
+ * Chunk types that carry document body text, as opposed to the title/abstract
+ * summary chunk or a child note. 'fulltext' is not produced by the current
+ * chunker but is a stored text_source value, so it is listed for safety.
+ */
+const DOCUMENT_CHUNK_TYPES = new Set<string>(['methods', 'findings', 'content', 'fulltext']);
+
+/**
+ * Whether the item has a PDF attachment registered in Zotero, regardless of
+ * whether its file can be opened right now. An unreachable file is precisely
+ * the case this is used to detect, so file existence is deliberately not part
+ * of the test.
+ */
+async function hasPDFAttachment(item: any): Promise<boolean> {
+  try {
+    const attachmentIDs: number[] = item?.getAttachments?.() || [];
+    for (const attId of attachmentIDs) {
+      const att = await Zotero.Items.getAsync(attId);
+      if (!att || typeof att.isAttachment !== 'function' || !att.isAttachment()) continue;
+      if ((att.attachmentMIMEType || '') === 'application/pdf') return true;
+      const path = att.getFilePath?.() || '';
+      if (path && /\.pdf$/i.test(path)) return true;
+    }
+  } catch (e: any) {
+    Zotero.debug(`[ZotSeek] hasPDFAttachment failed for item ${item?.id}: ${e?.message || e}`);
+  }
+  return false;
+}
+
+/**
+ * Decide which of the freshly extracted items the SILENT (auto-index) path may
+ * write. That path replaces an item's chunks rather than adding to them, and it
+ * runs unattended off an ordinary user action, so it has to be more careful
+ * than the bulk path the user explicitly asked for.
+ *
+ * Two guards, both drops rather than partial writes:
+ *
+ *  - Unchanged content. The stored hash for the active model already matches,
+ *    so the write would produce byte-identical chunks. This removes the entire
+ *    no-op re-index path, which is the common case for note notifications.
+ *  - Full mode produced no document body although the item has a PDF. The file
+ *    is unreachable (a linked file on an unmounted volume, download-as-needed)
+ *    or PDFWorker failed; replacing a fully indexed paper with a single summary
+ *    chunk would be invisible damage, because item_models survives so the item
+ *    still reads as indexed and every bulk path skips it afterwards. Only
+ *    clearing and rebuilding the index repairs that.
+ *
+ * Module-level rather than a class method: SpiderMonkey does not reliably
+ * register methods added to the class compiled into this esbuild IIFE bundle.
+ */
+async function filterSilentReindexTargets(
+  store: IVectorStore,
+  extracted: ExtractedChunks[],
+  indexingMode: string,
+  logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
+): Promise<ExtractedChunks[]> {
+  const modelId = getActiveModelId();
+  const keep: ExtractedChunks[] = [];
+
+  for (const e of extracted) {
+    const item = Zotero.Items.get(e.itemId);
+    const identity = item ? identityFromItem(item) : null;
+
+    if (identity) {
+      let changed = true;
+      try {
+        changed = await store.needsReindexByIdentity(
+          identity.libraryKey, identity.itemKey, e.contentHash, modelId
+        );
+      } catch (err: any) {
+        // A failed lookup must not block indexing; fall through and write.
+        logger.warn(`Re-index check failed for "${e.title}": ${err?.message || err}`);
+      }
+      if (!changed) {
+        logger.info(`Skipping "${e.title}": content unchanged since the last index`);
+        continue;
+      }
+    }
+
+    if (indexingMode === 'full' && !e.chunks.some(c => DOCUMENT_CHUNK_TYPES.has(c.type))) {
+      if (item && await hasPDFAttachment(item)) {
+        logger.warn(
+          `Skipping auto re-index of "${e.title}": full mode produced no document text ` +
+          `although the item has a PDF (file unreachable or extraction failed). ` +
+          `Keeping the existing chunks rather than replacing them with a summary.`
+        );
+        continue;
+      }
+    }
+
+    keep.push(e);
+  }
+
+  return keep;
+}
+
+/**
  * Main plugin class
  */
 class ZotSeekPlugin {
@@ -1753,12 +1849,23 @@ class ZotSeekPlugin {
 
       // Extract chunks from items
       itemRow.setText(getString('indexing-extracting'));
-      const extractedItems = await textExtractor.extractChunksFromItems(filteredItems, indexingMode);
+      const allExtracted = await textExtractor.extractChunksFromItems(filteredItems, indexingMode);
 
-      if (extractedItems.length === 0) {
+      if (allExtracted.length === 0) {
         this.logger.info('No content extracted from items');
         try { itemRow.setIcon('chrome://zotero/skin/cross.png'); } catch { /* ignore */ }
         itemRow.setText(getString('indexing-noContent'));
+        progressWin.startCloseTimer(3000);
+        return;
+      }
+
+      const extractedItems = await filterSilentReindexTargets(
+        this.vectorStore!, allExtracted, indexingMode, this.logger
+      );
+      if (extractedItems.length === 0) {
+        this.logger.info('Nothing to re-index: every queued item is already up to date');
+        try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
+        itemRow.setText(getString('indexing-alreadyUpToDate'));
         progressWin.startCloseTimer(3000);
         return;
       }

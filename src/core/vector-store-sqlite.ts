@@ -1748,8 +1748,33 @@ export class VectorStoreSQLite {
     }
   }
 
-  async needsReindexByIdentity(libraryKey: string, itemKey: string, contentHash: string): Promise<boolean> {
+  /**
+   * Whether an item's content has changed since it was last indexed.
+   *
+   * @param modelId When given, the comparison is against the hash stored for
+   *   THAT model in item_models. `items.content_hash` only records whichever
+   *   model wrote last, so without this an item indexed under model A and then
+   *   switched to model B would report "no re-index needed" while having no
+   *   chunks under B at all. Callers that gate a write on this must pass the
+   *   model they are about to write.
+   */
+  async needsReindexByIdentity(
+    libraryKey: string,
+    itemKey: string,
+    contentHash: string,
+    modelId?: string
+  ): Promise<boolean> {
     await this.ensureInit();
+    if (modelId) {
+      const storedForModel = await Zotero.DB.valueQueryAsync(
+        `SELECT im.content_hash FROM ${DB_NAME}.item_models im
+         JOIN ${DB_NAME}.items i ON i.item_pk = im.item_pk
+         WHERE i.library_key = ? AND i.item_key = ? AND im.model_id = ?`,
+        [libraryKey, itemKey, modelId]
+      );
+      if (!storedForModel) return true;  // not indexed under this model
+      return String(storedForModel) !== contentHash;
+    }
     const stored = await Zotero.DB.valueQueryAsync(
       `SELECT content_hash FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
       [libraryKey, itemKey]

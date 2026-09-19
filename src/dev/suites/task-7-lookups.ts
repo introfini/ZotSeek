@@ -114,6 +114,46 @@ selfTest.register('task-7-lookups', async () => {
       assertEq(result, true);
     }),
 
+    await scenario('needsReindexByIdentity with a modelId reads item_models, not items', async () => {
+      assertTrue(known, 'no non-orphan indexed item available');
+      // items.content_hash records whichever model wrote last, so a match
+      // there is not proof of coverage for the model about to be written.
+      // The model-aware form must say "re-index needed" for a model the item
+      // has no item_models row for, even when the hash matches.
+      const result = await vectorStoreSQLite.needsReindexByIdentity(
+        known!.libraryKey,
+        known!.itemKey,
+        known!.contentHash,
+        'no-such-model'
+      );
+      assertEq(result, true);
+    }),
+
+    await scenario('needsReindexByIdentity with the real model matches its stored hash', async () => {
+      assertTrue(known, 'no non-orphan indexed item available');
+      const modelId = await Zotero.DB.valueQueryAsync(
+        `SELECT model_id FROM ${DB}.item_models WHERE item_pk = ? LIMIT 1`,
+        [known!.itemPk]
+      );
+      if (!modelId) return;  // item has no per-model row yet
+      const hash = await Zotero.DB.valueQueryAsync(
+        `SELECT content_hash FROM ${DB}.item_models WHERE item_pk = ? AND model_id = ?`,
+        [known!.itemPk, modelId]
+      );
+      assertEq(
+        await vectorStoreSQLite.needsReindexByIdentity(
+          known!.libraryKey, known!.itemKey, String(hash), String(modelId)
+        ),
+        false
+      );
+      assertEq(
+        await vectorStoreSQLite.needsReindexByIdentity(
+          known!.libraryKey, known!.itemKey, 'different-hash', String(modelId)
+        ),
+        true
+      );
+    }),
+
     await scenario('getUniqueItemIds returns array of current local Zotero IDs', async () => {
       const ids = await vectorStoreSQLite.getUniqueItemIds();
       assertTrue(Array.isArray(ids), 'expected array');
