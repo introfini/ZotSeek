@@ -115,7 +115,7 @@ flowchart TD
 
 #### 1️⃣ Indexing Your Library
 
-When you use "Index Current Collection" or "Update Library Index":
+When you use "Index Current Collection" or "Update Entire Library":
 
 ```
 For each paper:
@@ -311,7 +311,7 @@ After indexing, a one-line summary in the progress window also warns when any pa
 
 Enable **"Also index child notes"** in Settings to make the text of notes attached to an item searchable alongside its abstract or full text. This includes notes created by [Better Notes](https://github.com/windingwind/zotero-better-notes), since it stores its content in the same note field Zotero itself uses. A note's text is added to its parent item, not indexed as a separate result.
 
-- **Off by default, and turning it on does not re-index anything by itself.** Items indexed from then on include their notes. Items that are already in the index keep exactly what they have until you run **"Add Note Text to Index"** (below), or until you edit each note individually.
+- **Off by default, and turning it on does not re-index anything by itself.** Items indexed from then on include their notes. Items that are already in the index keep exactly what they have until you run **"Add Note Text to Existing Items"** (below), or until you edit each note individually.
 - **Works in both modes.** This setting is independent of Abstract/Full Document mode; it adds note text on top of whichever mode is active.
 - **Not indexed:** standalone notes (notes not attached to any item), comments on PDF annotations, and images inside a note — every embedding model ZotSeek ships is text-only. Text surrounding an image is still indexed; only the image itself is skipped.
 - **Editing a note** re-indexes its parent after a quiet period (default 60 seconds, adjustable via **"Delay before re-indexing an edited note"**) — but only while **"Automatically index new items"** is also enabled. With auto-indexing off, edited notes are picked up the next time you run Update Index by hand.
@@ -320,12 +320,12 @@ Enable **"Also index child notes"** in Settings to make the text of notes attach
 
 #### Adding Notes to Items That Are Already Indexed
 
-**"Add Note Text to Index"**, in the item context menu next to the other indexing commands, adds note text to items that already have an entry in the index. Nothing else does: **Update Library Index** skips anything already indexed, whatever changed about it, so without this action the setting would only ever apply to items indexed after you switched it on.
+**"Add Note Text to Existing Items"**, in the item context menu's ZotSeek submenu next to the other indexing commands, adds note text to items that already have an entry in the index. Nothing else does: **Update Entire Library** skips anything already indexed, whatever changed about it, so without this action the setting would only ever apply to items indexed after you switched it on.
 
-- **What it picks up:** items that are **already indexed**, and that have at least one note which is not in the trash. Items that are not indexed yet are left alone, since **Update Library Index** covers those, notes included.
-- **Scope:** your personal library, or every library, following the same **Index scope** setting as Update Library Index.
+- **What it picks up:** items that are **already indexed**, and that have at least one note which is not in the trash. Items that are not indexed yet are left alone, since **Update Entire Library** covers those, notes included.
+- **Scope:** your personal library, or every library, following the same **Index scope** setting as Update Entire Library.
 - **Cost:** existing embeddings are reused, so only the note text goes to the model. In Full Document mode each candidate PDF is still read again to confirm the rest of the item has not changed, so the run is much faster than re-indexing from scratch but not instant.
-- **Interruptions:** pause, cancel and resume-after-a-crash behave exactly as they do for Update Library Index.
+- **Interruptions:** pause, cancel and resume-after-a-crash behave exactly as they do for Update Entire Library.
 - **If the setting is off**, the action stops and asks you to turn it on first; there would be no note text to add.
 - **Running it again is safe.** Items whose notes are already indexed are left untouched rather than rewritten, and are reported as such at the end of the run.
 
@@ -351,7 +351,7 @@ Go to **Zotero → Settings → ZotSeek → Embedding Model** to pick the model 
 **Three ways to index with a model (all preserve other models' embeddings):**
 1. The prompt shown immediately after you switch to a new model.
 2. The **Index remaining** button on the coverage line in Settings.
-3. The toolbar or right-click **Index Library** action — now model-aware, it backfills items not yet covered by the active model rather than reporting "already indexed."
+3. The toolbar or right-click → ZotSeek → **Update Entire Library** action — now model-aware, it backfills items not yet covered by the active model rather than reporting "already indexed."
 
 **Switching models:** switching to a different model triggers a background re-index for items that have not yet been indexed with the new model. Items indexed with other models retain their embeddings — switching back is instant.
 
@@ -567,7 +567,7 @@ These are third-party projects, maintained by their authors and released under t
 4. Select the downloaded `.xpi` file.
 5. Restart Zotero when prompted.
 
-After installation, ZotSeek is ready to use — open **Zotero → Settings → ZotSeek** to configure it, then right-click a collection and choose **"Update Library Index"** to build your index.
+After installation, ZotSeek is ready to use — open **Zotero → Settings → ZotSeek** to configure it, then right-click a collection and choose **ZotSeek → "Update Entire Library"** to build your index.
 
 **Updating:** ZotSeek checks for updates automatically. New releases are delivered through Zotero's built-in plugin update mechanism, so you'll be notified when a new version is available.
 
@@ -605,10 +605,10 @@ The interactive release script bumps the version, syncs `manifest.json` and `upd
 
 ### Index Your Library
 
-1. Right-click on a collection → **"Index Current Collection"**. Subcollections are
-   included. On Zotero 10 you can select several collections first and index them in
+1. Right-click on a collection → **ZotSeek → "Index Current Collection"**. Subcollections
+   are included. On Zotero 10 you can select several collections first and index them in
    one pass; items filed in more than one of them are indexed once.
-2. Or use **"Update Library Index"** to index all items
+2. Or use **"Update Entire Library"** to index all items
 3. A progress window will appear showing:
    - Current item being processed
    - Progress percentage
@@ -699,7 +699,7 @@ ZotSeek can automatically index papers as you add them to your library:
 
 **Manual removal:** To remove specific items from the index without deleting them:
 1. Select one or more items in Zotero
-2. Right-click → **"Remove from ZotSeek Index"**
+2. Right-click → **ZotSeek → "Remove from Index"**
 3. A notification confirms how many items were removed
 
 This is useful when you want to re-index specific items (e.g., after updating a PDF), or to exclude items from search results without deleting them from your library.
@@ -719,7 +719,7 @@ You can prevent specific items from being indexed by tagging them:
 ### ZotSeek Search Dialog
 
 1. Click the **ZotSeek button** in the toolbar (🔍✨)
-2. Or right-click → **"Open ZotSeek..."**
+2. Or right-click → **ZotSeek → "Search Library..."**
 3. Enter a natural language query (e.g., "machine learning for medical diagnosis")
 4. **Optional:** Click "+" to add more queries (up to 4) and combine with AND/OR
 5. View results ranked by semantic similarity
