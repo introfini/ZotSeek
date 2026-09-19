@@ -32,6 +32,7 @@ import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 import { identityFromItem, libraryKeyFromLocalID, localItemIDFromIdentity } from './core/identity-resolver';
 import { getActiveModelId } from './core/model-registry';
+import { splitReusable, ReuseCandidate, StoredEmbeddings } from './core/embedding-reuse';
 import { initServerManager, shutdownServerManager } from './server/server-manager';
 import { registerModelsResourceSubstitution, verifyModelsResourceSubstitution } from './core/model-download';
 // Self-test harness (mounted only when extensions.zotseek.devMode = true)
@@ -200,6 +201,57 @@ async function embedChunks(
     }
   }
   return { embeddings, failedChunks, failedItems };
+}
+
+/**
+ * Re-index wrapper around embedChunks that reuses embeddings for chunks whose
+ * text has not changed since the item was last indexed under the active
+ * model. Builds reuse candidates from the same extracted batch the chunk
+ * records come from, so itemId is still in scope, and only sends the
+ * genuinely new/changed chunks to embedChunks.
+ *
+ * Not used by reindexForActiveModel: its items have no chunks under the
+ * active model yet, so every lookup would be a guaranteed miss and a wasted
+ * query.
+ */
+async function embedChunksWithReuse(
+  store: IVectorStore,
+  extracted: Array<{ itemId: number; chunks: Array<{ index: number; text: string }> }>,
+  chunks: ChunkForEmbedding[],
+  onProgress: (processed: number) => Promise<void> | void,
+): Promise<EmbedChunksResult> {
+  const modelId = getActiveModelId();
+
+  const stored: StoredEmbeddings = { modelId, byItem: new Map() };
+  for (const { itemId } of extracted) {
+    if (stored.byItem.has(itemId)) continue;
+    const item = Zotero.Items.get(itemId);
+    const identity = item ? identityFromItem(item) : null;
+    if (!identity) continue;
+    stored.byItem.set(
+      itemId,
+      await store.getChunkTextEmbeddings(identity.libraryKey, identity.itemKey, modelId)
+    );
+  }
+
+  const candidates: ReuseCandidate[] = [];
+  for (const e of extracted) {
+    for (const chunk of e.chunks) {
+      candidates.push({ id: `${e.itemId}_${chunk.index}`, itemId: e.itemId, text: chunk.text });
+    }
+  }
+
+  const { toEmbed, reused } = splitReusable(candidates, stored, modelId);
+  if (reused.size > 0) {
+    Zotero.debug(`[ZotSeek] Reusing ${reused.size} of ${candidates.length} embeddings; embedding ${toEmbed.length}`);
+  }
+
+  const wanted = new Set(toEmbed.map(c => c.id));
+  const result = await embedChunks(chunks.filter(c => wanted.has(c.id)), onProgress);
+  for (const [key, value] of reused) {
+    result.embeddings.set(key, value);
+  }
+  return result;
 }
 
 /**
@@ -1480,7 +1532,9 @@ class ZotSeekPlugin {
         progressWindow.setHeadline(getString('indexing-batchEmbedding', { current: batchNumber, total: totalBatches }));
         this.logger.info(`Batch ${batchNumber}/${totalBatches}: Embedding ${batchChunks.length} chunks`);
 
-        const { embeddings: embeddingMap, failedChunks, failedItems } = await embedChunks(
+        const { embeddings: embeddingMap, failedChunks, failedItems } = await embedChunksWithReuse(
+          this.vectorStore!,
+          extractedBatch,
           batchChunks,
           async (processed) => {
             await progressWindow.waitIfPaused();
@@ -1726,7 +1780,9 @@ class ZotSeekPlugin {
       }
 
       // Generate embeddings with progress updates
-      const { embeddings: embeddingMap, failedChunks, failedItems } = await embedChunks(
+      const { embeddings: embeddingMap, failedChunks, failedItems } = await embedChunksWithReuse(
+        this.vectorStore!,
+        extractedItems,
         textsForEmbedding,
         (processed) => {
           itemRow.setText(getString('indexing-embedding', { current: processed, total: textsForEmbedding.length }));
@@ -1739,6 +1795,11 @@ class ZotSeekPlugin {
       let autoTruncatedCount = 0;
 
       for (const extracted of extractedItems) {
+        // Delete existing chunks for the active model only — this is a
+        // re-index path once note edits trigger auto-index, and without this
+        // an item whose chunk count shrank keeps orphaned high-index chunks.
+        await this.vectorStore!.deleteItemChunks(extracted.itemId, getActiveModelId());
+
         if (extracted.wasTruncated) {
           autoTruncatedCount++;
           const coverage = extracted.pagesTotal > 0
