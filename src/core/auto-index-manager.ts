@@ -29,6 +29,10 @@ export class AutoIndexManager {
   // Queue of items waiting to be indexed
   private pendingItems: Set<number> = new Set();
 
+  // Delay (seconds) for the currently scheduled batch timer, when the shortest-delay
+  // rule has overridden the default. Cleared once the timer fires or is stopped.
+  private pendingDelay: number | undefined;
+
   // Items waiting for PDF attachment to be ready
   private waitingForPDF: Map<number, { attempts: number; timer: any }> = new Map();
 
@@ -132,6 +136,7 @@ export class AutoIndexManager {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
+    this.pendingDelay = undefined;
 
     // Clear waiting timers
     for (const [itemId, data] of this.waitingForPDF) {
@@ -168,8 +173,12 @@ export class AutoIndexManager {
     ids: Array<string | number>,
     _extraData: any
   ): Promise<void> {
-    // Only handle item events
-    if (type !== 'item' || event !== 'add') {
+    // Only handle item events. 'trash' covers deleting a note: the item still
+    // resolves while trashed, so its parent can be re-indexed and the note text
+    // drops out. A permanent erase ('delete') leaves nothing to resolve and is
+    // picked up by the next manual Update Index; see the known limitation in
+    // the design doc.
+    if (type !== 'item' || (event !== 'add' && event !== 'modify' && event !== 'trash')) {
       return;
     }
 
@@ -184,6 +193,18 @@ export class AutoIndexManager {
         const itemId = rawId as number;
         const item = await Zotero.Items.getAsync(itemId);
         if (!item) continue;
+
+        // A note edit re-indexes the item the note belongs to. shouldProcess()
+        // rejects notes themselves, so this has to run first.
+        if (item.isNote() && item.parentID) {
+          const parent = await Zotero.Items.getAsync(item.parentID as number);
+          if (parent && this.shouldProcess(parent)) {
+            this.logger.info(`Note edited on: ${parent.getField('title')}`);
+            this.pendingItems.add(parent.id as number);
+            this.scheduleBatch(this.noteDelaySeconds());
+          }
+          continue;
+        }
 
         // Handle new top-level items (not attachments/notes)
         if (this.shouldProcess(item)) {
@@ -390,22 +411,39 @@ export class AutoIndexManager {
   }
 
   /**
+   * Note-edit quiet period. Kept separate from autoIndexDelay because 10 seconds
+   * of silence is normal for someone pausing mid-sentence while writing a note,
+   * whereas autoIndexDelay was calibrated for PDF attachments arriving after an item.
+   */
+  private noteDelaySeconds(): number {
+    const value = Zotero.Prefs.get('zotseek.noteIndexDelay', true);
+    return typeof value === 'number' && value > 0 ? value : 60;
+  }
+
+  /**
    * Schedule batch processing (debounced)
    * Resets timer on each call so indexing only fires
    * after items stop arriving for the configured delay.
    */
-  private scheduleBatch(): void {
-    // Reset timer on each new item (proper debounce)
+  private scheduleBatch(delaySeconds?: number): void {
+    const requested = delaySeconds
+      ?? Math.max(1, Zotero.Prefs.get('zotseek.autoIndexDelay', true) ?? 10);
+
+    // Shortest pending delay wins: a note still being typed must never hold
+    // back a newly arrived PDF. The cost is one extra pass over that note,
+    // which embedding reuse makes cheap.
+    this.pendingDelay = this.batchTimer
+      ? Math.min(this.pendingDelay ?? requested, requested)
+      : requested;
+
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
     }
 
-    // Read delay from preference at schedule time (dynamic)
-    const delaySec = Math.max(1, Zotero.Prefs.get('zotseek.autoIndexDelay', true) ?? 10);
-
     this.batchTimer = setTimeout(() => {
+      this.pendingDelay = undefined;
       this.processBatch();
-    }, delaySec * 1000);
+    }, this.pendingDelay * 1000);
   }
 
   /**
