@@ -25,6 +25,7 @@ export interface IVectorStore {
   put(embedding: import('./vector-store-sqlite').PaperEmbedding): Promise<void>;
   getByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding | undefined>;
   getItemChunksByIdentity(libraryKey: string, itemKey: string): Promise<import('./vector-store-sqlite').PaperEmbedding[]>;
+  getChunkTextEmbeddings(libraryKey: string, itemKey: string, modelId: string): Promise<Map<string, number[]>>;
   deleteItem(libraryKey: string, itemKey: string): Promise<void>;
   deleteChunksForItem(libraryKey: string, itemKey: string, modelId?: string): Promise<void>;
   isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean>;

@@ -2058,6 +2058,48 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Chunk text to embedding, for one item and one model, in a single round
+   * trip. getItemChunksByIdentity fans out into one getChunkByPk per chunk,
+   * which is ~101 queries for a 100-chunk item; reuse runs on every re-index,
+   * so it reads the two columns it needs directly.
+   */
+  async getChunkTextEmbeddings(
+    libraryKey: string,
+    itemKey: string,
+    modelId: string
+  ): Promise<Map<string, number[]>> {
+    await this.ensureInit();
+    const out = new Map<string, number[]>();
+
+    const pk = await Zotero.DB.valueQueryAsync(
+      `SELECT item_pk FROM ${DB_NAME}.items WHERE library_key = ? AND item_key = ?`,
+      [libraryKey, itemKey]
+    );
+    if (!pk) return out;
+
+    // Two single-column reads: multi-column SELECTs can come back empty on
+    // Zotero 8 (see the queryAsync quirk in CLAUDE.md).
+    const texts = await Zotero.DB.columnQueryAsync(
+      `SELECT chunk_text FROM ${DB_NAME}.chunks
+        WHERE item_pk = ? AND model_id = ? ORDER BY chunk_index`,
+      [Number(pk), modelId]
+    );
+    const embeddings = await Zotero.DB.columnQueryAsync(
+      `SELECT embedding FROM ${DB_NAME}.chunks
+        WHERE item_pk = ? AND model_id = ? ORDER BY chunk_index`,
+      [Number(pk), modelId]
+    );
+    if (!texts || !embeddings || texts.length !== embeddings.length) return out;
+
+    for (let i = 0; i < texts.length; i++) {
+      const text = texts[i];
+      if (typeof text !== 'string' || text === '') continue;
+      out.set(text, this.base64ToEmbedding(embeddings[i]));
+    }
+    return out;
+  }
+
+  /**
    * Get the summary embedding (chunk_index=0) for a specific item.
    * @deprecated Use getByIdentity(libraryKey, itemKey).
    */
