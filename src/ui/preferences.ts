@@ -478,6 +478,8 @@ class PreferencesManager {
       mcpServer: Z.Prefs.get('zotseek.mcpServer.enabled', true) ?? false,
       indexScope: Z.Prefs.get('zotseek.indexScope', true) || 'user',
       autoCompact: Z.Prefs.get('zotseek.autoCompact', true) ?? true,
+      indexNotes: Z.Prefs.get('zotseek.indexNotes', true) === true,
+      noteIndexDelay: Z.Prefs.get('zotseek.noteIndexDelay', true) ?? 60,
     };
 
     this.logger.debug(`Loaded preferences: ${JSON.stringify(prefs)}`);
@@ -496,6 +498,7 @@ class PreferencesManager {
     this.setCheckboxValue('zotseek-pref-autoIndex', prefs.autoIndex);
     this.setCheckboxValue('zotseek-pref-mcpServer', prefs.mcpServer);
     this.setCheckboxValue('zotseek-pref-autoCompact', prefs.autoCompact);
+    this.setCheckboxValue('zotseek-pref-indexNotes', prefs.indexNotes);
 
     // Automatic compaction rides on Zotero.DB.onIdle, which only exists on
     // Zotero 10+. Disable the control rather than hide it, so the requirement
@@ -506,6 +509,7 @@ class PreferencesManager {
     }
 
     this.setInputValue('zotseek-pref-autoIndexDelay', prefs.autoIndexDelay);
+    this.setInputValue('zotseek-pref-noteIndexDelay', prefs.noteIndexDelay);
 
     // Show/hide delay row based on auto-index state
     this.updateAutoIndexDelayVisibility(prefs.autoIndex);
@@ -683,6 +687,15 @@ class PreferencesManager {
       });
     }
 
+    const indexNotesCheckbox = doc.getElementById('zotseek-pref-indexNotes') as any;
+    if (indexNotesCheckbox) {
+      indexNotesCheckbox.addEventListener('command', () => {
+        const checked = indexNotesCheckbox.checked;
+        Z.Prefs.set('zotseek.indexNotes', checked === true, true);
+        this.logger.info(`Index child notes changed to: ${checked}`);
+      });
+    }
+
     const autoCompactCheckbox = doc.getElementById('zotseek-pref-autoCompact') as any;
     if (autoCompactCheckbox) {
       autoCompactCheckbox.addEventListener('command', () => {
@@ -736,6 +749,19 @@ class PreferencesManager {
         autoIndexDelayInput.value = String(value);
         Z.Prefs.set('zotseek.autoIndexDelay', value, true);
         this.logger.info(`Auto-index delay changed to: ${value}s`);
+      });
+    }
+
+    // Note-edit re-index delay input
+    const noteIndexDelayInput = doc.getElementById('zotseek-pref-noteIndexDelay') as HTMLInputElement;
+    if (noteIndexDelayInput) {
+      noteIndexDelayInput.addEventListener('change', () => {
+        let value = parseInt(noteIndexDelayInput.value, 10);
+        if (isNaN(value) || value < 1) value = 1;
+        if (value > 300) value = 300;
+        noteIndexDelayInput.value = String(value);
+        Z.Prefs.set('zotseek.noteIndexDelay', value, true);
+        this.logger.info(`Note index delay changed to: ${value}s`);
       });
     }
 

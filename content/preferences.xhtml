@@ -318,6 +318,16 @@
     </html:div>
   </html:div>
 
+  <checkbox id="zotseek-pref-indexNotes"
+            label="Also index child notes"
+            data-l10n-id="zotseek-pref-indexNotes"
+            native="true"
+            checked="false"
+            style="margin-top: 12px;" />
+  <html:p data-l10n-id="zotseek-pref-indexNotesDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    Indexes the text of notes attached to an item, in addition to the mode above. Turning this on re-indexes every item that has notes.
+  </html:p>
+
 </groupbox>
 
 <!-- Auto-Indexing -->
@@ -345,6 +355,20 @@
   </html:div>
   <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
     <html:span data-l10n-id="zotseek-pref-delayDesc">Wait this long after the last item is added before starting auto-indexing.</html:span>
+  </html:p>
+
+  <html:div id="zotseek-noteindex-delay-row" style="margin: 8px 0 0 24px; display: flex; align-items: center; gap: 8px;">
+    <html:label data-l10n-id="zotseek-pref-noteDelayLabel" for="zotseek-pref-noteIndexDelay" style="color: var(--zotseek-text-primary); font-size: 12px;">Delay before re-indexing an edited note:</html:label>
+    <html:input type="number"
+                id="zotseek-pref-noteIndexDelay"
+                class="zotseek-input"
+                min="1" max="300" step="5"
+                value="60"
+                style="width: 60px; padding: 4px 8px; border-radius: 4px; border-width: 1px; border-style: solid;" />
+    <html:span data-l10n-id="zotseek-pref-seconds" style="color: var(--zotseek-text-secondary); font-size: 12px;">seconds</html:span>
+  </html:div>
+  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    <html:span data-l10n-id="zotseek-pref-noteDelayDesc">Wait this long after the last change to a note before re-indexing its parent item.</html:span>
   </html:p>
 
   <html:div style="margin: 12px 0 0 24px; display: flex; align-items: center; gap: 8px;">
