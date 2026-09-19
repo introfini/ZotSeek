@@ -36,6 +36,7 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
 10. [Database Schema](#database-schema)
     - [Stable Identity (Schema v8)](#stable-identity-schema-v8)
     - [Per-Model Embeddings (Schema v9)](#per-model-embeddings-schema-v9)
+    - [Note Identity (Schema v10)](#note-identity-schema-v10)
 11. [Query Analysis](#query-analysis)
 
 ---
@@ -635,7 +636,7 @@ Overlap is common in RAG systems (e.g., LangChain defaults to ~200 token overlap
 
 ### Note Text Chunking
 
-Child notes are a separate text source (`note`, issue #50), gated by `zotseek.indexNotes` (default `false`) and applied in both indexing modes. When enabled, `collectNoteChunks()` (`src/core/text-extractor.ts`) reads every child note via `item.getNotes()`, converts each note's HTML body to plain text with `noteHtmlToText()` (`src/utils/note-text.ts`), and joins the results before chunking:
+Child notes are a separate text source (`note`, issue #50), gated by `zotseek.indexNotes` (default `false`) and applied in both indexing modes. When enabled, `collectNoteChunks()` (`src/core/text-extractor.ts`) reads every child note via `item.getNotes()`, converts each note's HTML body to plain text with `noteHtmlToText()` (`src/utils/note-text.ts`), and chunks **each note separately**:
 
 ```
 item.getNotes() → [noteId, ...]
@@ -644,21 +645,24 @@ item.getNotes() → [noteId, ...]
 noteHtmlToText(note.getNote())     block tags (<p>, <li>, <div>, ...) → "\n\n"
         │                          <img> stripped; entities unescaped after tags
         ▼
-join all notes with "\n\n"
-        │
+chunkNotes(title, [{key, text}, ...], options)
+        │      └─ chunkNoteText() once per note (same paragraph-based splitter
+        │         as the main content), then indices re-based across the
+        │         combined set and maxChunksPerPaper applied to that set
         ▼
-chunkNoteText(title, text, options)   same paragraph-based splitter as the
-        │                              main content, capped by maxChunksPerPaper
-        ▼
-Chunk[] with type: 'note'  ─────────►  appended to the item's other chunks
-                                        BEFORE the content hash is computed
+Chunk[] with type: 'note' and noteKey  ─►  appended to the item's other chunks
+                                            BEFORE the content hash is computed
 ```
+
+One note per chunking call, rather than one call over the joined text, for two reasons. The separator between two notes would be `"\n\n"`, which is exactly what the chunker splits paragraphs on, so short notes collapsed into a single chunk and a single vector: an item with three notes totalling 21,000 characters produced one chunk under `maxTokens: 8000`, too diluted to match a query aimed at any one of them. And embedding reuse keys off chunk text, so editing one note changed the joined text and forced every note chunk to be re-embedded — the exact case reuse was built for.
 
 Because note chunks are appended before `hashContent()` runs, editing a note's text changes the item's content hash exactly like editing the PDF would, which is what makes silent re-indexing pick up note edits.
 
-Note chunks do **not** share the main content's `maxChunksPerPaper` budget — `chunkNoteText()` applies its own `maxChunks` cap to the note text independently (`src/utils/chunker.ts`), and the result is concatenated after whatever the document chunker already produced. An item that fills the ceiling with PDF text and also has note-heavy notes can end up with roughly double `maxChunksPerPaper` chunks in total. Note overflow also does not set `wasTruncated`: that flag is computed from the main-content chunker's result alone, before `collectNoteChunks()` runs, so a note that hits its own cap is truncated silently — it does not surface through the partial-indexing glyph or the progress-window warning described below.
+Note chunks do **not** share the main content's `maxChunksPerPaper` budget — `chunkNotes()` applies its own `maxChunks` cap across **all** of the item's notes together (`src/utils/chunker.ts`), and the result is concatenated after whatever the document chunker already produced. The cap sits at that level, not inside `chunkNoteText()`, so five notes cannot claim five budgets; `chunkNoteText()` keeps its own slice as a bound on the work a single runaway note can cause, which cannot change the combined result. An item that fills the ceiling with PDF text and also has note-heavy notes can end up with roughly double `maxChunksPerPaper` chunks in total. Note overflow also does not set `wasTruncated`: that flag is computed from the main-content chunker's result alone, before `collectNoteChunks()` runs, so a note that hits its own cap is truncated silently — it does not surface through the partial-indexing glyph or the progress-window warning described below.
 
-Note chunks carry **no location data**. `pageNumber`, `paragraphIndex`, `startChar` and `endChar` are cleared by `chunkNoteText()`: the shared splitter estimates a page number from character offset, which is meaningful for PDF text and fiction for a note (it would climb one "page" per ~3000 characters of note text). Those fields are persisted and consumed — the Location column in the results table, opening a hit at a page in the PDF reader, and the MCP payload — so a note hit shows an empty Location and opens the item rather than a wrong page.
+Note chunks carry **no location data**. `pageNumber`, `paragraphIndex`, `startChar` and `endChar` are cleared by `chunkNoteText()`: the shared splitter estimates a page number from character offset, which is meaningful for PDF text and fiction for a note (it would climb one "page" per ~3000 characters of note text). Those fields are persisted and consumed — the Location column in the results table, opening a hit at a page in the PDF reader, and the MCP payload — so a note hit shows an empty Location and never opens the PDF at a page.
+
+What a note chunk carries instead is `noteKey`, the child note's stable 8-char Zotero key, stored in `chunks.note_key` (schema v10). Activating a note result resolves that key against the parent item's library and selects the **note**, which Zotero shows in the right-hand pane, instead of leaving the user to work out which note matched. A key that no longer resolves — the note was deleted or merged since indexing — falls back to selecting the parent item.
 
 `noteHtmlToText()` strips `<script>`/`<style>` blocks and `<img>` tags entirely — every embedding model ZotSeek ships is text-only, so an image contributes nothing, but the text around it is preserved. Entities (`&amp;`, `&lt;`, ...) are unescaped only after tags are stripped, so an escaped `&lt;p&gt;` in a note's body is never mistaken for real markup.
 
@@ -1065,7 +1069,7 @@ Issue #42 adds a second `runtime` to `ModelConfig` alongside the in-process Chro
 ZotSeek stores embeddings in a separate SQLite database (`zotseek.sqlite`) attached to Zotero's main connection. The schema is normalized into three tables:
 
 - **`items`** — one row per indexed paper, keyed by an internal autoincrement `item_pk`, with its stable identity (`library_key`, `item_key`) and metadata (title, abstract).
-- **`chunks`** — one row per embedding chunk per model, referencing `item_pk`, with the chunk text, source label, base64-encoded Float32 embedding, and location metadata (page, paragraph, char offsets, bbox).
+- **`chunks`** — one row per embedding chunk per model, referencing `item_pk`, with the chunk text, source label, base64-encoded Float32 embedding, location metadata (page, paragraph, char offsets, bbox) and, for note chunks, the key of the note the chunk came from (`note_key`).
 - **`item_models`** — one row per (item, model), holding that pairing's indexing status: timestamp, content hash, and truncation/coverage fields (`was_truncated`, `pages_indexed`, `pages_total`).
 
 The indexing status lives on `item_models` rather than `items` because it is inherently per-model; see [Per-Model Embeddings (Schema v9)](#per-model-embeddings-schema-v9) below.
@@ -1094,6 +1098,16 @@ Schema v9 extends the database to hold embeddings from multiple models simultane
 The per-item status columns (`was_truncated`, `pages_indexed`, `pages_total`) that were on the `items` table in v7/v8 are now on `item_models` because they are inherently per-(item, model): a paper may be fully indexed under one model but truncated under another if the chunk count varies. The `items` table loses these columns; queries check `item_models` for the active model.
 
 **Migration v8 → v9:** existing `chunks` rows have `model_id` back-filled from the `items.model_id` column (which recorded the last model used to index that item). Rows from `items` that have per-item status columns are migrated into `item_models` for each item's recorded model. A backup is written to `zotseek.sqlite.v8.bak` before the migration starts.
+
+### Note Identity (Schema v10)
+
+Schema v10 adds a single nullable column, `chunks.note_key`, holding the stable 8-char Zotero key of the child note a `note` chunk was cut from. It is `NULL` for every other chunk.
+
+The **key** is stored rather than the note's local `Zotero.Item.id`, for the same reason v8 moved items off local IDs: local IDs differ between machines, and keeping them out of `zotseek.sqlite` is what lets the file be copied between installs. The key is resolved to a local ID at click time, via the parent item's library (a child note always lives in its parent's library).
+
+An existing column was deliberately not reused. `bbox` is TEXT and unused for note chunks, but it is documented as PDF bounding-box coordinates, and overloading it would mislead the next reader.
+
+**Migration v9 → v10:** `ALTER TABLE chunks ADD COLUMN note_key TEXT`, and nothing else. No backup file and no back-fill: appending a nullable column rewrites no rows, so there is nothing to lose, and existing rows keeping `NULL` is correct — they are either not note chunks at all, or note chunks written before the column existed, which open their parent item until the item is re-indexed. Like every other migration here, it detects its own done-ness with `PRAGMA table_info(chunks)` rather than by reading the stored `schema_version`, which `createTables()` bumps unconditionally.
 
 ---
 

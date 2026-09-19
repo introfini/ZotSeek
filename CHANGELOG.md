@@ -14,6 +14,8 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 - Background re-indexing refuses to overwrite a paper's indexed text when Full Document mode produces no document text but the item does have a PDF — the usual cause is an unreachable file, and the old behaviour silently replaced the whole paper with a single summary chunk while still showing it as fully indexed.
 - An item trashed while a note edit was waiting out its quiet period is no longer re-indexed, which used to leave it searchable from the trash.
 - Note search results no longer show a page number or open the PDF at one. Notes have no pages, and the number shown was estimated from position in the note's own text.
+- Opening a note search result now selects the note that matched, instead of its parent item. If the note has been deleted since it was indexed, the item is selected as before.
+- Each of an item's notes is now indexed on its own. Notes used to be run together before being split, so two unrelated notes could share one entry in the index and a search for a phrase from either of them could miss the item entirely. Editing one note also used to re-process every note on the item.
 - Note text taken from tables keeps its cell boundaries instead of running the cells together.
 - The note re-index delay control is now dimmed together with the auto-index delay when automatic indexing is off, since it has no effect without it.
 
@@ -22,6 +24,8 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 - The auto-index path replaces an item's chunks inside the same database transaction that writes the new ones. An interrupted run can no longer leave items with their old chunks deleted and no new ones written.
 - Background re-indexing no longer tears down and reloads the embedding model when it is already loaded, and never while a search is running.
 - One unreadable child note no longer makes its whole parent item unindexable.
+- Database schema bumped to v10: `chunks` gains a nullable `note_key` column recording which child note a note chunk came from, stored as the note's portable Zotero key so the database stays copyable between machines. The migration adds the column and nothing else — no backup file and no back-fill, since existing rows keeping `NULL` is what they mean. Note chunks written before the bump keep opening their parent item until their items are re-indexed.
+- The per-item chunk ceiling now applies across all of an item's notes together, not once per note, so an item with several notes cannot multiply its own budget.
 
 ## [1.21.2] - 2026-09-01
 

@@ -67,6 +67,7 @@ interface SearchResult {
   year?: number;
   pageNumber?: number;     // 1-based page number of matched chunk
   paragraphIndex?: number; // 0-based paragraph index within page
+  noteKey?: string;        // Key of the child note the match came from ("note" only)
 }
 ```
 
@@ -74,6 +75,13 @@ interface SearchResult {
 from its abstract or its PDF. Note-sourced results carry no location data: `pageNumber` and
 `paragraphIndex` are always absent, because a note has no page in the document. Treat a
 falsy `pageNumber` as "no location" rather than as page zero.
+
+Those results carry `noteKey` instead: the matched note's own Zotero key, portable like
+`itemKey`. Each note is chunked on its own, so a result points at exactly one note. Resolve
+it with `Zotero.Items.getIDFromLibraryAndKey(item.libraryID, noteKey)` — a child note lives
+in its parent's library — and expect that to return nothing for a note deleted since
+indexing; fall back to the parent item. `noteKey` is absent on every other `textSource`,
+and on note results indexed before ZotSeek 1.22.0, which need re-indexing to gain one.
 
 Results are ranked by similarity (descending). When `returnAllChunks` is `false` (default), MaxSim aggregation is used: each paper appears once with the score of its best-matching chunk.
 
