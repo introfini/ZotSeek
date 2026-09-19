@@ -23,6 +23,7 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
    - [Token Estimation](#token-estimation)
    - [Chunk Overlap](#chunk-overlap)
    - [Note Text Chunking](#note-text-chunking)
+   - [Note Backfill for Already-Indexed Items](#note-backfill-for-already-indexed-items)
 7. [Section-Aware Chunking](#section-aware-chunking)
    - [References Filtering](#references-filtering)
 8. [Performance Optimizations](#performance-optimizations)
@@ -661,6 +662,49 @@ Note chunks carry **no location data**. `pageNumber`, `paragraphIndex`, `startCh
 
 `noteHtmlToText()` strips `<script>`/`<style>` blocks and `<img>` tags entirely — every embedding model ZotSeek ships is text-only, so an image contributes nothing, but the text around it is preserved. Entities (`&amp;`, `&lt;`, ...) are unescaped only after tags are stripped, so an escaped `&lt;p&gt;` in a note's body is never mistaken for real markup.
 
+### Note Backfill for Already-Indexed Items
+
+Switching `zotseek.indexNotes` on changes nothing about a library that is already indexed. Bulk indexing decides what to skip by **presence**, not by content: `indexItems()` drops any item `isIndexedByIdentity()` reports as indexed under the active model, whatever its content hash now says. The items whose notes are missing from the index are therefore exactly the ones every bulk path refuses to touch, and the only other trigger (a note edit, through the auto-index path) reaches one item at a time.
+
+"Add Note Text to Index" (`onBackfillNotes()` in `src/index.ts`) closes that gap by feeding those items back through the ordinary bulk pipeline:
+
+```
+onBackfillNotes()
+        │
+        ├── zotseek.indexNotes off ──► refuse and say so (nothing to add)
+        │
+        ▼
+libraryIds from zotseek.indexScope        'user' → [userLibraryID]
+        │                                 'all'  → every user/group library
+        ▼
+collectNoteBackfillItems()  (src/utils/note-backfill.ts)
+        │   per item, cheapest rule first:
+        │     regular item, not trashed, not exclusion-tagged
+        │     has >= 1 child note that is not in the trash
+        │     ALREADY indexed under the active model  ◄── one DB query,
+        │                                                 reached only by
+        │                                                 items with notes
+        ▼
+indexItems(candidates, { type: 'notes-backfill', libraryIds })
+```
+
+`notes-backfill` is a `BulkScope` variant alongside `library` and `collections`, which buys the whole bulk apparatus unchanged: checkpoint batching, the progress window with pause and cancel, and the persisted resume marker that offers to finish an interrupted run at the next startup. Two behaviours key off that variant, and off nothing else, so no other path can reach them:
+
+| Behaviour | Ordinary bulk run | Notes backfill |
+|-----------|-------------------|----------------|
+| Already-indexed filter in phase 1 | applied | **skipped**; that filter is what makes the backfill necessary |
+| `embedChunksWithReuse({ knownUnindexed })` | `true` (every lookup would miss) | **`false`**; every item has chunks under the active model, and only the note chunks are new |
+| `filterReindexTargets()` after extraction | not run (nothing to overwrite) | **run**; same two guards as the auto-index path |
+
+The reuse switch is what makes backfilling a whole library affordable. A candidate's document chunks come back from extraction byte-identical, so `splitReusable()` matches them against the stored embeddings by chunk text and only the note chunks reach the model. Extraction itself is not saved: in Full Document mode each candidate PDF is read again, which is also what lets the unchanged-content guard detect items whose notes are already indexed.
+
+`filterReindexTargets()` matters more here than anywhere else. A backfill candidate is by definition already indexed and about to have its chunks **replaced**, which is precisely the exposure the guard was written for: an item whose PDF has become unreachable would otherwise have its full text replaced by a summary chunk plus its notes, permanently and without a visible symptom, because `item_models` survives and every bulk path skips the item afterwards. The guard's own `alreadyIndexed` test is satisfied by every candidate, so it fires exactly where it should.
+
+Two consequences worth knowing:
+
+- **Re-running the backfill is safe but not free.** Items whose notes are already indexed come back with an unchanged content hash and are dropped before embedding or writing, but they are still extracted first.
+- **Resuming an interrupted backfill re-lists items the run had already reached.** The resume path rebuilds candidates from the same selection, and "already backfilled" is not one of its rules, so those items pay for a second extraction and are then dropped by the same unchanged-hash guard. Nothing is re-embedded or re-written.
+
 ---
 
 ## Section-Aware Chunking
@@ -879,14 +923,14 @@ Clearing the item's existing chunks for the active model before writing the merg
 
 The delete lives **inside** `putBatch`'s transaction rather than in the caller, because this path now replaces chunks instead of only adding them, and it runs unattended. A caller-side delete leaves a window in which the old chunks are gone and the new ones are not yet written; a crash, a quit, a dropped database ATTACH or a throwing insert in that window would destroy the chunks of every item in the batch. `item_models` is deliberately never deleted — the same transaction re-upserts it — so an aborted transaction leaves the item exactly as it was.
 
-The auto-index path additionally refuses to write in two cases, both of which drop the item rather than write part of it:
+The two paths that **replace** an already-indexed item's chunks, the auto-index path and the notes backfill, additionally refuse to write in two cases, both of which drop the item rather than write part of it:
 
 | Condition | Why |
 |-----------|-----|
 | The content hash for the active model is unchanged | The write would produce byte-identical chunks. Most note notifications land here, because Zotero fires `modify` on saves that do not change a note's text. |
 | Full mode produced no document body (`methods`/`findings`/`content`) although the item has a PDF attachment | The PDF is unreachable (linked file on an unmounted volume, download-as-needed) or extraction failed. Writing would replace a fully indexed paper with a single summary chunk — invisible damage, since `item_models` survives, the status column still shows a full tick, and every bulk path skips the item afterwards. |
 
-Neither guard applies to the bulk path: there the user explicitly asked to index, and abstract-only chunks for a scanned image-only PDF are better than nothing. The bulk path also skips the reuse lookup entirely (`knownUnindexed`), because it only reaches the embed step for items that `isIndexedByIdentity` — which is model-aware — reported as not indexed, so every lookup would be a guaranteed miss.
+Neither guard applies to an ordinary bulk run: it only ever writes items with no chunks under the active model, so it has nothing to overwrite, and abstract-only chunks for a scanned image-only PDF are better than nothing. That same fact lets it skip the reuse lookup entirely (`knownUnindexed: true`), because every lookup would be a guaranteed miss. The notes backfill inverts both: it is the one bulk run whose items are all already indexed, so it runs the guards and takes the reuse path. See [Note Backfill for Already-Indexed Items](#note-backfill-for-already-indexed-items).
 
 ### Performance Benchmarks
 

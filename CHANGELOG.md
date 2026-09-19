@@ -5,7 +5,8 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 ## [1.22.0] - 2026-09-19
 
 ### Added
-- Optional indexing of child notes, so notes are searchable alongside abstracts and full text. Off by default; enabling it re-indexes items that have notes.
+- Optional indexing of child notes, so notes are searchable alongside abstracts and full text. Off by default. Enabling it applies to items indexed from then on and does not change what is already in the index; turning it back off stops new note text from going in but does not remove note text already indexed, which needs those items re-indexed from scratch.
+- "Add Note Text to Index", in the item context menu, adds note text to items that are already in the index. Update Library Index skips anything already indexed, so this is the only way to apply note indexing to a library that was indexed before the setting was switched on. It follows the Index scope setting, reuses the existing embeddings so only note text is sent to the model, and can be paused, cancelled and resumed after an interrupted run like any other bulk indexing.
 
 ### Changed
 - With note indexing off, editing or trashing a note no longer queues its parent for a full re-index. The net change to the index was nil, so every user on the default setting was paying for PDF re-extraction, a model reload and a progress popup for nothing.

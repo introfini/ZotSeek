@@ -311,11 +311,23 @@ After indexing, a one-line summary in the progress window also warns when any pa
 
 Enable **"Also index child notes"** in Settings to make the text of notes attached to an item searchable alongside its abstract or full text. This includes notes created by [Better Notes](https://github.com/windingwind/zotero-better-notes), since it stores its content in the same note field Zotero itself uses. A note's text is added to its parent item, not indexed as a separate result.
 
-- **Off by default.** Turning it on re-indexes every item that has at least one note, since note text now counts toward whether that item is up to date.
+- **Off by default, and turning it on does not re-index anything by itself.** Items indexed from then on include their notes. Items that are already in the index keep exactly what they have until you run **"Add Note Text to Index"** (below), or until you edit each note individually.
 - **Works in both modes.** This setting is independent of Abstract/Full Document mode; it adds note text on top of whichever mode is active.
 - **Not indexed:** standalone notes (notes not attached to any item), comments on PDF annotations, and images inside a note — every embedding model ZotSeek ships is text-only. Text surrounding an image is still indexed; only the image itself is skipped.
 - **Editing a note** re-indexes its parent after a quiet period (default 60 seconds, adjustable via **"Delay before re-indexing an edited note"**) — but only while **"Automatically index new items"** is also enabled. With auto-indexing off, edited notes are picked up the next time you run Update Index by hand.
 - **Trashing a note** removes its text from the index the same way. Permanently erasing a note (bypassing the trash) leaves nothing to resolve back to its parent, so that removal only takes effect on the next manual Update Index.
+- **Turning the setting back off does not remove note text that is already indexed.** It only stops new note text from going in. Notes already in the index stay searchable until those items are re-indexed from scratch: remove them from the index and index them again, or clear and rebuild the whole index from Settings. If you put something in a note that you would rather not have indexed, switching the setting off is not enough on its own.
+
+#### Adding Notes to Items That Are Already Indexed
+
+**"Add Note Text to Index"**, in the item context menu next to the other indexing commands, adds note text to items that already have an entry in the index. Nothing else does: **Update Library Index** skips anything already indexed, whatever changed about it, so without this action the setting would only ever apply to items indexed after you switched it on.
+
+- **What it picks up:** items that are **already indexed**, and that have at least one note which is not in the trash. Items that are not indexed yet are left alone, since **Update Library Index** covers those, notes included.
+- **Scope:** your personal library, or every library, following the same **Index scope** setting as Update Library Index.
+- **Cost:** existing embeddings are reused, so only the note text goes to the model. In Full Document mode each candidate PDF is still read again to confirm the rest of the item has not changed, so the run is much faster than re-indexing from scratch but not instant.
+- **Interruptions:** pause, cancel and resume-after-a-crash behave exactly as they do for Update Library Index.
+- **If the setting is off**, the action stops and asks you to turn it on first; there would be no note text to add.
+- **Running it again is safe.** Items whose notes are already indexed are left untouched rather than rewritten, and are reported as such at the end of the run.
 
 ---
 
