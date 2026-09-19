@@ -34,6 +34,8 @@ Methods that don't need the embedding pipeline (`findSimilar`, `getStats`, `isRe
 
 Run a semantic search against the indexed library. Auto-initializes the embedding pipeline on first call.
 
+This API is semantic only: it ranks by embedding similarity and has no keyword leg, so a rare literal string such as a conference acronym is not what it is good at. For hybrid search, which combines semantic and keyword matching the way the search window does, use the local MCP endpoints instead (see `docs/MCP.md`).
+
 ```js
 const results = await Zotero.ZotSeek.api.search("transformer attention mechanisms", {
   topK: 20,
