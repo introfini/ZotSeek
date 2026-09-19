@@ -16,6 +16,7 @@ import { Logger } from '../utils/logger';
 import { SearchEngine, SearchResult } from './search-engine';
 import { TextSourceType } from './vector-store-sqlite';
 import { applyMinSimilarity, ChunkMatch } from './keyword-backfill';
+import { KeywordMatchFacts, resolveKeywordMatches } from './keyword-parents';
 
 declare const Zotero: any;
 
@@ -100,6 +101,68 @@ export interface QueryAnalysis {
   semanticWeight: number;
   reasoning: string;
   detectedPatterns: string[];
+}
+
+/**
+ * Ceiling on how many resolved items the keyword leg scores before ranking them.
+ *
+ * Everything resolved is scored, because Zotero returns its matches in no
+ * particular order of relevance: capping earlier would decide the result set by
+ * match order rather than by score, and a query whose full-text matches come
+ * first would lose its title matches entirely. This is only a safety valve for
+ * a pathological query on a very large library; scoring 3,000 items costs
+ * ~15 ms, since the items are already in Zotero's cache.
+ */
+const MAX_KEYWORD_CANDIDATES = 5000;
+
+/**
+ * Ask Zotero what each keyword match is, so the matches can be resolved to the
+ * items that own them.
+ *
+ * Module-level rather than a class method: it needs no `this`, and class
+ * methods added to the plugin's classes have been unreliable under the esbuild
+ * IIFE bundle in SpiderMonkey.
+ */
+async function describeKeywordMatches(matchedIds: number[]): Promise<KeywordMatchFacts[]> {
+  const facts: KeywordMatchFacts[] = [];
+  if (!matchedIds || matchedIds.length === 0) return facts;
+
+  // One batched load: a broad query can match thousands of attachments, and a
+  // getAsync per id would cost more than the search itself.
+  let items: any[] = [];
+  try {
+    items = (await Zotero.Items.getAsync(matchedIds)) || [];
+  } catch (e) {
+    Zotero.debug(`[ZotSeek:HybridSearch] Could not load keyword matches: ${(e as any)?.message || e}`);
+    return facts;
+  }
+
+  const byId = new Map<number, any>();
+  for (const item of items) {
+    if (item && typeof item.id === 'number') byId.set(item.id, item);
+  }
+
+  // Iterate the search's own order, which the relevance scoring below builds on.
+  for (const id of matchedIds) {
+    const item = byId.get(id);
+    if (!item) continue;
+    try {
+      const isRegularItem = typeof item.isRegularItem === 'function' ? item.isRegularItem() : true;
+      // topLevelItem, not parentItem: an annotation hangs off an attachment,
+      // and what matters is the paper at the top of that chain.
+      const owner = isRegularItem ? null : item.topLevelItem;
+      facts.push({
+        itemId: id,
+        itemType: item.itemType,
+        isRegularItem,
+        owner: owner && owner.id !== id ? { itemId: owner.id, itemType: owner.itemType } : null,
+      });
+    } catch (e) {
+      Zotero.debug(`[ZotSeek:HybridSearch] Could not describe match ${id}: ${(e as any)?.message || e}`);
+    }
+  }
+
+  return facts;
 }
 
 /**
@@ -394,21 +457,26 @@ export class HybridSearchEngine {
         search.addCondition('collectionID', 'is', opts.collectionId.toString());
       }
 
-      // Quick search searches title, creators, year, tags, etc.
-      // This is the same search used in Zotero's search bar
+      // Quick search searches title, creators, year, tags, full text and notes.
+      // This is the same search used in Zotero's search bar.
+      //
+      // Children are deliberately NOT excluded here. A match in a PDF's text or
+      // a note's body is returned as the attachment or the note, so excluding
+      // those item types discarded the match instead of crediting the paper it
+      // belongs to, and the keyword leg only ever matched item metadata. The
+      // children are resolved to their papers below.
       search.addCondition('quicksearch-everything', 'contains', query);
 
-      // Exclude attachments and notes - we only want regular items
-      search.addCondition('itemType', 'isNot', 'attachment');
-      search.addCondition('itemType', 'isNot', 'note');
+      const matchedIds = await search.search();
 
-      // Exclude books if preference is set
+      // Resolve each match to the item that should represent it, then filter
+      // and dedupe. The book filter reads the resolved item's type rather than
+      // the matched child's, and deduping before the scoring loop means one
+      // paper with a dozen matching attachments is scored once, not a dozen
+      // times.
       const excludeBooks = Zotero.Prefs.get('zotseek.excludeBooks', true) ?? true;
-      if (excludeBooks) {
-        search.addCondition('itemType', 'isNot', 'book');
-      }
-
-      const itemIds = await search.search();
+      const facts = await describeKeywordMatches(matchedIds);
+      const itemIds = resolveKeywordMatches(facts, { excludeBooks, limit: MAX_KEYWORD_CANDIDATES });
 
       // Extract query components for scoring
       const queryLower = query.toLowerCase();
@@ -419,7 +487,7 @@ export class HybridSearchEngine {
       // Score each result based on match quality
       const scoredResults: Array<{ itemId: number; score: number }> = [];
 
-      for (const itemId of itemIds.slice(0, opts.keywordTopK * 2)) { // Get more to allow reranking
+      for (const itemId of itemIds) {
         try {
           const item = await Zotero.Items.getAsync(itemId);
           if (!item) continue;
