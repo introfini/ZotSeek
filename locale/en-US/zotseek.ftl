@@ -303,13 +303,7 @@ zotseek-notesBackfill-none = No indexed items have notes to add. Items that are 
 zotseek-notesBackfill-title = ZotSeek - Add Note Text to Index
 zotseek-notesBackfill-confirmMsg = { $count } indexed item(s) have notes that are not in the index yet.
 
-    Their notes will be indexed and the rest of their content reused, so this is much faster than a full re-index.
-
-    Continue?
-
-    Items that are already indexed will be skipped.
-
-    This may take several minutes depending on the number of new items.
+    Their notes will be indexed and the rest of their content is reused, so this is much faster than a full re-index. Each item's PDF is still read again, so allow several minutes.
 
     Continue?
 zotseek-indexing-noItemsSelected = No items selected

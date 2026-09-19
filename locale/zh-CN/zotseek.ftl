@@ -302,13 +302,7 @@ zotseek-notesBackfill-none = 没有已索引的条目需要加入笔记。尚未
 zotseek-notesBackfill-title = ZotSeek - 将笔记文本加入索引
 zotseek-notesBackfill-confirmMsg = 有 { $count } 个已索引的条目，其笔记尚未进入索引。
 
-    将索引这些笔记，并复用条目其余内容，因此比完整重新索引快得多。
-
-    继续？
-
-    已索引的条目将被跳过。
-
-    根据新条目数量，这可能需要几分钟。
+    将索引这些笔记并复用条目其余内容，因此比完整重新索引快得多。但仍需重新读取每个条目的 PDF，请预留几分钟。
 
     继续？
 zotseek-indexing-noItemsSelected = 未选择条目
