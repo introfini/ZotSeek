@@ -20,6 +20,37 @@ import {
 
 declare const Zotero: any;
 
+/**
+ * Resolve the child note a result came from to a local Zotero item ID.
+ *
+ * Note chunks store the note's stable 8-char key, never a local ID, so the
+ * database can be copied between machines. The note lives in the same library
+ * as its parent, which is what makes the parent enough to resolve it.
+ *
+ * Returns null when the key resolves to nothing (a note deleted or merged
+ * since indexing) so the caller can fall back to the parent item instead of
+ * failing the click. Module-level, not a class method: SpiderMonkey does not
+ * reliably register class methods added to this project's esbuild IIFE bundle
+ * (helpers that do not need `this` stay plain functions).
+ */
+function resolveNoteItemId(parentItemId: number, noteKey: string): number | null {
+  try {
+    const parent = Zotero.Items.get(parentItemId);
+    if (!parent) return null;
+    const noteId = Zotero.Items.getIDFromLibraryAndKey(parent.libraryID, noteKey);
+    if (!noteId) return null;
+    const note = Zotero.Items.get(noteId);
+    if (!note || note.deleted) return null;
+    return noteId;
+  } catch (error: any) {
+    Zotero.debug(
+      `[ZotSeek:SearchDialog] Could not resolve note ${noteKey}: ` +
+      `${error?.message || error?.toString() || 'Unknown error'}`
+    );
+    return null;
+  }
+}
+
 export class ZotSeekDialogVTable {
   private logger: Logger;
   private zoteroAPI: ZoteroAPI;
@@ -1023,7 +1054,7 @@ export class ZotSeekDialogVTable {
       const hybridResult = result as HybridSearchResult;
       const pageNumber = exactPage || hybridResult.pageNumber;
 
-      this.openItem(localId, pageNumber);
+      this.openItem(localId, pageNumber, hybridResult.noteKey);
     }
   }
 
@@ -1051,7 +1082,7 @@ export class ZotSeekDialogVTable {
       const exactPage = this.resultsTable?.getExactPage(localId);
       const hybridResult = result as HybridSearchResult;
       const pageNumber = exactPage || hybridResult.pageNumber;
-      this.openItem(localId, pageNumber);
+      this.openItem(localId, pageNumber, hybridResult.noteKey);
     } else {
       // Multiple selection: select all in Zotero library (skip orphans)
       const itemIds = results
@@ -1067,10 +1098,26 @@ export class ZotSeekDialogVTable {
   }
 
   /**
-   * Open an item in Zotero, optionally to a specific page
+   * Open an item in Zotero, optionally to a specific page.
+   *
+   * When the result came from a child note, the note itself is selected
+   * rather than its parent: selecting a note already shows it in the
+   * right-hand pane, which is what every other result does too. A key that
+   * no longer resolves falls back to the parent item, so a stale key costs
+   * precision, not the click.
    */
-  private async openItem(itemId: number, pageNumber?: number): Promise<void> {
+  private async openItem(itemId: number, pageNumber?: number, noteKey?: string): Promise<void> {
     try {
+      const noteId = noteKey ? resolveNoteItemId(itemId, noteKey) : null;
+      if (noteId) {
+        this.zoteroAPI.selectItem(noteId);
+        this.logger.info(`Selected note ${noteKey} of item ${itemId}`);
+        return;
+      }
+      if (noteKey) {
+        this.logger.warn(`Note ${noteKey} of item ${itemId} is gone; selecting the item instead`);
+      }
+
       // Select the item in the library
       this.zoteroAPI.selectItem(itemId);
 
