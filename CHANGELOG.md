@@ -2,6 +2,15 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.22.0] - 2026-09-19
+
+### Added
+- Optional indexing of child notes, so notes are searchable alongside abstracts and full text. Off by default; enabling it re-indexes items that have notes.
+
+### Technical
+- Re-indexing now reuses stored embeddings for chunks whose text is unchanged, so editing a note no longer re-embeds the whole item.
+- The auto-index path clears an item's stale chunks before rewriting them, which matters now that note edits trigger re-indexing.
+
 ## [1.21.2] - 2026-09-01
 
 ### Fixed

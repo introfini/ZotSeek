@@ -307,6 +307,16 @@ ZotSeek adds a "ZotSeek" column to the Zotero item list so you can see at a glan
 
 After indexing, a one-line summary in the progress window also warns when any paper hit the chunk limit, and the same warning is written to the debug log per affected paper.
 
+### Indexing Child Notes
+
+Enable **"Also index child notes"** in Settings to make the text of notes attached to an item searchable alongside its abstract or full text. This includes notes created by [Better Notes](https://github.com/windingwind/zotero-better-notes), since it stores its content in the same note field Zotero itself uses. A note's text is added to its parent item, not indexed as a separate result.
+
+- **Off by default.** Turning it on re-indexes every item that has at least one note, since note text now counts toward whether that item is up to date.
+- **Works in both modes.** This setting is independent of Abstract/Full Document mode; it adds note text on top of whichever mode is active.
+- **Not indexed:** standalone notes (notes not attached to any item), comments on PDF annotations, and images inside a note — every embedding model ZotSeek ships is text-only. Text surrounding an image is still indexed; only the image itself is skipped.
+- **Editing a note** re-indexes its parent after a quiet period (default 60 seconds, adjustable via **"Delay before re-indexing an edited note"**) — but only while **Auto-index new items** is also enabled. With auto-indexing off, edited notes are picked up the next time you run Update Index by hand.
+- **Trashing a note** removes its text from the index the same way. Permanently erasing a note (bypassing the trash) leaves nothing to resolve back to its parent, so that removal only takes effect on the next manual Update Index.
+
 ---
 
 ## Choose Your Embedding Model
@@ -748,12 +758,14 @@ Preferences are stored in Zotero's preferences system:
 | `zotseek.topK` | `20` | Maximum number of results |
 | `zotseek.autoIndex` | `false` | Automatically index new papers when added |
 | `zotseek.autoIndexDelay` | `10` | Seconds to wait after last item before auto-indexing (1-300) |
+| `zotseek.noteIndexDelay` | `60` | Seconds to wait after a note edit before re-indexing its parent (requires `zotseek.autoIndex`) |
 
 **Indexing Settings:**
 
 | Preference | Default | Description |
 |------------|---------|-------------|
 | `zotseek.indexingMode` | `"full"` | `"abstract"` or `"full"` |
+| `zotseek.indexNotes` | `false` | Also index the text of child notes attached to an item |
 | `zotseek.maxTokens` | `2000` | Max tokens per chunk |
 | `zotseek.maxChunksPerPaper` | `100` | Max chunks per paper |
 | `zotseek.excludeBooks` | `true` | Skip books during indexing |

@@ -22,9 +22,11 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
    - [Truncation Detection (Max Chunks per Paper)](#truncation-detection-max-chunks-per-paper)
    - [Token Estimation](#token-estimation)
    - [Chunk Overlap](#chunk-overlap)
+   - [Note Text Chunking](#note-text-chunking)
 7. [Section-Aware Chunking](#section-aware-chunking)
    - [References Filtering](#references-filtering)
 8. [Performance Optimizations](#performance-optimizations)
+   - [Embedding Reuse on Re-Index](#embedding-reuse-on-re-index)
 9. [Embedding Model Registry](#embedding-model-registry)
    - [Curated Model Set](#curated-model-set)
    - [Partitioned Search by Model](#partitioned-search-by-model)
@@ -630,6 +632,31 @@ The paper title is prepended to each chunk for embedding context, but this is fo
 
 Overlap is common in RAG systems (e.g., LangChain defaults to ~200 token overlap) and could be added as a future enhancement for cases where important information spans paragraph boundaries.
 
+### Note Text Chunking
+
+Child notes are a separate text source (`note`, issue #50), gated by `zotseek.indexNotes` (default `false`) and applied in both indexing modes. When enabled, `collectNoteChunks()` (`src/core/text-extractor.ts`) reads every child note via `item.getNotes()`, converts each note's HTML body to plain text with `noteHtmlToText()` (`src/utils/note-text.ts`), and joins the results before chunking:
+
+```
+item.getNotes() → [noteId, ...]
+        │
+        ▼
+noteHtmlToText(note.getNote())     block tags (<p>, <li>, <div>, ...) → "\n\n"
+        │                          <img> stripped; entities unescaped after tags
+        ▼
+join all notes with "\n\n"
+        │
+        ▼
+chunkNoteText(title, text, options)   same paragraph-based splitter as the
+        │                              main content, capped by maxChunksPerPaper
+        ▼
+Chunk[] with type: 'note'  ─────────►  appended to the item's other chunks
+                                        BEFORE the content hash is computed
+```
+
+Because note chunks are appended before `hashContent()` runs, editing a note's text changes the item's content hash exactly like editing the PDF would, which is what makes silent re-indexing pick up note edits. Note chunks share the item's normal `maxChunksPerPaper` ceiling with the rest of its content, so a note-heavy item can still hit the truncation limit described above.
+
+`noteHtmlToText()` strips `<script>`/`<style>` blocks and `<img>` tags entirely — every embedding model ZotSeek ships is text-only, so an image contributes nothing, but the text around it is preserved. Entities (`&amp;`, `&lt;`, ...) are unescaped only after tags are stripped, so an escaped `&lt;p&gt;` in a note's body is never mistaken for real markup.
+
 ---
 
 ## Section-Aware Chunking
@@ -704,6 +731,7 @@ Unlike generic chunkers that split at arbitrary character boundaries, our chunke
 | `methods` | Intro, Background, Methods | "Methods" | How did they do it? |
 | `findings` | Results, Discussion, Conclusions | "Results" | What did they find? |
 | `content` | Fallback (no sections detected) | "Content" | Generic content |
+| `note` | Child note text (opt-in) | "Note" | What did the reader annotate? |
 
 ### Fallback Behavior
 
@@ -810,6 +838,40 @@ See [Chunking Strategy](#chunking-strategy) for detailed trade-offs. Summary:
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Embedding Reuse on Re-Index
+
+Re-indexing an item used to re-embed every one of its chunks, which is fine when a new paper arrives but wasteful once a note edit (or any other silent re-index) touches one paragraph of a long item. `splitReusable()` (`src/core/embedding-reuse.ts`) keys reuse by **chunk text**, not chunk position, so inserting, deleting or reordering chunks — exactly what happens when a note grows or a paragraph is edited — does not invalidate the chunks that did not change:
+
+```
+Re-index triggered (note edit, silent re-index, ...)
+        │
+        ▼
+Extract + chunk item  ──►  new chunk texts, per item
+        │
+        ▼
+getChunkTextEmbeddings(libraryKey, itemKey, activeModelId)
+        │   two single-column reads per item (not one query per chunk):
+        │   chunk text → stored embedding, for the ACTIVE model only
+        ▼
+splitReusable(candidates, stored, activeModelId)
+        │
+        ├── stored.modelId !== activeModelId ──► ALL chunks to embed (clean miss;
+        │                                          never reuse vectors from another
+        │                                          embedding space)
+        │
+        ├── chunk text matches a stored embedding ──► reused (no embedding call)
+        │
+        └── chunk text is new/changed ──► sent to embedChunks()
+        │
+        ▼
+deleteItemChunks(itemId, activeModelId)   clears the item's stale rows for this
+        │                                  model before...
+        ▼
+write merged (reused + newly embedded) chunks
+```
+
+Clearing the item's existing chunks for the active model before writing the merged set (rather than upserting in place) matters once note edits can shrink an item's chunk count: without it, an item whose note got shorter would keep orphaned chunks at the old, now-unused higher indices.
 
 ### Performance Benchmarks
 
