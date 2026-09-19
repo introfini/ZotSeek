@@ -30,8 +30,12 @@ export function noteHtmlToText(html: string): string {
   text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
   text = text.replace(/<img\b[^>]*\/?>/gi, '');
   text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<hr\b[^>]*\/?>/gi, '\n\n');
   text = text.replace(/<li\b[^>]*>/gi, '- ');
-  text = text.replace(/<\/(p|div|li|h[1-6]|blockquote|tr|pre|ul|ol)>/gi, '\n\n');
+  // td/th are in the list because Better Notes tables are a stated use case:
+  // without them `<td>a</td><td>b</td>` collapses to `ab` and the chunker sees
+  // one run-on word instead of two cells.
+  text = text.replace(/<\/(p|div|li|h[1-6]|blockquote|tr|td|th|pre|ul|ol)>/gi, '\n\n');
   text = text.replace(/<[^>]*>/g, '');
   text = unescapeEntities(text);
 

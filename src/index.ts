@@ -213,25 +213,34 @@ async function embedChunks(
  * Not used by reindexForActiveModel: its items have no chunks under the
  * active model yet, so every lookup would be a guaranteed miss and a wasted
  * query.
+ *
+ * @param options.knownUnindexed The caller has already established that none
+ *   of these items has chunks under the active model (the bulk path filters on
+ *   isIndexedByIdentity, which is model-aware). The store lookup would then be
+ *   a guaranteed miss: three queries per item, ~45,000 on a 15,000 item
+ *   library, all returning nothing. Skips it and embeds everything.
  */
 async function embedChunksWithReuse(
   store: IVectorStore,
   extracted: Array<{ itemId: number; chunks: Array<{ index: number; text: string }> }>,
   chunks: ChunkForEmbedding[],
   onProgress: (processed: number) => Promise<void> | void,
+  options?: { knownUnindexed?: boolean },
 ): Promise<EmbedChunksResult> {
   const modelId = getActiveModelId();
 
   const stored: StoredEmbeddings = { modelId, byItem: new Map() };
-  for (const { itemId } of extracted) {
-    if (stored.byItem.has(itemId)) continue;
-    const item = Zotero.Items.get(itemId);
-    const identity = item ? identityFromItem(item) : null;
-    if (!identity) continue;
-    stored.byItem.set(
-      itemId,
-      await store.getChunkTextEmbeddings(identity.libraryKey, identity.itemKey, modelId)
-    );
+  if (!options?.knownUnindexed) {
+    for (const { itemId } of extracted) {
+      if (stored.byItem.has(itemId)) continue;
+      const item = Zotero.Items.get(itemId);
+      const identity = item ? identityFromItem(item) : null;
+      if (!identity) continue;
+      stored.byItem.set(
+        itemId,
+        await store.getChunkTextEmbeddings(identity.libraryKey, identity.itemKey, modelId)
+      );
+    }
   }
 
   const candidates: ReuseCandidate[] = [];
@@ -247,10 +256,19 @@ async function embedChunksWithReuse(
   }
 
   const wanted = new Set(toEmbed.map(c => c.id));
-  const result = await embedChunks(chunks.filter(c => wanted.has(c.id)), onProgress);
+  // Count the reused chunks as already processed, otherwise the caller's
+  // percentage divides progress by the unfiltered chunk count and under-reports.
+  const result = await embedChunks(
+    chunks.filter(c => wanted.has(c.id)),
+    (processed) => onProgress(processed + reused.size)
+  );
   for (const [key, value] of reused) {
     result.embeddings.set(key, value);
   }
+  // A fully reused batch never enters embedChunks' loop, so onProgress — where
+  // the callers put their pause and cancel checks — would never fire and Cancel
+  // would do nothing for that batch. Report completion once, unconditionally.
+  await onProgress(reused.size + toEmbed.length);
   return result;
 }
 
@@ -1639,10 +1657,13 @@ class ZotSeekPlugin {
             }
             progressWindow.updateProgressWithETA(
               getString('indexing-batchEmbeddingChunks', { current: batchNumber, total: totalBatches }),
-              batchStart + Math.floor((processed / batchChunks.length) * batchItems.length),
+              batchStart + Math.floor((processed / Math.max(batchChunks.length, 1)) * batchItems.length),
               itemsToIndex.length
             );
-          }
+          },
+          // Phase 1 kept only items isIndexedByIdentity said were NOT indexed
+          // under the active model, so there is nothing to reuse here.
+          { knownUnindexed: true }
         );
 
         if (failedChunks > 0) {
@@ -1832,9 +1853,17 @@ class ZotSeekPlugin {
       // Get indexing mode
       const indexingMode = getIndexingMode(Z);
 
-      // Reset pipeline to ensure fresh initialization
-      itemRow.setText(getString('indexing-progressLoadingModel'));
-      embeddingPipeline.reset();
+      // Only tear the worker down when it cannot be used as it stands. Since
+      // note edits reach this path, a reset here is routine rather than rare,
+      // and it rejects every pending job with "Pipeline reset" — including the
+      // query embedding of a search the user is waiting on. It also reloads
+      // the ONNX model to embed nothing whenever reuse covers every chunk.
+      if (!embeddingPipeline.isReady()) {
+        itemRow.setText(getString('indexing-progressLoadingModel'));
+        if (!isSearchInProgress()) {
+          embeddingPipeline.reset();
+        }
+      }
       await embeddingPipeline.init();
 
       // Drop items trashed since they were queued: the cleanup observer deletes

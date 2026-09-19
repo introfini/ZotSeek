@@ -657,6 +657,8 @@ Because note chunks are appended before `hashContent()` runs, editing a note's t
 
 Note chunks do **not** share the main content's `maxChunksPerPaper` budget — `chunkNoteText()` applies its own `maxChunks` cap to the note text independently (`src/utils/chunker.ts`), and the result is concatenated after whatever the document chunker already produced. An item that fills the ceiling with PDF text and also has note-heavy notes can end up with roughly double `maxChunksPerPaper` chunks in total. Note overflow also does not set `wasTruncated`: that flag is computed from the main-content chunker's result alone, before `collectNoteChunks()` runs, so a note that hits its own cap is truncated silently — it does not surface through the partial-indexing glyph or the progress-window warning described below.
 
+Note chunks carry **no location data**. `pageNumber`, `paragraphIndex`, `startChar` and `endChar` are cleared by `chunkNoteText()`: the shared splitter estimates a page number from character offset, which is meaningful for PDF text and fiction for a note (it would climb one "page" per ~3000 characters of note text). Those fields are persisted and consumed — the Location column in the results table, opening a hit at a page in the PDF reader, and the MCP payload — so a note hit shows an empty Location and opens the item rather than a wrong page.
+
 `noteHtmlToText()` strips `<script>`/`<style>` blocks and `<img>` tags entirely — every embedding model ZotSeek ships is text-only, so an image contributes nothing, but the text around it is preserved. Entities (`&amp;`, `&lt;`, ...) are unescaped only after tags are stripped, so an escaped `&lt;p&gt;` in a note's body is never mistaken for real markup.
 
 ---
@@ -867,13 +869,24 @@ splitReusable(candidates, stored, activeModelId)
         └── chunk text is new/changed ──► sent to embedChunks()
         │
         ▼
-deleteItemChunks(itemId, activeModelId)   clears the item's stale rows for this
-        │                                  model before...
-        ▼
-write merged (reused + newly embedded) chunks
+putBatch(merged, { replaceItems: true })
+        │   one transaction: delete the item's chunks for the active model,
+        ▼   then write the merged (reused + newly embedded) set
+committed, or nothing happened at all
 ```
 
 Clearing the item's existing chunks for the active model before writing the merged set (rather than upserting in place) matters once note edits can shrink an item's chunk count: without it, an item whose note got shorter would keep orphaned chunks at the old, now-unused higher indices.
+
+The delete lives **inside** `putBatch`'s transaction rather than in the caller, because this path now replaces chunks instead of only adding them, and it runs unattended. A caller-side delete leaves a window in which the old chunks are gone and the new ones are not yet written; a crash, a quit, a dropped database ATTACH or a throwing insert in that window would destroy the chunks of every item in the batch. `item_models` is deliberately never deleted — the same transaction re-upserts it — so an aborted transaction leaves the item exactly as it was.
+
+The auto-index path additionally refuses to write in two cases, both of which drop the item rather than write part of it:
+
+| Condition | Why |
+|-----------|-----|
+| The content hash for the active model is unchanged | The write would produce byte-identical chunks. Most note notifications land here, because Zotero fires `modify` on saves that do not change a note's text. |
+| Full mode produced no document body (`methods`/`findings`/`content`) although the item has a PDF attachment | The PDF is unreachable (linked file on an unmounted volume, download-as-needed) or extraction failed. Writing would replace a fully indexed paper with a single summary chunk — invisible damage, since `item_models` survives, the status column still shows a full tick, and every bulk path skips the item afterwards. |
+
+Neither guard applies to the bulk path: there the user explicitly asked to index, and abstract-only chunks for a scanned image-only PDF are better than nothing. The bulk path also skips the reuse lookup entirely (`knownUnindexed`), because it only reaches the embed step for items that `isIndexedByIdentity` — which is model-aware — reported as not indexed, so every lookup would be a guaranteed miss.
 
 ### Performance Benchmarks
 

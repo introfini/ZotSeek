@@ -7,9 +7,20 @@ All notable changes to ZotSeek - Semantic Search for Zotero will be documented i
 ### Added
 - Optional indexing of child notes, so notes are searchable alongside abstracts and full text. Off by default; enabling it re-indexes items that have notes.
 
+### Changed
+- With note indexing off, editing or trashing a note no longer queues its parent for a full re-index. The net change to the index was nil, so every user on the default setting was paying for PDF re-extraction, a model reload and a progress popup for nothing.
+- Background re-indexing now skips items whose content has not changed since they were last indexed, instead of re-writing identical chunks.
+- Background re-indexing refuses to overwrite a paper's indexed text when Full Document mode produces no document text but the item does have a PDF — the usual cause is an unreachable file, and the old behaviour silently replaced the whole paper with a single summary chunk while still showing it as fully indexed.
+- An item trashed while a note edit was waiting out its quiet period is no longer re-indexed, which used to leave it searchable from the trash.
+- Note search results no longer show a page number or open the PDF at one. Notes have no pages, and the number shown was estimated from position in the note's own text.
+- Note text taken from tables keeps its cell boundaries instead of running the cells together.
+- The note re-index delay control is now dimmed together with the auto-index delay when automatic indexing is off, since it has no effect without it.
+
 ### Technical
 - Re-indexing now reuses stored embeddings for chunks whose text is unchanged, so editing a note no longer re-embeds the whole item.
-- The auto-index path clears an item's stale chunks before rewriting them, which matters now that note edits trigger re-indexing.
+- The auto-index path replaces an item's chunks inside the same database transaction that writes the new ones. An interrupted run can no longer leave items with their old chunks deleted and no new ones written.
+- Background re-indexing no longer tears down and reloads the embedding model when it is already loaded, and never while a search is running.
+- One unreadable child note no longer makes its whole parent item unindexable.
 
 ## [1.21.2] - 2026-09-01
 

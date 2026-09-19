@@ -46,10 +46,20 @@ async function collectNoteChunks(
 
   const parts: string[] = [];
   for (const noteId of noteIds) {
-    const note = await Zotero.Items.getAsync(noteId);
-    if (!note || note.deleted) continue;
-    const text = noteHtmlToText(note.getNote() || '');
-    if (text) parts.push(text);
+    // Per-note try/catch: a throw from getAsync or getNote() would otherwise
+    // reach extractChunksFromItem's catch, which returns null and drops the
+    // whole item. One unreadable note must cost that note, not the paper.
+    try {
+      const note = await Zotero.Items.getAsync(noteId);
+      if (!note || note.deleted) continue;
+      const text = noteHtmlToText(note.getNote() || '');
+      if (text) parts.push(text);
+    } catch (error: any) {
+      Zotero.debug(
+        `[ZotSeek:TextExtractor] Skipping note ${noteId} on item ${item.id}: ` +
+        `${error?.message || error?.toString() || 'Unknown error'}`
+      );
+    }
   }
   if (parts.length === 0) return [];
 

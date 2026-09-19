@@ -1119,14 +1119,24 @@ class PreferencesManager {
   }
 
   /**
-   * Show/hide the auto-index delay row based on checkbox state
+   * Dim the delay rows when auto-indexing is off.
+   *
+   * Both rows depend on the same checkbox: the note-edit path is reached from
+   * the auto-index notifier, so with auto-indexing off the note delay does
+   * nothing either, and a control that looks live while doing nothing misleads.
    */
   private updateAutoIndexDelayVisibility(enabled: boolean): void {
     if (!this.window) return;
-    const delayRow = this.window.document.getElementById('zotseek-autoindex-delay-row');
-    if (delayRow) {
+    const doc = this.window.document;
+    const rows: Array<[string, string]> = [
+      ['zotseek-autoindex-delay-row', 'zotseek-pref-autoIndexDelay'],
+      ['zotseek-noteindex-delay-row', 'zotseek-pref-noteIndexDelay'],
+    ];
+    for (const [rowId, inputId] of rows) {
+      const delayRow = doc.getElementById(rowId);
+      if (!delayRow) continue;
       (delayRow as HTMLElement).style.opacity = enabled ? '1' : '0.4';
-      const input = this.window.document.getElementById('zotseek-pref-autoIndexDelay') as HTMLInputElement;
+      const input = doc.getElementById(inputId) as HTMLInputElement;
       if (input) input.disabled = !enabled;
     }
   }

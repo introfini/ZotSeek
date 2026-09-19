@@ -50,6 +50,22 @@ describe('noteHtmlToText', () => {
     assert.equal(out, 'a\n\nb');
   });
 
+  test('separates table cells instead of gluing them together', () => {
+    const html = '<table><tr><td>alpha</td><td>beta</td></tr><tr><td>gamma</td></tr></table>';
+    const out = noteHtmlToText(html);
+    assert.equal(out, 'alpha\n\nbeta\n\ngamma');
+  });
+
+  test('treats header cells as cells too', () => {
+    const out = noteHtmlToText('<table><tr><th>Year</th><th>Result</th></tr></table>');
+    assert.equal(out, 'Year\n\nResult');
+  });
+
+  test('turns a horizontal rule into a paragraph break', () => {
+    assert.equal(noteHtmlToText('<p>above</p><hr/><p>below</p>'), 'above\n\nbelow');
+    assert.equal(noteHtmlToText('above<hr>below'), 'above\n\nbelow');
+  });
+
   test('survives unclosed tags without losing text', () => {
     assert.equal(noteHtmlToText('<p>unclosed'), 'unclosed');
   });
