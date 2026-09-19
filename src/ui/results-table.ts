@@ -368,6 +368,7 @@ export class SearchResultsTable {
       case 'methods': return getString('source-methods');
       case 'findings': return getString('source-results');
       case 'content': return getString('source-content');
+      case 'note': return getString('source-note');
       default: return '';
     }
   }

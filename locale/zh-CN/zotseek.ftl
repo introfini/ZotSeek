@@ -217,6 +217,7 @@ zotseek-source-title = 标题
 zotseek-source-methods = 方法
 zotseek-source-results = 结果
 zotseek-source-content = 内容
+zotseek-source-note = 笔记
 zotseek-search-hybrid-menuitem =
     .label = 🔗 混合（推荐）
 zotseek-search-semantic-menuitem =
