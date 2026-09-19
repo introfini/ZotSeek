@@ -40,7 +40,11 @@ selfTest.register('task-50-note-identity', async () => {
       assertEq(String(v), '10');
     }),
     await scenario('migration is idempotent: a second init adds no second column', async () => {
-      await (vectorStoreSQLite as any).migrateToV10?.();
+      // Also proves the method reached the runtime prototype: SpiderMonkey does
+      // not always register class methods added to this esbuild IIFE bundle.
+      const migrate = (vectorStoreSQLite as any).migrateToV10;
+      assertTrue(typeof migrate === 'function', 'migrateToV10 missing from the prototype');
+      await migrate.call(vectorStoreSQLite);
       const cols = await chunkColumns();
       assertEq(cols.filter((c) => c === 'note_key').length, 1, 'note_key duplicated');
     }),
