@@ -155,7 +155,7 @@ The plugin combines **semantic search** (AI embeddings) with **Zotero's keyword 
 |------|----------|--------------|
 | 🔗 **Hybrid** (Recommended) | Most searches | Combines semantic + keyword results |
 | 🧠 **Semantic Only** | Conceptual queries | Finds related papers by meaning |
-| 🔤 **Keyword Only** | Author/year searches | Exact title, author, year matching |
+| 🔤 **Keyword Only** | Author/year searches, exact phrases | Zotero's own search over titles, authors, years, tags, PDF text and notes; a match inside a PDF or a note is credited to the paper it belongs to |
 
 ### Why Hybrid Search?
 

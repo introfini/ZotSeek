@@ -38,6 +38,8 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
     - [Per-Model Embeddings (Schema v9)](#per-model-embeddings-schema-v9)
     - [Note Identity (Schema v10)](#note-identity-schema-v10)
 11. [Query Analysis](#query-analysis)
+    - [Resolving Keyword Matches to Papers](#resolving-keyword-matches-to-papers)
+    - [Keyword Scoring](#keyword-scoring)
 
 ---
 
@@ -126,16 +128,21 @@ Uses AI embeddings to find conceptually related papers, even with different word
 
 ### 🔤 Keyword Only
 
-Uses Zotero's built-in quick search on titles, authors, years, tags.
+Uses Zotero's built-in quick search, which covers titles, authors, years and
+tags as well as the text of attached PDFs and of child notes. A match inside a
+PDF or a note is credited to the paper the file or the note belongs to (see
+[Resolving keyword matches to papers](#resolving-keyword-matches-to-papers)).
 
 **Best for:**
 - Author searches: "Smith 2023"
 - Exact terms: "PRISMA 2020"
 - Tag-based filtering
+- Exact phrases you remember from a PDF or wrote in a note
 
 **Limitations:**
 - No semantic understanding
 - Won't find synonyms or related concepts
+- Full-text matching depends on Zotero having indexed the attachment
 
 ---
 
@@ -1151,6 +1158,43 @@ The plugin automatically adjusts semantic vs keyword weights based on query char
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Resolving Keyword Matches to Papers
+
+Zotero's quick search returns whichever item holds the matching text. For a
+phrase in a PDF that is the attachment; for a phrase in a note it is the note.
+Neither is a result ZotSeek can rank, so every match is resolved to the item it
+belongs to before anything else happens:
+
+```
+Zotero.Search (quicksearch-everything)
+        │
+        ▼
+  matched items ──── attachment ──┐
+                     note ────────┼──► the paper it hangs from
+                     annotation ──┘
+                     regular item ───► itself
+                     standalone note/attachment ───► dropped (nothing indexed)
+        │
+        ▼
+  drop books (zotseek.excludeBooks), read from the RESOLVED item's type
+        │
+        ▼
+  dedupe by resolved item (11 matching PDFs on one paper = 1 result)
+        │
+        ▼
+  relevance scoring below, then top K
+```
+
+Order matters at every step. The book filter cannot be a search condition,
+because the match's own type is `attachment` and only the resolved paper can be
+a book. Deduping has to happen before the results are capped, otherwise one
+paper's attachments would fill the cap and crowd out other papers. And the cap
+itself is applied only after scoring, since Zotero returns its matches in no
+relevance order at all.
+
+Grandchildren resolve in one step: an annotation hangs off an attachment, and
+what it resolves to is the paper at the top of that chain, not the PDF.
 
 ### Keyword Scoring
 
