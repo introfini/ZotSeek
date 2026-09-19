@@ -26,8 +26,11 @@ declare const Zotero: any;
 /**
  * Read every child note of an item, convert HTML to plain text, and chunk
  * the combined note text. Module-level (not a class method) because
- * SpiderMonkey does not reliably register all class methods added to
- * TextExtractor in this project's esbuild IIFE bundle (see CLAUDE.md).
+ * SpiderMonkey does not reliably register all class methods added to a
+ * class compiled into this project's esbuild IIFE bundle: a method added
+ * here can be missing from the runtime prototype even though it is present
+ * in the build output, so utility functions that do not need `this` are
+ * kept as plain module-level functions instead.
  */
 async function collectNoteChunks(
   item: ZoteroItem,

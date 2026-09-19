@@ -653,7 +653,9 @@ Chunk[] with type: 'note'  ─────────►  appended to the item'
                                         BEFORE the content hash is computed
 ```
 
-Because note chunks are appended before `hashContent()` runs, editing a note's text changes the item's content hash exactly like editing the PDF would, which is what makes silent re-indexing pick up note edits. Note chunks share the item's normal `maxChunksPerPaper` ceiling with the rest of its content, so a note-heavy item can still hit the truncation limit described above.
+Because note chunks are appended before `hashContent()` runs, editing a note's text changes the item's content hash exactly like editing the PDF would, which is what makes silent re-indexing pick up note edits.
+
+Note chunks do **not** share the main content's `maxChunksPerPaper` budget — `chunkNoteText()` applies its own `maxChunks` cap to the note text independently (`src/utils/chunker.ts`), and the result is concatenated after whatever the document chunker already produced. An item that fills the ceiling with PDF text and also has note-heavy notes can end up with roughly double `maxChunksPerPaper` chunks in total. Note overflow also does not set `wasTruncated`: that flag is computed from the main-content chunker's result alone, before `collectNoteChunks()` runs, so a note that hits its own cap is truncated silently — it does not surface through the partial-indexing glyph or the progress-window warning described below.
 
 `noteHtmlToText()` strips `<script>`/`<style>` blocks and `<img>` tags entirely — every embedding model ZotSeek ships is text-only, so an image contributes nothing, but the text around it is preserved. Entities (`&amp;`, `&lt;`, ...) are unescaped only after tags are stripped, so an escaped `&lt;p&gt;` in a note's body is never mistaken for real markup.
 

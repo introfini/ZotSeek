@@ -2077,8 +2077,9 @@ export class VectorStoreSQLite {
     );
     if (!pk) return out;
 
-    // Two single-column reads: multi-column SELECTs can come back empty on
-    // Zotero 8 (see the queryAsync quirk in CLAUDE.md).
+    // Two single-column reads: Zotero.DB.queryAsync() can return empty results
+    // for multi-column SELECTs on Zotero 8, so every read path here uses
+    // parallel columnQueryAsync() calls instead as a workaround.
     const texts = await Zotero.DB.columnQueryAsync(
       `SELECT chunk_text FROM ${DB_NAME}.chunks
         WHERE item_pk = ? AND model_id = ? ORDER BY chunk_index`,
