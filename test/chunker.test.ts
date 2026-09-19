@@ -312,4 +312,29 @@ describe('chunkNoteText', () => {
     assert.match(combined, /Specificity 0\.79/);
     assert.match(combined, /AUC 0\.91 across all folds/);
   });
+
+  test('keeps short list items alive when the note is long enough to force splitting across chunks', () => {
+    // Same seam as the table test above, for `<li>`: a bullet list rendered
+    // as one paragraph survives splitTextIntoChunks's >50-char filter
+    // (chunker.ts:357), but only once the note is long enough to take the
+    // multi-chunk split branch. Research notes are very often exactly a list
+    // of short bullet lines, each well under 50 characters on its own.
+    const fillerParagraphs = paragraphs(40)
+      .split('\n\n')
+      .map((p) => `<p>${p}</p>`)
+      .join('');
+    const html =
+      `${fillerParagraphs}<ul>` +
+      '<li>Sensitivity 0.82</li><li>Specificity 0.79</li><li>Third bullet point</li>' +
+      '</ul>';
+    const noteText = noteHtmlToText(html);
+
+    const chunks = chunkNoteText('Paper title', noteText, { maxTokens: 200 });
+    assert.ok(chunks.length > 1, 'note must be long enough to force splitting across chunks');
+
+    const combined = chunks.map((c) => c.text).join('\n');
+    assert.match(combined, /Sensitivity 0\.82/);
+    assert.match(combined, /Specificity 0\.79/);
+    assert.match(combined, /Third bullet point/);
+  });
 });

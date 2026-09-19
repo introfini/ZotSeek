@@ -41,7 +41,14 @@ export function noteHtmlToText(html: string): string {
   // `\n` keeps cells readably separated while `</tr>` still closes the row as
   // one paragraph, long enough to survive that filter.
   text = text.replace(/<\/(td|th)>/gi, '\n');
-  text = text.replace(/<\/(p|div|li|h[1-6]|blockquote|tr|pre|ul|ol)>/gi, '\n\n');
+  // Same reasoning applies to `<li>`: a single newline keeps every bullet on
+  // its own line while `</ul>`/`</ol>` still closes the whole list as one
+  // paragraph. Research notes are very often exactly a list of short bullet
+  // lines, each well under 50 characters on its own, so splitting per-item
+  // would feed the chunker's short-paragraph filter one throwaway fragment
+  // per bullet and silently drop the entire list.
+  text = text.replace(/<\/li>/gi, '\n');
+  text = text.replace(/<\/(p|div|h[1-6]|blockquote|tr|pre|ul|ol)>/gi, '\n\n');
   text = text.replace(/<[^>]*>/g, '');
   text = unescapeEntities(text);
 

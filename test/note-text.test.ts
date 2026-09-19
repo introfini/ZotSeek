@@ -45,6 +45,23 @@ describe('noteHtmlToText', () => {
     assert.match(out, /- two/);
   });
 
+  test('keeps a whole list as one paragraph, not one paragraph per item', () => {
+    // Mirrors the table-row regression below: an earlier fix made `</td>`/`</th>`
+    // a single newline so a row stays one paragraph, but left `</li>` emitting a
+    // paragraph break (`\n\n`), which fragments every list item into its own
+    // short paragraph. Those fragments are exactly the kind the chunker's
+    // short-paragraph filter discards downstream (chunker.ts:357), so a bullet
+    // list of short items survived here only to be silently dropped later. The
+    // list must come out as a single paragraph: no `\n\n` between items, only
+    // after the list closes.
+    const html = '<ul><li>alpha</li><li>beta</li><li>gamma</li></ul><p>after</p>';
+    const out = noteHtmlToText(html);
+    const paragraphs = out.split('\n\n');
+    assert.equal(paragraphs.length, 2);
+    assert.equal(paragraphs[0], '- alpha\n- beta\n- gamma');
+    assert.equal(paragraphs[1], 'after');
+  });
+
   test('collapses runs of blank lines to a single paragraph break', () => {
     const out = noteHtmlToText('<p>a</p><p></p><p></p><p>b</p>');
     assert.equal(out, 'a\n\nb');
