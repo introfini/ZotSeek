@@ -19,6 +19,21 @@ declare const Zotero: any;
 // Callback type for when items are ready to be indexed
 type IndexCallback = (items: any[]) => Promise<void>;
 
+/**
+ * Whether child-note text is part of the index. Module-level (not a class
+ * method) because SpiderMonkey does not reliably register methods added to a
+ * class compiled into this project's esbuild IIFE bundle; see CLAUDE.md
+ * pitfall #6.
+ */
+function isNoteIndexingEnabled(): boolean {
+  try {
+    return Zotero.Prefs.get('zotseek.indexNotes', true) === true;
+  } catch (e) {
+    Zotero.debug(`[ZotSeek:AutoIndexManager] Error reading indexNotes pref: ${e}`);
+    return false;
+  }
+}
+
 export class AutoIndexManager {
   private static instance: AutoIndexManager | null = null;
 
@@ -200,6 +215,13 @@ export class AutoIndexManager {
         // trash events to its child notes, and re-indexing a trashed item
         // that Update Index would skip anyway is pointless.
         if (item.isNote() && item.parentID) {
+          // Nothing a note does changes the index while note indexing is off:
+          // the chunk array would come out byte-identical. Without this check
+          // every note edit still pays for a full re-index of its parent — PDF
+          // re-extraction, a worker reload, a chunk rewrite and a popup — for
+          // a net change of nothing, which every user on the default setting
+          // would be paying.
+          if (!isNoteIndexingEnabled()) continue;
           const parent = await Zotero.Items.getAsync(item.parentID as number);
           if (parent && !parent.deleted && this.shouldProcess(parent)) {
             const verb = event === 'trash' ? 'Note trashed on' : event === 'modify' ? 'Note edited on' : 'Note added on';
@@ -471,7 +493,11 @@ export class AutoIndexManager {
     try {
       // Get Zotero items
       const items = await Zotero.Items.getAsync(itemIds);
-      const validItems = items.filter((item: any) => item && !item.isNote() && !item.isAttachment());
+      // !item.deleted: an item trashed during the quiet period has already had
+      // its embeddings deleted by the cleanup observer, and re-indexing it here
+      // would write them straight back, leaving a trashed item searchable.
+      const validItems = items.filter((item: any) =>
+        item && !item.deleted && !item.isNote() && !item.isAttachment());
 
       if (validItems.length > 0) {
         // Trigger indexing via callback

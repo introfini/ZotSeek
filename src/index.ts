@@ -1837,10 +1837,19 @@ class ZotSeekPlugin {
       embeddingPipeline.reset();
       await embeddingPipeline.init();
 
+      // Drop items trashed since they were queued: the cleanup observer deletes
+      // a trashed item's embeddings on the trash event, and the quiet period
+      // makes "edit a note, then trash the parent" likely enough that writing
+      // them back here would leave a trashed item searchable — exactly what
+      // that observer exists to prevent.
+      const liveItems = items.filter(item => !item.deleted);
+
       // Filter out items with exclusion tag
-      const filteredItems = items.filter(item => !hasExcludeTag(item));
+      const filteredItems = liveItems.filter(item => !hasExcludeTag(item));
       if (filteredItems.length === 0) {
-        this.logger.info('All items excluded by tag');
+        this.logger.info(liveItems.length === 0
+          ? 'All queued items were trashed before indexing ran'
+          : 'All items excluded by tag');
         try { itemRow.setIcon('chrome://zotero/skin/tick.png'); } catch { /* ignore */ }
         itemRow.setText(getString('indexing-allExcluded'));
         progressWin.startCloseTimer(3000);
