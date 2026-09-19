@@ -312,12 +312,18 @@ async function hasPDFAttachment(item: any): Promise<boolean> {
  *  - Unchanged content. The stored hash for the active model already matches,
  *    so the write would produce byte-identical chunks. This removes the entire
  *    no-op re-index path, which is the common case for note notifications.
- *  - Full mode produced no document body although the item has a PDF. The file
- *    is unreachable (a linked file on an unmounted volume, download-as-needed)
- *    or PDFWorker failed; replacing a fully indexed paper with a single summary
- *    chunk would be invisible damage, because item_models survives so the item
- *    still reads as indexed and every bulk path skips it afterwards. Only
- *    clearing and rebuilding the index repairs that.
+ *  - A previously-indexed item's full mode re-index produced no document body
+ *    although the item has a PDF. The file is unreachable (a linked file on an
+ *    unmounted volume, download-as-needed) or PDFWorker failed; replacing a
+ *    fully indexed paper with a single summary chunk would be invisible
+ *    damage, because item_models survives so the item still reads as indexed
+ *    and every bulk path skips it afterwards. Only clearing and rebuilding the
+ *    index repairs that. This guard only applies to a genuine re-index: an
+ *    item's first auto-index pass falls through and is written abstract-only,
+ *    same as before this guard existed, so a scanned/image-only PDF (which
+ *    never has extractable text) or an ordinary PDF whose extraction simply
+ *    hasn't finished yet still gets its imperfect-but-real abstract-only
+ *    index instead of being skipped forever.
  *
  * Module-level rather than a class method: SpiderMonkey does not reliably
  * register methods added to the class compiled into this esbuild IIFE bundle.
@@ -352,11 +358,22 @@ async function filterSilentReindexTargets(
     }
 
     if (indexingMode === 'full' && !e.chunks.some(c => DOCUMENT_CHUNK_TYPES.has(c.type))) {
-      if (item && await hasPDFAttachment(item)) {
+      let alreadyIndexed = false;
+      if (identity) {
+        try {
+          alreadyIndexed = await store.isIndexedByIdentity(identity.libraryKey, identity.itemKey);
+        } catch (err: any) {
+          // A failed lookup must not block indexing; fall through and write.
+          logger.warn(`Indexed-status check failed for "${e.title}": ${err?.message || err}`);
+        }
+      }
+
+      if (alreadyIndexed && item && await hasPDFAttachment(item)) {
         logger.warn(
           `Skipping auto re-index of "${e.title}": full mode produced no document text ` +
-          `although the item has a PDF (file unreachable or extraction failed). ` +
-          `Keeping the existing chunks rather than replacing them with a summary.`
+          `although the item has a PDF and was already indexed (file unreachable or ` +
+          `extraction failed). Keeping the existing chunks rather than replacing them ` +
+          `with a summary.`
         );
         continue;
       }
