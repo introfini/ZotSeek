@@ -5,6 +5,7 @@ import {
   chunkDocument,
   chunkDocumentEx,
   chunkNoteText,
+  chunkNotes,
   createPageEstimationContext,
   estimatePageNumber,
   estimatePageForRange,
@@ -336,5 +337,95 @@ describe('chunkNoteText', () => {
     assert.match(combined, /Sensitivity 0\.82/);
     assert.match(combined, /Specificity 0\.79/);
     assert.match(combined, /Third bullet point/);
+  });
+});
+
+describe('chunkNotes', () => {
+  /** Distinctive prose so a chunk can be traced back to the note it came from. */
+  function note(marker: string, count = 6): string {
+    const out: string[] = [];
+    for (let p = 0; p < count; p++) {
+      const sentences: string[] = [];
+      for (let s = 0; s < 12; s++) {
+        sentences.push(`${marker} paragraph ${p} sentence ${s} about semantic retrieval.`);
+      }
+      out.push(sentences.join(' '));
+    }
+    return out.join('\n\n');
+  }
+
+  test('tags every chunk with the key of the note it came from', () => {
+    const chunks = chunkNotes('Paper title', [
+      { key: 'AAAAAAAA', text: note('ALPHA') },
+      { key: 'BBBBBBBB', text: note('BETA') },
+    ], { maxTokens: 200 });
+
+    assert.ok(chunks.length > 2);
+    for (const chunk of chunks) {
+      const marker = /ALPHA/.test(chunk.text) ? 'AAAAAAAA' : 'BBBBBBBB';
+      assert.equal(chunk.noteKey, marker, 'chunk must carry its own note key');
+    }
+    assert.ok(chunks.some(c => c.noteKey === 'AAAAAAAA'));
+    assert.ok(chunks.some(c => c.noteKey === 'BBBBBBBB'));
+  });
+
+  test('never puts text from two notes in the same chunk', () => {
+    // The old code joined the notes with a blank line, which is exactly the
+    // separator the chunker splits paragraphs on, so short notes collapsed
+    // into one diluted vector and a query matching one note matched nothing.
+    const chunks = chunkNotes('Paper title', [
+      { key: 'AAAAAAAA', text: 'A short note about ALPHA and nothing else.' },
+      { key: 'BBBBBBBB', text: 'A short note about BETA and nothing else.' },
+    ], { maxTokens: 8000 });
+
+    assert.equal(chunks.length, 2, 'each note must produce its own chunk');
+    for (const chunk of chunks) {
+      const mixed = /ALPHA/.test(chunk.text) && /BETA/.test(chunk.text);
+      assert.equal(mixed, false, 'a chunk must not mix two notes');
+    }
+  });
+
+  test('applies the chunk ceiling to the combined set, not per note', () => {
+    // Per note, five notes of 100 chunks each would be 500 chunks on one item.
+    const notes = ['AAAAAAAA', 'BBBBBBBB', 'CCCCCCCC', 'DDDDDDDD', 'EEEEEEEE']
+      .map(key => ({ key, text: note(key, 40) }));
+
+    const chunks = chunkNotes('Paper title', notes, { maxTokens: 100, maxChunks: 7 });
+    assert.equal(chunks.length, 7);
+    // Per-note chunking is what makes the combined cap necessary, so the
+    // capped set must still be note-tagged: a set of seven untagged chunks
+    // means the notes were merged before chunking.
+    for (const chunk of chunks) {
+      assert.ok(chunk.noteKey, 'every capped chunk must still name its note');
+    }
+  });
+
+  test('skips an empty or unreadable note without consuming an index', () => {
+    const chunks = chunkNotes('Paper title', [
+      { key: 'AAAAAAAA', text: '' },
+      { key: 'BBBBBBBB', text: '   \n\n  ' },
+      { key: 'CCCCCCCC', text: 'A short note about GAMMA.' },
+    ]);
+
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0].index, 0);
+    assert.equal(chunks[0].noteKey, 'CCCCCCCC');
+  });
+
+  test('re-bases chunk indices across notes so none collide', () => {
+    // The chunks table is keyed by (item_pk, chunk_index, model_id): a repeated
+    // index silently overwrites an earlier note's chunk.
+    const chunks = chunkNotes('Paper title', [
+      { key: 'AAAAAAAA', text: note('ALPHA', 10) },
+      { key: 'BBBBBBBB', text: note('BETA', 10) },
+    ], { maxTokens: 200 });
+
+    assert.ok(chunks.length > 2);
+    chunks.forEach((chunk, i) => assert.equal(chunk.index, i));
+    assert.equal(new Set(chunks.map(c => c.index)).size, chunks.length);
+
+    const firstBeta = chunks.findIndex(c => c.noteKey === 'BBBBBBBB');
+    assert.ok(firstBeta > 0, 'the second note must start after the first note ends');
+    assert.equal(chunks[firstBeta].index, firstBeta);
   });
 });

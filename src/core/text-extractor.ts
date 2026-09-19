@@ -14,7 +14,8 @@ import {
   IndexingMode,
   chunkDocumentEx,
   chunkDocumentWithPagesEx,
-  chunkNoteText,
+  NoteSource,
+  chunkNotes,
   getChunkOptionsFromPrefs,
   getIndexingMode
 } from '../utils/chunker';
@@ -25,7 +26,8 @@ declare const Zotero: any;
 
 /**
  * Read every child note of an item, convert HTML to plain text, and chunk
- * the combined note text. Module-level (not a class method) because
+ * each note on its own, so no chunk ever mixes two notes and every chunk
+ * records which note it came from. Module-level (not a class method) because
  * SpiderMonkey does not reliably register all class methods added to a
  * class compiled into this project's esbuild IIFE bundle: a method added
  * here can be missing from the runtime prototype even though it is present
@@ -44,7 +46,7 @@ async function collectNoteChunks(
   const noteIds: number[] = getNotes.call(item) || [];
   if (noteIds.length === 0) return [];
 
-  const parts: string[] = [];
+  const parts: NoteSource[] = [];
   for (const noteId of noteIds) {
     // Per-note try/catch: a throw from getAsync or getNote() would otherwise
     // reach extractChunksFromItem's catch, which returns null and drops the
@@ -53,7 +55,7 @@ async function collectNoteChunks(
       const note = await Zotero.Items.getAsync(noteId);
       if (!note || note.deleted) continue;
       const text = noteHtmlToText(note.getNote() || '');
-      if (text) parts.push(text);
+      if (text) parts.push({ key: note.key, text });
     } catch (error: any) {
       Zotero.debug(
         `[ZotSeek:TextExtractor] Skipping note ${noteId} on item ${item.id}: ` +
@@ -63,7 +65,7 @@ async function collectNoteChunks(
   }
   if (parts.length === 0) return [];
 
-  return chunkNoteText(title, parts.join('\n\n'), options);
+  return chunkNotes(title, parts, options);
 }
 
 export interface ExtractedText {

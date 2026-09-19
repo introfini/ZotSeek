@@ -15,6 +15,10 @@ export interface Chunk {
   type: 'summary' | 'methods' | 'findings' | 'content' | 'note';
   tokenCount?: number;
 
+  // Stable key of the child note this chunk was cut from ('note' chunks only).
+  // Lets a search hit open the note itself instead of only its parent item.
+  noteKey?: string;
+
   // Passage-level location (Phase 2: evidence linking)
   pageNumber?: number;        // 1-based estimated page number
   paragraphIndex?: number;    // 0-based paragraph index within the chunk's source
@@ -708,6 +712,57 @@ export function chunkNoteText(
     startChar: undefined,
     endChar: undefined,
   }));
+}
+
+/**
+ * One child note as the chunker sees it: its stable Zotero key and its text
+ * already converted from HTML.
+ */
+export interface NoteSource {
+  key: string;
+  text: string;
+}
+
+/**
+ * Chunk each of an item's notes on its own.
+ *
+ * Joining the notes into one string and chunking that was wrong twice over:
+ * the separator between two notes is the same blank line the chunker splits
+ * paragraphs on, so unrelated notes ended up sharing a chunk and therefore a
+ * vector, and editing any note changed the joined text and forced every note
+ * chunk to be re-embedded.
+ *
+ * `maxChunks` is a per-ITEM budget, so it is enforced here over the combined
+ * set rather than per note. `chunkNoteText` keeps its own slice as a bound on
+ * the work a single runaway note can cause; it cannot change the result,
+ * because a note that alone fills the budget leaves nothing for the rest
+ * either way.
+ */
+export function chunkNotes(
+  title: string,
+  notes: NoteSource[],
+  options: ChunkOptions = {}
+): Chunk[] {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const out: Chunk[] = [];
+
+  for (const note of notes || []) {
+    if (out.length >= opts.maxChunks) break;
+    const noteChunks = chunkNoteText(title, note?.text || '', options);
+    for (const chunk of noteChunks) {
+      if (out.length >= opts.maxChunks) break;
+      out.push({
+        ...chunk,
+        // Re-based across the combined set: the primary key is
+        // (item_pk, chunk_index, model_id), so a repeated index would
+        // silently overwrite an earlier note's chunk.
+        index: out.length,
+        noteKey: note?.key || undefined,
+      });
+    }
+  }
+
+  return out;
 }
 
 /**
