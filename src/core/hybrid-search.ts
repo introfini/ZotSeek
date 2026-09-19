@@ -52,6 +52,7 @@ export interface HybridSearchResult {
   // Location information from matched chunk
   pageNumber?: number;        // 1-based page number
   paragraphIndex?: number;    // 0-based paragraph index within page
+  noteKey?: string;           // Key of the child note the matched chunk came from
 
   // Multi-query scores (for tooltip display in multi-query search)
   queryScores?: number[];     // Individual scores from each query
@@ -211,6 +212,7 @@ export class HybridSearchEngine {
       if (match.textSource !== undefined) result.textSource = match.textSource;
       if (match.pageNumber !== undefined) result.pageNumber = match.pageNumber;
       if (match.paragraphIndex !== undefined) result.paragraphIndex = match.paragraphIndex;
+      if (match.noteKey !== undefined) result.noteKey = match.noteKey;
     }
 
     this.logger.info(`Back-filled ${matches.size}/${needing.length} keyword-only hits`);
@@ -274,6 +276,7 @@ export class HybridSearchEngine {
       chunkText: r.chunkText,
       pageNumber: r.pageNumber,
       paragraphIndex: r.paragraphIndex,
+      noteKey: r.noteKey,
     }));
 
     await this.populateItemMetadata(hybridResults.slice(0, opts.finalTopK));
@@ -314,7 +317,7 @@ export class HybridSearchEngine {
     query: string,
     opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>> & HybridSearchOptions,
     queryEmbedding?: Float32Array
-  ): Promise<Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; chunkText?: string; pageNumber?: number; paragraphIndex?: number }>> {
+  ): Promise<Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; chunkText?: string; pageNumber?: number; paragraphIndex?: number; noteKey?: string }>> {
     try {
       // Initialize search engine if needed
       if (!this.semanticSearch.isReady()) {
@@ -361,6 +364,7 @@ export class HybridSearchEngine {
         chunkText: r.chunkText,
         pageNumber: r.pageNumber,
         paragraphIndex: r.paragraphIndex,
+        noteKey: r.noteKey,
       }));
     } catch (error) {
       this.logger.error('Semantic search failed:', error);
@@ -498,7 +502,7 @@ export class HybridSearchEngine {
    * @param opts - Options including rrfK and semanticWeight
    */
   private reciprocalRankFusion(
-    semanticResults: Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; chunkText?: string; pageNumber?: number; paragraphIndex?: number }>,
+    semanticResults: Array<{ itemId: number; score: number; textSource?: TextSourceType; chunkIndex?: number; chunkText?: string; pageNumber?: number; paragraphIndex?: number; noteKey?: string }>,
     keywordResults: Array<{ itemId: number; score: number }>,
     opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>>
   ): HybridSearchResult[] {
@@ -512,7 +516,7 @@ export class HybridSearchEngine {
 
     // Build maps for quick lookup
     // Key is either "itemId" or "itemId-chunkIndex" depending on mode
-    const semanticMap = new Map<string, { itemId: number; chunkIndex?: number; chunkText?: string; rank: number; score: number; textSource?: TextSourceType; pageNumber?: number; paragraphIndex?: number }>();
+    const semanticMap = new Map<string, { itemId: number; chunkIndex?: number; chunkText?: string; rank: number; score: number; textSource?: TextSourceType; pageNumber?: number; paragraphIndex?: number; noteKey?: string }>();
     semanticResults.forEach((r, index) => {
       const key = useChunkKey ? `${r.itemId}-${r.chunkIndex ?? 0}` : String(r.itemId);
       // In all-chunks mode, keep all entries; in MaxSim mode, keep only first (best) per item
@@ -526,6 +530,7 @@ export class HybridSearchEngine {
           textSource: r.textSource,
           pageNumber: r.pageNumber,
           paragraphIndex: r.paragraphIndex,
+          noteKey: r.noteKey,
         });
       }
     });
@@ -590,6 +595,7 @@ export class HybridSearchEngine {
         chunkText: semantic?.chunkText,
         pageNumber: semantic?.pageNumber,
         paragraphIndex: semantic?.paragraphIndex,
+        noteKey: semantic?.noteKey,
       });
     }
 

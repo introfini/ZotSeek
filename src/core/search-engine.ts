@@ -38,6 +38,7 @@ export interface SearchResult {
   year?: number;               // Optional: publication year for display
   pageNumber?: number;         // 1-based page number of matched chunk
   paragraphIndex?: number;     // 0-based paragraph index within page
+  noteKey?: string;            // Key of the child note the matched chunk came from
 }
 
 export interface SearchOptions {
@@ -76,6 +77,7 @@ interface ItemSimilarity {
   matchedChunkIndex: number;
   pageNumber?: number;
   paragraphIndex?: number;
+  noteKey?: string;
 }
 
 export class SearchEngine {
@@ -283,6 +285,7 @@ export class SearchEngine {
       embedding: Float32Array;
       pageNumber?: number;
       paragraphIndex?: number;
+      noteKey?: string;
     }>;
 
     if (opts.libraryId !== undefined) {
@@ -313,6 +316,7 @@ export class SearchEngine {
           embedding: float32Embedding,
           pageNumber: e.pageNumber,
           paragraphIndex: e.paragraphIndex,
+          noteKey: e.noteKey,
         };
       });
     } else {
@@ -575,6 +579,7 @@ export class SearchEngine {
       embedding: Float32Array;
       pageNumber?: number;
       paragraphIndex?: number;
+      noteKey?: string;
     }>,
     minSimilarity: number
   ): SearchResult[] {
@@ -603,6 +608,7 @@ export class SearchEngine {
           matchedChunkIndex: chunk.chunkIndex,
           pageNumber: chunk.pageNumber,
           paragraphIndex: chunk.paragraphIndex,
+          noteKey: chunk.noteKey,
         });
       }
     }
@@ -622,6 +628,7 @@ export class SearchEngine {
           matchedChunkIndex: item.matchedChunkIndex,
           pageNumber: item.pageNumber,
           paragraphIndex: item.paragraphIndex,
+          noteKey: item.noteKey,
         });
       }
     }
@@ -648,6 +655,7 @@ export class SearchEngine {
       embedding: Float32Array;
       pageNumber?: number;
       paragraphIndex?: number;
+      noteKey?: string;
     }>,
     minSimilarity: number
   ): SearchResult[] {
@@ -675,6 +683,7 @@ export class SearchEngine {
           matchedChunkIndex: chunk.chunkIndex,
           pageNumber: chunk.pageNumber,
           paragraphIndex: chunk.paragraphIndex,
+          noteKey: chunk.noteKey,
         });
       }
     }
@@ -703,6 +712,7 @@ export class SearchEngine {
     embedding: Float32Array;
     pageNumber?: number;
     paragraphIndex?: number;
+    noteKey?: string;
   }>> {
     const store = this.getStore();
     let embeddings;
@@ -736,6 +746,7 @@ export class SearchEngine {
           embedding: float32Embedding,
           pageNumber: e.pageNumber,
           paragraphIndex: e.paragraphIndex,
+          noteKey: e.noteKey,
         };
       });
     } else {

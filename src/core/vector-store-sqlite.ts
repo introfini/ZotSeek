@@ -71,6 +71,11 @@ export interface PaperEmbedding {
   endChar?: number;          // End character offset
   bbox?: string;             // JSON: [l, t, r, b] bounding box coordinates
 
+  // Which child note this chunk was cut from (v10). Set only on 'note' chunks;
+  // the stable 8-char Zotero key, never a local item ID, so the database stays
+  // copyable between machines.
+  noteKey?: string;
+
   // Per-item indexing status (v7) — same value across all chunks of an item.
   // Stored on the items table; populated here so putBatch can write it.
   wasTruncated?: boolean;    // True if maxChunksPerPaper limit cut off content
@@ -112,7 +117,7 @@ export interface VectorStoreStats {
 // Database configuration
 const DB_NAME = 'zotseek';           // Schema name when attached
 const DB_FILE = 'zotseek.sqlite';    // Database filename
-const SCHEMA_VERSION = 9;            // v9: per-model embeddings (chunks.model_id + item_models)
+const SCHEMA_VERSION = 10;           // v10: chunks.note_key (which child note a note chunk came from)
 
 // Legacy table prefix (for migration from old schema)
 const LEGACY_TABLE_PREFIX = 'zs_';
@@ -141,6 +146,7 @@ export class VectorStoreSQLite {
       embedding: Float32Array;
       pageNumber?: number;
       paragraphIndex?: number;
+      noteKey?: string;
     }>;
     validAt: number;  // timestamp
   } | null = null;
@@ -235,6 +241,9 @@ export class VectorStoreSQLite {
 
       // Migrate to v9 (per-model embeddings: chunks.model_id + item_models) if needed
       await this.migrateToV9();
+
+      // Migrate to v10 (chunks.note_key) if needed
+      await this.migrateToV10();
 
       this.initialized = true;
       this.logger.info('SQLite store initialized successfully');
@@ -1378,6 +1387,55 @@ export class VectorStoreSQLite {
   }
 
   /**
+   * Migrate to schema v10: record which child note a note chunk came from.
+   *
+   * Adds a nullable `chunks.note_key` holding the note's stable 8-char Zotero
+   * key. Local item IDs are deliberately not stored (that was the point of the
+   * v8 identity work), so the database stays copyable between machines.
+   *
+   * No backup file and no back-fill: this only appends a nullable column, so
+   * there is nothing to rewrite and nothing to lose. Existing rows keep NULL,
+   * which is correct — they are either not note chunks at all, or note chunks
+   * written before this column existed, which simply open their parent item
+   * until the item is re-indexed.
+   *
+   * Detection: presence of the column is ground truth. Reading the stored
+   * schema_version would not work, because createTables() bumps that marker
+   * unconditionally, including when its CREATE TABLE IF NOT EXISTS is a no-op.
+   */
+  private async migrateToV10(): Promise<void> {
+    let chunkCols: Set<string>;
+    try {
+      const cols: any[] = await Zotero.DB.queryAsync(`PRAGMA ${DB_NAME}.table_info(chunks)`);
+      chunkCols = new Set((cols || []).map((c: any) => c.name));
+    } catch (e: any) {
+      this.logger.error(`migrateToV10: cannot introspect chunks: ${e?.message || e}`);
+      return;
+    }
+    if (chunkCols.size === 0) {
+      // No chunks table yet (very old schema deferring to an earlier migration).
+      return;
+    }
+    if (chunkCols.has('note_key')) {
+      this.logger.debug('chunks already at v10, skipping migration');
+      return;
+    }
+
+    this.logger.info('Migrating schema from v9 to v10 (chunks.note_key)...');
+    try {
+      await Zotero.DB.queryAsync(`ALTER TABLE ${DB_NAME}.chunks ADD COLUMN note_key TEXT`);
+      await Zotero.DB.queryAsync(
+        `INSERT OR REPLACE INTO ${DB_NAME}.metadata (key, value) VALUES ('schema_version', '10')`
+      );
+      this.logger.info('Migrated zotseek DB to schema v10');
+      this.invalidateCache();
+    } catch (error: any) {
+      this.logger.error(`Migration to v10 failed: ${error?.message || error}`);
+      // Non-fatal: without the column a note hit still opens its parent item.
+    }
+  }
+
+  /**
    * Check if a table exists in the attached database
    */
   private async tableExists(tableName: string): Promise<boolean> {
@@ -1447,6 +1505,7 @@ export class VectorStoreSQLite {
           start_char INTEGER,
           end_char INTEGER,
           bbox TEXT,
+          note_key TEXT,
           PRIMARY KEY (item_pk, chunk_index, model_id),
           FOREIGN KEY (item_pk) REFERENCES items(item_pk) ON DELETE CASCADE
         )
@@ -1480,7 +1539,7 @@ export class VectorStoreSQLite {
     await this.createIndexes();
     await this.updateSchemaVersion();
 
-    this.logger.debug('Tables created successfully (v9)');
+    this.logger.debug('Tables created successfully (v10)');
   }
 
   /**
@@ -1606,6 +1665,7 @@ export class VectorStoreSQLite {
     startChar?: number | null;
     endChar?: number | null;
     bbox?: string | null;
+    noteKey?: string | null;
   }): PaperEmbedding {
     const itemId = localItemIDFromIdentity({
       libraryKey: row.libraryKey,
@@ -1633,6 +1693,7 @@ export class VectorStoreSQLite {
       startChar: row.startChar != null ? Number(row.startChar) : undefined,
       endChar: row.endChar != null ? Number(row.endChar) : undefined,
       bbox: row.bbox || undefined,
+      noteKey: row.noteKey || undefined,
     };
   }
 
@@ -1819,8 +1880,8 @@ export class VectorStoreSQLite {
     await Zotero.DB.queryAsync(`
       INSERT OR REPLACE INTO ${DB_NAME}.chunks
       (item_pk, chunk_index, model_id, chunk_text, text_source, embedding,
-       page_number, paragraph_index, start_char, end_char, bbox)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       page_number, paragraph_index, start_char, end_char, bbox, note_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       itemPk, chunkIndex, embedding.modelId,
       embedding.chunkText || null,
@@ -1831,6 +1892,7 @@ export class VectorStoreSQLite {
       embedding.startChar ?? null,
       embedding.endChar ?? null,
       embedding.bbox ?? null,
+      embedding.noteKey ?? null,
     ]);
 
     this.logger.debug(`Stored chunk for (${embedding.libraryKey}, ${embedding.itemKey}) idx=${chunkIndex}`);
@@ -1923,8 +1985,8 @@ export class VectorStoreSQLite {
         await Zotero.DB.queryAsync(`
           INSERT OR REPLACE INTO ${DB_NAME}.chunks
           (item_pk, chunk_index, model_id, chunk_text, text_source, embedding,
-           page_number, paragraph_index, start_char, end_char, bbox)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           page_number, paragraph_index, start_char, end_char, bbox, note_key)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           itemPk, chunkIndex, embedding.modelId,
           embedding.chunkText || null,
@@ -1935,6 +1997,7 @@ export class VectorStoreSQLite {
           embedding.startChar ?? null,
           embedding.endChar ?? null,
           embedding.bbox ?? null,
+          embedding.noteKey ?? null,
         ]);
       }
     });
@@ -2227,7 +2290,7 @@ export class VectorStoreSQLite {
       const [
         library_key, item_key, title, indexed_at, content_hash, abstract,
         text_source, chunk_text, embedding,
-        page_number, paragraph_index, start_char, end_char, bbox
+        page_number, paragraph_index, start_char, end_char, bbox, note_key
       ] = await Promise.all([
         Zotero.DB.valueQueryAsync(`SELECT library_key FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
         Zotero.DB.valueQueryAsync(`SELECT item_key FROM ${DB_NAME}.items WHERE item_pk = ?`, [itemPk]),
@@ -2243,6 +2306,7 @@ export class VectorStoreSQLite {
         Zotero.DB.valueQueryAsync(`SELECT start_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
         Zotero.DB.valueQueryAsync(`SELECT end_char FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
         Zotero.DB.valueQueryAsync(`SELECT bbox FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
+        Zotero.DB.valueQueryAsync(`SELECT note_key FROM ${DB_NAME}.chunks WHERE item_pk = ? AND chunk_index = ? AND model_id = ?`, [itemPk, chunkIndex, activeModelId]),
       ]);
 
       if (!library_key || !item_key || !embedding) return undefined;
@@ -2265,6 +2329,7 @@ export class VectorStoreSQLite {
         startChar: start_char,
         endChar: end_char,
         bbox,
+        noteKey: note_key,
       });
     } catch (e) {
       this.logger.error(`getChunkByPk(${itemPk}, ${chunkIndex}): ${e}`);
@@ -2329,6 +2394,7 @@ export class VectorStoreSQLite {
     embedding: Float32Array;
     pageNumber?: number;
     paragraphIndex?: number;
+    noteKey?: string;
   }>> {
     await this.ensureInit();
 
@@ -2373,6 +2439,7 @@ export class VectorStoreSQLite {
         embedding: float32Embedding,
         pageNumber: e.pageNumber,
         paragraphIndex: e.paragraphIndex,
+        noteKey: e.noteKey,
       };
     });
 
@@ -2425,12 +2492,13 @@ export class VectorStoreSQLite {
     let startChars: (number | null)[] = [];
     let endChars: (number | null)[] = [];
     let bboxes: (string | null)[] = [];
+    let noteKeys: (string | null)[] = [];
 
     try {
       [
         pks, libraryKeys, itemKeys, titles, abstracts, modelIds, indexedAts, contentHashes,
         chunkIndexes, chunkTexts, textSources, embeddings,
-        pageNumbers, paragraphIndexes, startChars, endChars, bboxes
+        pageNumbers, paragraphIndexes, startChars, endChars, bboxes, noteKeys
       ] = await Promise.all([
         Zotero.DB.columnQueryAsync(`SELECT c.item_pk FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => (r || []).map(Number)),
         Zotero.DB.columnQueryAsync(`SELECT i.library_key FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
@@ -2449,6 +2517,7 @@ export class VectorStoreSQLite {
         Zotero.DB.columnQueryAsync(`SELECT c.start_char FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
         Zotero.DB.columnQueryAsync(`SELECT c.end_char FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
         Zotero.DB.columnQueryAsync(`SELECT c.bbox FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
+        Zotero.DB.columnQueryAsync(`SELECT c.note_key FROM ${DB_NAME}.chunks c INNER JOIN ${DB_NAME}.items i ON c.item_pk = i.item_pk WHERE i.library_key != 'orphan' ORDER BY c.item_pk, c.chunk_index`).then((r: any) => r || []),
       ]);
     } catch (e) {
       this.logger.error(`getAll(): batch failed: ${e}`);
@@ -2490,6 +2559,7 @@ export class VectorStoreSQLite {
         startChar: startChars[i] != null ? Number(startChars[i]) : undefined,
         endChar: endChars[i] != null ? Number(endChars[i]) : undefined,
         bbox: bboxes[i] || undefined,
+        noteKey: noteKeys[i] || undefined,
       });
     }
 

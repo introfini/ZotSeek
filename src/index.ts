@@ -52,6 +52,7 @@ import './dev/suites/task-37c-model-aware-store';
 import './dev/suites/task-37d-partitioned-search';
 import './dev/suites/task-37e-model-download';
 import './dev/suites/task-50-note-reuse';
+import './dev/suites/task-50-note-identity';
 import './dev/suites/task-42a-loopback';
 import './dev/suites/task-42b-server-registry';
 import './dev/suites/task-42c-server-client';
@@ -1899,6 +1900,7 @@ class ZotSeekPlugin {
                 contentHash: extracted.contentHash,
                 pageNumber: chunk.pageNumber,
                 paragraphIndex: chunk.paragraphIndex,
+                noteKey: chunk.noteKey,
                 startChar: chunk.startChar,
                 endChar: chunk.endChar,
                 wasTruncated: extracted.wasTruncated,
@@ -2165,6 +2167,7 @@ class ZotSeekPlugin {
             contentHash: extracted.contentHash,
             pageNumber: chunk.pageNumber,
             paragraphIndex: chunk.paragraphIndex,
+            noteKey: chunk.noteKey,
             startChar: chunk.startChar,
             endChar: chunk.endChar,
             wasTruncated: extracted.wasTruncated,
@@ -2556,6 +2559,7 @@ class ZotSeekPlugin {
               contentHash: extracted.contentHash,
               pageNumber: chunk.pageNumber,
               paragraphIndex: chunk.paragraphIndex,
+              noteKey: chunk.noteKey,
               startChar: chunk.startChar,
               endChar: chunk.endChar,
               wasTruncated: extracted.wasTruncated,

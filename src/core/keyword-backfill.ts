@@ -23,6 +23,7 @@ export interface ScorableChunk {
   textSource?: TextSourceType;
   pageNumber?: number;
   paragraphIndex?: number;
+  noteKey?: string;
 }
 
 /** The winning chunk for one item, with everything needed to cite it. */
@@ -34,6 +35,7 @@ export interface ChunkMatch {
   textSource?: TextSourceType;
   pageNumber?: number;
   paragraphIndex?: number;
+  noteKey?: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export function bestChunkPerItem(
     if (chunk.textSource !== undefined) match.textSource = chunk.textSource;
     if (chunk.pageNumber !== undefined) match.pageNumber = chunk.pageNumber;
     if (chunk.paragraphIndex !== undefined) match.paragraphIndex = chunk.paragraphIndex;
+    if (chunk.noteKey !== undefined) match.noteKey = chunk.noteKey;
     best.set(itemId, match);
   }
 
