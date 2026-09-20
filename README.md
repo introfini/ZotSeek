@@ -21,6 +21,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 📖 **Search from PDF Selection** - Select text while reading → right-click → find documents about that concept
 - 🔎 **Natural Language Search** - Search with queries like "machine learning in healthcare"
 - 🔀 **Multi-Query Search** - Combine up to 4 queries with AND/OR logic to find topic intersections
+- 🕘 **Recent Searches** - The search window remembers your last 10 queries, so you can go back to a phrasing that worked; clear the list from the dropdown at any time
 - 🔗 **Hybrid Search** - Combines AI + keyword search for best results
 - ⚡ **Lightning Fast** - Searches complete in <100ms
 - 📑 **Section-Aware** - See which section matched (Abstract, Methods, Results)
@@ -232,6 +233,16 @@ Combine up to 4 search queries to find papers at the intersection of multiple to
 - `73% (77|73|68)` = 73% combined, with 77% for Q1, 73% for Q2, 68% for Q3
 
 For technical details, see [docs/SEARCH_ARCHITECTURE.md](docs/SEARCH_ARCHITECTURE.md).
+
+### Recent Searches
+
+Semantic search rewards rephrasing, and the phrasing that finally worked is easy to lose. The search window keeps the last 10 queries you actually ran:
+
+1. Click the **🕘** button next to the search field to see them, newest first
+2. Pick one to put it back in the box and run it again
+3. Choose **Clear search history** in the same dropdown to forget all of them
+
+Only the text of the main search box is kept, in a preference, so the list survives a restart. Running a query you have run before moves it back to the top instead of listing it twice, and a search you never ran (text you typed and then deleted) never enters the list.
 
 ---
 
