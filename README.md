@@ -238,7 +238,7 @@ For technical details, see [docs/SEARCH_ARCHITECTURE.md](docs/SEARCH_ARCHITECTUR
 
 Semantic search rewards rephrasing, and the phrasing that finally worked is easy to lose. The search window keeps the last 10 queries you actually ran:
 
-1. Click the **🕘** button next to the search field to see them, newest first
+1. Click the empty search field (or press the Down arrow while it's empty) to see them, newest first
 2. Pick one to put it back in the box and run it again
 3. Choose **Clear search history** in the same dropdown to forget all of them
 
