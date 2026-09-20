@@ -302,7 +302,7 @@ zotseek-notesBackfill-disabled = "Also index child notes" is turned off, so ther
     Turn it on in Settings → ZotSeek first, then run this again.
 zotseek-notesBackfill-scanning = Looking for indexed items that have notes...
 zotseek-notesBackfill-none = No indexed items have notes to add. Items that are not indexed yet already pick up their notes through Update Library Index.
-zotseek-notesBackfill-title = ZotSeek - Add Note Text to Index
+zotseek-notesBackfill-title = ZotSeek - Add Note Text to Existing Items
 zotseek-notesBackfill-confirmMsg = { $count } indexed item(s) have notes that are not in the index yet.
 
     Their notes will be indexed and the rest of their content is reused, so this is much faster than a full re-index. Each item's PDF is still read again, so allow several minutes.

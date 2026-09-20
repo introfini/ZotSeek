@@ -301,7 +301,7 @@ zotseek-notesBackfill-disabled = “同时索引子笔记”已关闭，没有�
     请先在“设置 → ZotSeek”中开启，然后再运行一次。
 zotseek-notesBackfill-scanning = 正在查找已索引且含笔记的条目...
 zotseek-notesBackfill-none = 没有已索引的条目需要加入笔记。尚未索引的条目会在“更新文献库索引”时一并索引其笔记。
-zotseek-notesBackfill-title = ZotSeek - 将笔记文本加入索引
+zotseek-notesBackfill-title = ZotSeek - 为已索引项目添加笔记文本
 zotseek-notesBackfill-confirmMsg = 有 { $count } 个已索引的条目，其笔记尚未进入索引。
 
     将索引这些笔记并复用条目其余内容，因此比完整重新索引快得多。但仍需重新读取每个条目的 PDF，请预留几分钟。
