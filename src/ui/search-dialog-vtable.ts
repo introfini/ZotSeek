@@ -89,6 +89,19 @@ function isSearchHistoryMenuOpen(doc: Document): boolean {
 }
 
 /**
+ * Close the recent-searches popup if it is open.
+ *
+ * The popup is anchored on the query field but does not take focus away from
+ * it, so typing a character does not close it on its own: only an outside
+ * click or Escape does that natively. A keystroke means the user is now
+ * editing a query, so this is called on every `input` on that field.
+ */
+function closeSearchHistoryMenu(doc: Document): void {
+  const menu = doc.getElementById('zotseek-history-menu') as any;
+  menu?.hidePopup?.();
+}
+
+/**
  * Resolve the child note a result came from to a local Zotero item ID.
  *
  * Note chunks store the note's stable 8-char key, never a local ID, so the
@@ -304,6 +317,9 @@ export class ZotSeekDialogVTable {
           openHistoryFromQueryField();
         }
       });
+      // A keystroke means the user is editing, not browsing history: close
+      // the popup rather than let it sit over the results it now covers.
+      query1Input?.addEventListener('input', () => closeSearchHistoryMenu(doc));
 
       // Multi-query UI handlers
       const addQueryBtn = doc.getElementById('zotseek-add-query-btn');
