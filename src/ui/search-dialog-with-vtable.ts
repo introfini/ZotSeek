@@ -18,19 +18,37 @@ declare const Components: any;
  * project's esbuild IIFE bundle.
  */
 function raiseWindow(win: any): void {
+  // Two steps, because they solve two different problems and neither is
+  // enough alone. `activate` brings the APPLICATION forward when the user is
+  // in another app; measured on Zotero 10.0.3 / macOS it does not reorder
+  // windows within Zotero. The visibility toggle reorders within the app.
   try {
     const activate = (Zotero as any)?.Utilities?.Internal?.activate;
     if (typeof activate === 'function') {
       activate.call((Zotero as any).Utilities.Internal, win);
-      return;
+    } else {
+      win.focus();
     }
   } catch {
-    // fall through to the plain focus below
+    // keep going: the toggle below is the half that actually raises
   }
+
+  // Same technique the indexing progress popup uses (see minimize-follower).
+  // The `visibility` setter only acts on a change and its getter does not read
+  // back what was written, so a bare `= true` on an already-visible window is a
+  // no-op: it has to go false first. Verified against a dialog sitting behind
+  // the main window — `= true` alone left it behind, false-then-true raised it.
   try {
-    win.focus();
+    const ci = (win as any).Ci
+      ?? (globalThis as any).Ci
+      ?? (globalThis as any).Components?.interfaces;
+    const baseWin = win.docShell?.treeOwner?.QueryInterface?.(ci.nsIBaseWindow);
+    if (baseWin) {
+      baseWin.visibility = false;
+      baseWin.visibility = true;
+    }
   } catch {
-    // nothing else to try
+    // Window may be mid-teardown; the caller still has a usable dialog
   }
 }
 
