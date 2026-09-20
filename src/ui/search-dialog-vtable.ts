@@ -17,8 +17,73 @@ import {
   populateCollectionMenu as sharedPopulateCollectionMenu,
   exportItemsToNewCollection,
 } from './collection-export';
+import { clearSearchHistory, loadSearchHistory, recordSearchQuery } from '../core/search-history';
 
 declare const Zotero: any;
+
+const XUL_NS = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';
+
+/**
+ * Shorten a past query for a menu label, keeping the full text as a tooltip.
+ *
+ * Queries here are sentences, not keywords, so without this the menu grows as
+ * wide as the longest thing the user ever searched for.
+ */
+function truncateQueryLabel(query: string, maxLength: number = 70): string {
+  const oneLine = query.replace(/\s+/g, ' ').trim();
+  return oneLine.length > maxLength ? oneLine.substring(0, maxLength - 1) + '…' : oneLine;
+}
+
+/**
+ * Show the recent-query dropdown under the history button.
+ *
+ * A XUL menupopup rather than an HTML <datalist>: the popup is the idiom this
+ * dialog already uses (the results context menu and every menulist), it
+ * inherits Zotero's native styling and keyboard handling, and it has room for
+ * the "Clear search history" entry that a datalist gives nowhere to put.
+ *
+ * Built fresh on every open so it can never show a stale list, and cleaned up
+ * on popuphidden. Module-level rather than a class method: it needs no `this`,
+ * which is the reliable shape under this project's esbuild IIFE bundle.
+ */
+function openSearchHistoryMenu(options: {
+  doc: Document;
+  anchor: Element;
+  history: string[];
+  onPick: (query: string) => void;
+  onClear: () => void;
+}): void {
+  const { doc, anchor, history, onPick, onClear } = options;
+
+  const popup = doc.createElementNS(XUL_NS, 'menupopup');
+  popup.id = 'zotseek-history-menu';
+
+  if (history.length === 0) {
+    const empty = doc.createElementNS(XUL_NS, 'menuitem');
+    empty.setAttribute('label', getString('search-historyEmpty'));
+    empty.setAttribute('disabled', 'true');
+    popup.appendChild(empty);
+  } else {
+    for (const query of history) {
+      const item = doc.createElementNS(XUL_NS, 'menuitem');
+      item.setAttribute('label', truncateQueryLabel(query));
+      item.setAttribute('tooltiptext', query);
+      item.addEventListener('command', () => onPick(query));
+      popup.appendChild(item);
+    }
+
+    popup.appendChild(doc.createElementNS(XUL_NS, 'menuseparator'));
+
+    const clear = doc.createElementNS(XUL_NS, 'menuitem');
+    clear.setAttribute('label', getString('search-historyClear'));
+    clear.addEventListener('command', () => onClear());
+    popup.appendChild(clear);
+  }
+
+  popup.addEventListener('popuphidden', () => popup.remove());
+  doc.documentElement.appendChild(popup);
+  (popup as any).openPopup(anchor, 'after_start', 0, 0, false, false);
+}
 
 /**
  * Resolve the child note a result came from to a local Zotero item ID.
@@ -188,6 +253,38 @@ export class ZotSeekDialogVTable {
           }
           this.performSearch();
         }
+      });
+
+      // Recent searches dropdown for the main query box
+      const historyBtn = doc.getElementById('zotseek-history-btn');
+      historyBtn?.addEventListener('click', () => {
+        openSearchHistoryMenu({
+          doc,
+          anchor: historyBtn,
+          history: loadSearchHistory(),
+          onPick: (query) => {
+            // Cancel the pending auto-search first: the debounce timer from
+            // whatever was typed before would otherwise fire on the text we
+            // are about to replace. Assigning .value does not raise an
+            // `input` event, so inserting a past query costs no keystroke
+            // searches of its own.
+            if (this.searchTimeout) {
+              win.clearTimeout(this.searchTimeout);
+              this.searchTimeout = null;
+            }
+            query1Input.value = query;
+            query1Input.focus();
+            query1Input.setSelectionRange(query.length, query.length);
+            // Run it rather than only filling the box, even when it is the
+            // query that just ran: the results may have been cleared since.
+            this.lastQuery = '';
+            this.performSearch();
+          },
+          onClear: () => {
+            clearSearchHistory();
+            this.setStatus(getString('search-historyCleared'));
+          },
+        });
       });
 
       // Multi-query UI handlers
@@ -416,6 +513,13 @@ export class ZotSeekDialogVTable {
         // Multiple queries: run in parallel and combine
         await this.performMultiQuerySearch(activeQueries, modeLabel, returnAllChunks);
       }
+
+      // A search actually ran, so remember what it was. Only the main box:
+      // boxes 2-4 exist for AND/OR combination and are not reusable on their
+      // own. Recorded here rather than on input, so a half-typed query never
+      // reaches the history.
+      const mainQuery = (doc.getElementById('zotseek-query-1') as HTMLInputElement)?.value || '';
+      recordSearchQuery(mainQuery);
 
       // Filter out excluded item (e.g., the paper being read when using "Find Related Papers")
       if (this.excludeItemId !== undefined) {
