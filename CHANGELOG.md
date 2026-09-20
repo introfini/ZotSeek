@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [1.22.0] - 2026-09-19
+## [1.22.0] - 2026-09-20
 
 ### Added
 - A search history in the search window. Clicking the search field while it is empty, or pressing the Down arrow, lists the last 10 queries that actually ran, newest first; picking one puts it back in the box and runs it. The list never appears over text you are editing, and it never appears just because the field received focus, only on that deliberate gesture. Re-running a query moves it to the top rather than listing it twice, and text you typed but never searched never enters the list. Only the query text is stored, in a preference, so the list survives a restart. "Clear search history" in the same dropdown forgets all of it, and the list does not immediately reappear once it is empty.
