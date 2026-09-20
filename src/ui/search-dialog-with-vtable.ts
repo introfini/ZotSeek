@@ -12,6 +12,28 @@ declare const Zotero: any;
 declare const Services: any;
 declare const Components: any;
 
+/**
+ * Bring a chrome window to the front. Module-level rather than a class method:
+ * SpiderMonkey does not reliably register added class methods from this
+ * project's esbuild IIFE bundle.
+ */
+function raiseWindow(win: any): void {
+  try {
+    const activate = (Zotero as any)?.Utilities?.Internal?.activate;
+    if (typeof activate === 'function') {
+      activate.call((Zotero as any).Utilities.Internal, win);
+      return;
+    }
+  } catch {
+    // fall through to the plain focus below
+  }
+  try {
+    win.focus();
+  } catch {
+    // nothing else to try
+  }
+}
+
 export class ZotSeekDialogWithVTable {
   private logger: Logger;
   private zoteroAPI: ZoteroAPI;
@@ -31,8 +53,15 @@ export class ZotSeekDialogWithVTable {
   public open(initialQuery?: string, excludeItemId?: number): void {
     try {
       if (this.isWindowOpen()) {
-        // Bring existing window to front
-        this.window.focus();
+        // Raise the existing window rather than opening a second one.
+        //
+        // window.focus() alone does not reliably bring a chrome window forward
+        // on macOS once the application is already frontmost, which is exactly
+        // the case when the user clicks the toolbar button while the main
+        // window has focus. Zotero ships a helper for this whose macOS branch
+        // drops to ctypes to force the activation; feature-detected because it
+        // is an internal API.
+        raiseWindow(this.window);
 
         // If we have an initial query and window is already open, set it and search
         if (initialQuery) {
