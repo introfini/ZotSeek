@@ -1,18 +1,21 @@
 /**
- * Self-test suite for issue #44: back-filling keyword-only hybrid hits.
+ * Self-test suite for issue #44: back-filling keyword-only hybrid hits, and for
+ * where the similarity threshold is allowed to apply.
  *
  * The keyword leg of hybrid search matches at item level, so before the fix its
- * results carried no chunk and no similarity. Two consequences, both exercised
- * here against the real library:
+ * results carried no chunk and no similarity, which is a poor answer from an API
+ * whose purpose is grounding. The back-fill recovers both from the item's own
+ * chunks, and that part is exercised here against the real library.
  *
- *  - `minSimilarity` filtered only the semantic leg, so raising it removed the
- *    grounded results and kept the ungrounded ones.
- *  - keyword-only hits had nothing citable, which is a poor answer from an API
- *    whose purpose is grounding.
+ * #44 also used the recovered score to gate the fused set. That gate is gone: a
+ * keyword hit exists because a literal string is present in the item, and its
+ * cosine to the query is close to noise for a rare literal such as a conference
+ * acronym, so a high threshold switched the keyword leg off entirely. The
+ * threshold now applies inside the semantic leg only, which the last two
+ * scenarios pin from both sides.
  *
- * The pure scoring and filtering logic is unit-tested in Node
- * (test/keyword-backfill.test.ts); this suite covers the wiring that only
- * exists inside Zotero.
+ * The pure scoring logic is unit-tested in Node (test/keyword-backfill.test.ts);
+ * this suite covers the wiring that only exists inside Zotero.
  */
 
 import { selfTest, scenario, assertTrue, assertEq } from '../self-test';
@@ -93,31 +96,33 @@ selfTest.register('task-44-hybrid-backfill', async () => {
       assertEq(empty.length, 0, `${empty.length}/${backfilled.length} back-filled hits have no chunk`);
     }),
 
-    await scenario('a strict threshold leaves only genuinely unscorable hits', async () => {
-      // The headline symptom of #44: at 0.99 the old code removed the semantic
-      // hits and kept every keyword hit, because none of them had a similarity
-      // to test. Anything indexed that survives 0.99 is that bug.
+    await scenario('a strict threshold leaves keyword evidence alone', async () => {
+      // The whole point of the change: a keyword hit is evidence of a literal
+      // match, not of semantic closeness, so raising the threshold must not
+      // remove it. At 0.99 nothing in a real library scores that high, so every
+      // keyword-only hit from the open run has to survive.
       if (!query) return;
-      const strict = await engine.search(query, { finalTopK: 10, minSimilarity: 0.99 });
+      const open = await engine.search(query, { finalTopK: 10, minSimilarity: 0 });
+      const keywordOnly = open.filter(r => r.source === 'keyword').map(r => r.itemKey);
+      assertTrue(keywordOnly.length > 0, `"${query}" produced no keyword-only hits`);
 
-      const survivors: string[] = [];
-      for (const r of strict) {
-        if (r.semanticScore !== null && r.semanticScore >= 0.99) continue;
-        if (await isIndexed(r)) survivors.push(`${r.itemKey} (${r.source}, score ${r.semanticScore})`);
-      }
-      assertEq(survivors.length, 0, `indexed hits survived a 0.99 threshold: ${survivors.join(', ')}`);
+      const strict = await engine.search(query, { finalTopK: 10, minSimilarity: 0.99 });
+      const survived = new Set(strict.map(r => r.itemKey));
+      const lost = keywordOnly.filter(k => !survived.has(k));
+      assertEq(lost.length, 0, `keyword hits dropped by a 0.99 threshold: ${lost.join(', ')}`);
     }),
 
-    await scenario('an unindexed keyword hit is exempt rather than dropped', async () => {
-      // Items the keyword leg matched on metadata but ZotSeek never indexed
-      // cannot be scored. Excluding them would silently remove matches hybrid
-      // search has always returned, so they pass the threshold unscored.
+    await scenario('a strict threshold still filters the semantic leg', async () => {
+      // The other side of the same rule: `minSimilarity` has to keep meaning
+      // something where a similarity is the right test. Nothing that reached the
+      // results through the semantic leg alone may sit below the bar.
       if (!query) return;
       const strict = await engine.search(query, { finalTopK: 10, minSimilarity: 0.99 });
       for (const r of strict) {
+        if (r.source !== 'semantic' && r.source !== 'both') continue;
         assertTrue(
-          r.semanticScore === null || r.semanticScore >= 0.99,
-          `${r.itemKey} survived a 0.99 threshold with score ${r.semanticScore}`
+          r.semanticScore !== null && r.semanticScore >= 0.99,
+          `${r.itemKey} reached the results via the semantic leg with score ${r.semanticScore}`
         );
       }
     }),

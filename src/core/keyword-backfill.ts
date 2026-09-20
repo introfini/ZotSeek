@@ -2,14 +2,17 @@
  * Back-fill for keyword-only hybrid hits.
  *
  * Zotero's quick search matches at item level, so the keyword leg of hybrid
- * search returns items with no chunk and no similarity. That left `minSimilarity`
- * filtering only half the pipeline, and left those results with nothing citable
- * (issue #44). The item is already indexed and the query is already embedded, so
- * recovering both is a cosine over that item's own chunks — no second search and
- * no second inference.
+ * search returns items with no chunk and no similarity, which left those results
+ * with nothing citable and nothing to display (issue #44). The item is already
+ * indexed and the query is already embedded, so recovering both is a cosine over
+ * that item's own chunks — no second search and no second inference.
  *
- * These functions are pure so they can be tested outside Zotero; the wiring that
- * feeds them the embedding cache lives in search-engine.ts and hybrid-search.ts.
+ * The recovered score is reported, never used to reject: hybrid search applies
+ * `minSimilarity` inside the semantic leg, where a similarity is the right test,
+ * and leaves keyword evidence alone. See the note in `HybridSearchEngine.search`.
+ *
+ * This function is pure so it can be tested outside Zotero; the wiring that
+ * feeds it the embedding cache lives in search-engine.ts and hybrid-search.ts.
  */
 
 import type { TextSourceType } from './vector-store-sqlite';
@@ -83,23 +86,4 @@ export function bestChunkPerItem(
   }
 
   return best;
-}
-
-/**
- * Gate a fused result set on the similarity threshold, uniformly.
- *
- * Results that carry no similarity at all are exempt: an item the keyword leg
- * matched on metadata but ZotSeek never indexed has no vector to compare, and
- * dropping it would silently remove matches hybrid search has always returned.
- * Everything that *can* be scored is held to the threshold, which is what
- * `minSimilarity` promised and did not deliver before.
- */
-export function applyMinSimilarity<T extends { semanticScore: number | null }>(
-  results: T[],
-  minSimilarity: number,
-): T[] {
-  if (!(minSimilarity > 0)) return results;
-  return results.filter(
-    (r) => r.semanticScore === null || r.semanticScore === undefined || r.semanticScore >= minSimilarity,
-  );
 }

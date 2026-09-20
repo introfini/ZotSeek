@@ -15,7 +15,7 @@
 import { Logger } from '../utils/logger';
 import { SearchEngine, SearchResult } from './search-engine';
 import { TextSourceType } from './vector-store-sqlite';
-import { applyMinSimilarity, ChunkMatch } from './keyword-backfill';
+import { ChunkMatch } from './keyword-backfill';
 import { KeywordMatchFacts, resolveKeywordMatches } from './keyword-parents';
 
 declare const Zotero: any;
@@ -70,7 +70,9 @@ export interface HybridSearchOptions {
   // RRF constant (higher = more weight to lower ranks)
   rrfK?: number;              // Default: 60
 
-  // Minimum semantic similarity to include
+  // Minimum semantic similarity to include. Applies to the semantic leg only:
+  // a keyword match is evidence in its own right and is never rejected for
+  // scoring low against the query vector.
   minSimilarity?: number;     // Default: 0.3
 
   // Weight balance (0 = keyword only, 1 = semantic only)
@@ -212,13 +214,29 @@ export class HybridSearchEngine {
       opts
     );
 
-    // Give the keyword-only hits the similarity and the chunk they arrived
-    // without, so the threshold below applies to the whole set instead of
-    // half of it (issue #44).
-    const backfilled = await this.backfillKeywordHits(fusedResults, queryEmbedding, opts);
+    // No threshold pass over the fused set. `minSimilarity` is applied where it
+    // means something: at source, inside the semantic leg (`semanticSearchQuery`
+    // passes it to `SearchEngine.search`, which drops sub-threshold items before
+    // returning). So every `semantic` and `both` result here has already cleared
+    // the bar, and the only rows a post-fusion filter could ever reject are the
+    // keyword-only ones.
+    //
+    // Judging those by a similarity is the wrong test. A keyword hit exists
+    // because the query string is literally present in the item; its back-filled
+    // cosine measures how close the item's *meaning* is to the query, which for a
+    // rare literal such as a conference acronym is close to noise. Gating on that
+    // number discarded the strongest evidence there was: at the default 70%
+    // threshold the keyword half of hybrid search was effectively switched off,
+    // and a query like "RCIS 2025" returned nothing at all. This reverses that
+    // part of issue #44; the rest of it (back-filled chunks, exposed component
+    // scores) stands.
+    const top = fusedResults.slice(0, opts.finalTopK);
 
-    const kept = applyMinSimilarity(fusedResults, opts.minSimilarity);
-    const top = kept.slice(0, opts.finalTopK);
+    // Give the keyword-only hits the similarity and the chunk they arrived
+    // without, so they have a score to show and something citable (issue #44).
+    // Only the rows actually being returned need it, now that nothing
+    // downstream filters on the result.
+    const backfilled = await this.backfillKeywordHits(top, queryEmbedding, opts);
 
     await Promise.all([
       this.populateItemMetadata(top),
@@ -232,14 +250,14 @@ export class HybridSearchEngine {
    * Give keyword-only hits the similarity and location they arrived without.
    *
    * Zotero's quick search matches at item level, so its hits carry no chunk and
-   * no score. That left `minSimilarity` gating only the semantic leg, and left
-   * those results with nothing citable (issue #44). The item is indexed and the
-   * query is already embedded, so recovering both is a cosine over that item's
-   * own chunks, read from the cache the semantic leg just used.
+   * no score, which left those results with nothing citable and nothing to
+   * display (issue #44). The item is indexed and the query is already embedded,
+   * so recovering both is a cosine over that item's own chunks, read from the
+   * cache the semantic leg just used.
    *
-   * Runs over the whole fused set rather than the top K, because the scores it
-   * produces are what the threshold is applied to next. Items with no chunks
-   * under the active model stay unscored and are exempt from the threshold.
+   * The score is reported, never used to reject: see the note in `search()` on
+   * why a keyword hit is not judged by a semantic similarity. Items with no
+   * chunks under the active model simply stay unscored.
    *
    * @returns the matched chunk per item ID, for the chunk-text fetch afterwards.
    */
@@ -286,8 +304,8 @@ export class HybridSearchEngine {
    * Fetch the chunk text for back-filled results, so they have a snippet to
    * show and an agent has something to quote.
    *
-   * Deliberately runs after the threshold and the top-K slice: chunk text is one
-   * query per row, and only the rows actually being returned need it.
+   * Deliberately runs after the top-K slice: chunk text is one query per row,
+   * and only the rows actually being returned need it.
    */
   private async populateBackfilledChunkText(
     results: HybridSearchResult[],

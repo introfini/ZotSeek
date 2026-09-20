@@ -1,6 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { bestChunkPerItem, applyMinSimilarity } from '../src/core/keyword-backfill';
+import { bestChunkPerItem } from '../src/core/keyword-backfill';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 // Both sides of the dot product are unit vectors here, so every expected
 // similarity below is exact and readable: [1,0] against [0.6,0.8] is 0.6.
@@ -64,37 +66,40 @@ describe('bestChunkPerItem', () => {
   });
 });
 
-describe('applyMinSimilarity', () => {
-  test('drops results scoring below the threshold', () => {
-    const kept = applyMinSimilarity(
-      [
-        { itemId: 1, semanticScore: 0.42 },
-        { itemId: 2, semanticScore: 0.11 },
-      ],
-      0.3,
-    );
+describe('the similarity threshold', () => {
+  // The threshold is applied at source, inside the semantic leg, and nowhere
+  // else. It used to be re-applied to the fused set as well (issue #44), which
+  // could only ever reject keyword-only hits, because semantic and `both`
+  // results arrive pre-filtered. Judging a literal-string match by how close the
+  // item's meaning is to the query switched the keyword half of hybrid search
+  // off at a high threshold, so the post-fusion pass is gone.
+  //
+  // The fusion and the leg wiring are private to a class that needs Zotero, so
+  // the rule is pinned statically here and behaviourally in the in-Zotero suite
+  // src/dev/suites/task-44-hybrid-backfill.ts.
+  const source = readFileSync(
+    path.join(__dirname, '..', 'src', 'core', 'hybrid-search.ts'),
+    'utf8',
+  );
 
-    assert.deepEqual(kept.map((r) => r.itemId), [1]);
+  test('hands minSimilarity to the semantic leg, where a similarity is the right test', () => {
+    assert.match(source, /minSimilarity:\s*opts\.minSimilarity/);
   });
 
-  test('keeps a result sitting exactly on the threshold', () => {
-    const kept = applyMinSimilarity([{ itemId: 1, semanticScore: 0.3 }], 0.3);
-
-    assert.equal(kept.length, 1);
+  test('never rejects a fused result by its semantic score', () => {
+    // Anything comparing a score against the threshold outside the options
+    // plumbing would be a second gate, and the only rows it could drop are the
+    // keyword-only ones.
+    const comparisons = source.match(/semanticScore\s*[<>]=?/g) || [];
+    assert.deepEqual(comparisons, []);
+    assert.equal(source.includes('applyMinSimilarity'), false);
   });
 
-  test('keeps results that carry no score, since they cannot be gated', () => {
-    // Items the keyword leg found but ZotSeek never indexed have no vector to
-    // compare against. Excluding them would silently drop metadata matches that
-    // hybrid search has always returned.
-    const kept = applyMinSimilarity(
-      [
-        { itemId: 1, semanticScore: null },
-        { itemId: 2, semanticScore: 0.05 },
-      ],
-      0.3,
+  test('the dead threshold helper is gone rather than left unable to reject anything', () => {
+    const backfill = readFileSync(
+      path.join(__dirname, '..', 'src', 'core', 'keyword-backfill.ts'),
+      'utf8',
     );
-
-    assert.deepEqual(kept.map((r) => r.itemId), [1]);
+    assert.equal(backfill.includes('applyMinSimilarity'), false);
   });
 });
