@@ -23,6 +23,7 @@ import {
   bulkResolve,
   libraryKeyFromLocalID,
 } from './identity-resolver';
+import { escapeLikePattern } from './keyword-backfill';
 
 declare const Zotero: any;
 declare const PathUtils: any;
@@ -121,6 +122,15 @@ const SCHEMA_VERSION = 10;           // v10: chunks.note_key (which child note a
 
 // Legacy table prefix (for migration from old schema)
 const LEGACY_TABLE_PREFIX = 'zs_';
+
+/**
+ * Safety valve on the term-match read behind `getChunkTextsContaining()`.
+ *
+ * The read is already scoped to one page of results, so this only bites on a
+ * very common term across many fully-indexed items. Hitting it costs nothing
+ * but precision: the chunks beyond the cap are ranked by similarity alone.
+ */
+const MAX_TERM_MATCH_CHUNKS = 600;
 
 /**
  * SQLite-based Vector Store
@@ -2335,6 +2345,79 @@ export class VectorStoreSQLite {
       this.logger.error(`getChunkByPk(${itemPk}, ${chunkIndex}): ${e}`);
       return undefined;
     }
+  }
+
+  /**
+   * Fetch the text of the chunks that literally contain at least one of the
+   * given query terms, restricted to the given items.
+   *
+   * This is what lets a keyword hit be represented by the passage that actually
+   * holds the match instead of the passage nearest in vector space. The item
+   * scope is not an optimisation, it is the reason the query is viable: this
+   * library holds over 200,000 chunks and a `LIKE` across all of them takes
+   * seconds, while `item_pk IN (...)` narrows the scan to the few dozen items
+   * of one result page first.
+   *
+   * Every term is bound as a parameter and its `%`/`_` escaped, so a query
+   * containing SQL-significant characters matches them literally and cannot
+   * alter the statement.
+   *
+   * Returns a map keyed `${itemPk}:${chunkIndex}` -> chunk_text, holding only
+   * chunks that matched. The count of distinct terms per chunk is computed by
+   * `countMatchingTerms` on the caller's side, so the rule that decides which
+   * passage wins stays in one pure, testable place.
+   */
+  async getChunkTextsContaining(
+    itemPks: number[],
+    terms: string[],
+    modelId?: string
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (itemPks.length === 0 || terms.length === 0) return out;
+    await this.ensureInit();
+
+    const pks = Array.from(new Set(itemPks));
+    const patterns = terms.map(escapeLikePattern);
+    const model = modelId || getActiveModelId();
+
+    // Identical WHERE/ORDER/LIMIT across three single-column reads: multi-column
+    // SELECTs can come back empty on Zotero 8 (see the DB notes in the dev
+    // guide), and the composite (item_pk, chunk_index) ordering is total, so the
+    // three columns line up row for row.
+    const where =
+      `WHERE model_id = ? AND item_pk IN (${pks.map(() => '?').join(',')})` +
+      ` AND (${patterns.map(() => `chunk_text LIKE ? ESCAPE '\\'`).join(' OR ')})`;
+    const tail = `FROM ${DB_NAME}.chunks ${where} ORDER BY item_pk, chunk_index LIMIT ${MAX_TERM_MATCH_CHUNKS}`;
+    const params = [model, ...pks, ...patterns];
+
+    try {
+      const [itemPkCol, chunkIndexCol, textCol] = await Promise.all([
+        Zotero.DB.columnQueryAsync(`SELECT item_pk ${tail}`, params),
+        Zotero.DB.columnQueryAsync(`SELECT chunk_index ${tail}`, params),
+        Zotero.DB.columnQueryAsync(`SELECT chunk_text ${tail}`, params),
+      ]);
+
+      const pkList: any[] = itemPkCol || [];
+      const idxList: any[] = chunkIndexCol || [];
+      const textList: any[] = textCol || [];
+      const rows = Math.min(pkList.length, idxList.length, textList.length);
+      for (let i = 0; i < rows; i++) {
+        const text = textList[i];
+        if (typeof text === 'string' && text.length > 0) {
+          out.set(`${pkList[i]}:${idxList[i]}`, text);
+        }
+      }
+      if (rows >= MAX_TERM_MATCH_CHUNKS) {
+        this.logger.debug(`getChunkTextsContaining(): hit the ${MAX_TERM_MATCH_CHUNKS}-chunk cap`);
+      }
+    } catch (e) {
+      // Best effort: without the term counts the caller falls back to ranking
+      // those chunks by similarity alone, which is the old behaviour.
+      this.logger.debug(`getChunkTextsContaining() failed (non-fatal): ${e}`);
+      return new Map();
+    }
+
+    return out;
   }
 
   /**

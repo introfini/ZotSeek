@@ -15,7 +15,7 @@
 import { Logger } from '../utils/logger';
 import { SearchEngine, SearchResult } from './search-engine';
 import { TextSourceType } from './vector-store-sqlite';
-import { ChunkMatch } from './keyword-backfill';
+import { ChunkMatch, keywordTerms } from './keyword-backfill';
 import { KeywordMatchFacts, resolveKeywordMatches } from './keyword-parents';
 
 declare const Zotero: any;
@@ -236,7 +236,7 @@ export class HybridSearchEngine {
     // without, so they have a score to show and something citable (issue #44).
     // Only the rows actually being returned need it, now that nothing
     // downstream filters on the result.
-    const backfilled = await this.backfillKeywordHits(top, queryEmbedding, opts);
+    const backfilled = await this.backfillKeywordHits(top, query, queryEmbedding, opts);
 
     await Promise.all([
       this.populateItemMetadata(top),
@@ -259,10 +259,21 @@ export class HybridSearchEngine {
    * why a keyword hit is not judged by a semantic similarity. Items with no
    * chunks under the active model simply stay unscored.
    *
+   * The query's terms go with it, because the chunk worth showing for a keyword
+   * hit is one that actually contains them. Cosine alone picked a passage that
+   * merely read like the query, which for a literal such as a conference
+   * acronym is close to random, and the result then reported a page the string
+   * is not on. Term coverage decides, cosine breaks ties, and an item whose
+   * chunks contain no term falls back to cosine exactly as before.
+   *
+   * This applies to keyword-only hits and to nothing else: where the semantic
+   * leg found the item, its closest chunk is the reason it matched and is kept.
+   *
    * @returns the matched chunk per item ID, for the chunk-text fetch afterwards.
    */
   private async backfillKeywordHits(
     results: HybridSearchResult[],
+    query: string,
     queryEmbedding: Float32Array,
     opts: Required<Omit<HybridSearchOptions, 'collectionId' | 'libraryId' | 'mode'>> & HybridSearchOptions
   ): Promise<Map<number, ChunkMatch>> {
@@ -276,7 +287,7 @@ export class HybridSearchEngine {
       matches = await this.semanticSearch.scoreItems(
         queryEmbedding,
         needing.map(r => r.itemId),
-        { libraryId: opts.libraryId }
+        { libraryId: opts.libraryId, terms: keywordTerms(query) }
       );
     } catch (e) {
       // A failed back-fill must not fail the search: results simply stay as
@@ -498,7 +509,8 @@ export class HybridSearchEngine {
 
       // Extract query components for scoring
       const queryLower = query.toLowerCase();
-      const queryTerms = queryLower.split(/\s+/).filter(t => t.length > 1);
+      // Same notion of a term as the chunk choice for a keyword hit uses.
+      const queryTerms = keywordTerms(query);
       const queryYearMatch = query.match(/\b(19|20)\d{2}\b/);
       const queryYear = queryYearMatch ? queryYearMatch[0] : null;
 

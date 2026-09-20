@@ -13,7 +13,7 @@ import { VectorStoreSQLite, TextSourceType } from './vector-store-sqlite';
 import { EmbeddingPipeline, embeddingPipeline } from './embedding-pipeline';
 import { identityFromItem } from './identity-resolver';
 import { getActiveModelId } from './model-registry';
-import { bestChunkPerItem, ChunkMatch } from './keyword-backfill';
+import { bestChunkPerItem, ChunkMatch, countMatchingTerms } from './keyword-backfill';
 import { trackSearch } from './search-activity';
 
 declare const Zotero: any;
@@ -802,7 +802,7 @@ export class SearchEngine {
   async scoreItems(
     queryEmbedding: Float32Array,
     itemIds: number[],
-    options: { libraryId?: number } = {}
+    options: { libraryId?: number; terms?: string[] } = {}
   ): Promise<Map<number, ChunkMatch>> {
     if (itemIds.length === 0) return new Map();
     return trackSearch(() => this.scoreItemsInternal(queryEmbedding, itemIds, options));
@@ -811,14 +811,53 @@ export class SearchEngine {
   private async scoreItemsInternal(
     queryEmbedding: Float32Array,
     itemIds: number[],
-    options: { libraryId?: number }
+    options: { libraryId?: number; terms?: string[] }
   ): Promise<Map<number, ChunkMatch>> {
 
     const wanted = new Set(itemIds);
     const embeddings = await this.loadCandidateEmbeddings(options.libraryId);
     const candidates = embeddings.filter(e => e.itemId !== undefined && wanted.has(e.itemId));
 
-    return bestChunkPerItem(queryEmbedding, candidates, wanted);
+    const termHits = await this.countTermHits(candidates, options.terms);
+
+    return bestChunkPerItem(queryEmbedding, candidates, wanted, { termHits });
+  }
+
+  /**
+   * Count, per candidate chunk, how many distinct query terms its text
+   * contains.
+   *
+   * Only the chunks of the items being scored are read, and only those that
+   * literally contain a term come back, so this is a small query however large
+   * the index is. Returns undefined when there is nothing to match, which
+   * leaves the ranking as plain MaxSim.
+   */
+  private async countTermHits(
+    candidates: Array<{ itemPk: number }>,
+    terms?: string[]
+  ): Promise<Map<string, number> | undefined> {
+    if (!terms || terms.length === 0 || candidates.length === 0) return undefined;
+
+    const store = this.getStore();
+    if (typeof (store as VectorStoreSQLite).getChunkTextsContaining !== 'function') return undefined;
+
+    const itemPks = Array.from(new Set(candidates.map(c => c.itemPk).filter(pk => pk !== undefined)));
+    if (itemPks.length === 0) return undefined;
+
+    let texts: Map<string, string>;
+    try {
+      texts = await (store as VectorStoreSQLite).getChunkTextsContaining(itemPks, terms);
+    } catch (e) {
+      this.logger.debug(`countTermHits failed (non-fatal): ${e}`);
+      return undefined;
+    }
+
+    const hits = new Map<string, number>();
+    for (const [key, text] of texts) {
+      const count = countMatchingTerms(text, terms);
+      if (count > 0) hits.set(key, count);
+    }
+    return hits;
   }
 
   /**
