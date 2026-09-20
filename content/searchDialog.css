@@ -415,10 +415,6 @@
   background: #e8f5e9;
 }
 
-#zotseek-history-btn:hover {
-  background: #e3f2fd;
-}
-
 #zotseek-remove-query-2-btn:hover {
   background: #ffebee;
 }
@@ -619,10 +615,6 @@
 
   #zotseek-add-query-btn:hover {
     background: rgba(76, 175, 80, 0.2);
-  }
-
-  #zotseek-history-btn:hover {
-    background: rgba(33, 150, 243, 0.2);
   }
 
   #zotseek-remove-query-2-btn:hover {

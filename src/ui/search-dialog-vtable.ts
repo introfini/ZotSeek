@@ -35,12 +35,16 @@ function truncateQueryLabel(query: string, maxLength: number = 70): string {
 }
 
 /**
- * Show the recent-query dropdown under the history button.
+ * Show the recent-query dropdown anchored under the query field.
  *
  * A XUL menupopup rather than an HTML <datalist>: the popup is the idiom this
  * dialog already uses (the results context menu and every menulist), it
  * inherits Zotero's native styling and keyboard handling, and it has room for
  * the "Clear search history" entry that a datalist gives nowhere to put.
+ *
+ * A no-op when there is no history to show: this is summoned by a gesture on
+ * an empty field, not an explicit request for an answer, so an empty list is
+ * silence rather than a disabled placeholder entry.
  *
  * Built fresh on every open so it can never show a stale list, and cleaned up
  * on popuphidden. Module-level rather than a class method: it needs no `this`,
@@ -54,35 +58,34 @@ function openSearchHistoryMenu(options: {
   onClear: () => void;
 }): void {
   const { doc, anchor, history, onPick, onClear } = options;
+  if (history.length === 0) return;
 
   const popup = doc.createElementNS(XUL_NS, 'menupopup');
   popup.id = 'zotseek-history-menu';
 
-  if (history.length === 0) {
-    const empty = doc.createElementNS(XUL_NS, 'menuitem');
-    empty.setAttribute('label', getString('search-historyEmpty'));
-    empty.setAttribute('disabled', 'true');
-    popup.appendChild(empty);
-  } else {
-    for (const query of history) {
-      const item = doc.createElementNS(XUL_NS, 'menuitem');
-      item.setAttribute('label', truncateQueryLabel(query));
-      item.setAttribute('tooltiptext', query);
-      item.addEventListener('command', () => onPick(query));
-      popup.appendChild(item);
-    }
-
-    popup.appendChild(doc.createElementNS(XUL_NS, 'menuseparator'));
-
-    const clear = doc.createElementNS(XUL_NS, 'menuitem');
-    clear.setAttribute('label', getString('search-historyClear'));
-    clear.addEventListener('command', () => onClear());
-    popup.appendChild(clear);
+  for (const query of history) {
+    const item = doc.createElementNS(XUL_NS, 'menuitem');
+    item.setAttribute('label', truncateQueryLabel(query));
+    item.setAttribute('tooltiptext', query);
+    item.addEventListener('command', () => onPick(query));
+    popup.appendChild(item);
   }
+
+  popup.appendChild(doc.createElementNS(XUL_NS, 'menuseparator'));
+
+  const clear = doc.createElementNS(XUL_NS, 'menuitem');
+  clear.setAttribute('label', getString('search-historyClear'));
+  clear.addEventListener('command', () => onClear());
+  popup.appendChild(clear);
 
   popup.addEventListener('popuphidden', () => popup.remove());
   doc.documentElement.appendChild(popup);
   (popup as any).openPopup(anchor, 'after_start', 0, 0, false, false);
+}
+
+/** Whether the recent-searches popup is currently open. */
+function isSearchHistoryMenuOpen(doc: Document): boolean {
+  return !!doc.getElementById('zotseek-history-menu');
 }
 
 /**
@@ -255,12 +258,21 @@ export class ZotSeekDialogVTable {
         }
       });
 
-      // Recent searches dropdown for the main query box
-      const historyBtn = doc.getElementById('zotseek-history-btn');
-      historyBtn?.addEventListener('click', () => {
+      // Recent searches dropdown, summoned from the query field itself.
+      //
+      // Only a deliberate gesture on an EMPTY field opens it: a click, or the
+      // Down arrow. Never plain focus, including the programmatic focus this
+      // dialog gives the field on open below (that dispatches a `focus`
+      // event, not `click`, so it never reaches this handler) — opening on
+      // every focus would throw the history at the user each time the dialog
+      // opens. A field with text in it means the user is editing a query and
+      // the results underneath matter more than a list of past ones.
+      const openHistoryFromQueryField = (): void => {
+        if (query1Input.value.trim() !== '') return;
+        if (isSearchHistoryMenuOpen(doc)) return;
         openSearchHistoryMenu({
           doc,
-          anchor: historyBtn,
+          anchor: query1Input,
           history: loadSearchHistory(),
           onPick: (query) => {
             // Cancel the pending auto-search first: the debounce timer from
@@ -285,6 +297,12 @@ export class ZotSeekDialogVTable {
             this.setStatus(getString('search-historyCleared'));
           },
         });
+      };
+      query1Input?.addEventListener('click', () => openHistoryFromQueryField());
+      query1Input?.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key === 'ArrowDown') {
+          openHistoryFromQueryField();
+        }
       });
 
       // Multi-query UI handlers
