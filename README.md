@@ -766,7 +766,7 @@ Preferences are stored in Zotero's preferences system:
 
 | Preference | Default | Description |
 |------------|---------|-------------|
-| `zotseek.minSimilarityPercent` | `30` | Minimum similarity % to show in results |
+| `zotseek.minSimilarityPercent` | `30` | Minimum similarity % for semantic matches; keyword matches are never filtered by it |
 | `zotseek.topK` | `20` | Maximum number of results |
 | `zotseek.autoIndex` | `false` | Automatically index new papers when added |
 | `zotseek.autoIndexDelay` | `10` | Seconds to wait after last item before auto-indexing (1-300) |

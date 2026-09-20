@@ -97,9 +97,11 @@ Notes on the shape:
 
 #### `minSimilarity`
 
-`minSimilarity` drops every result whose similarity to the query falls below it. In `semantic` mode and in `hybrid` mode that covers the whole result set, including hits the keyword engine contributed. In `keyword` mode nothing is compared against the query vector, so the parameter has no effect there.
+`minSimilarity` is a floor on **cosine similarity to the query vector**, so it applies exactly where a similarity is the right test: the semantic engine. In `semantic` mode that is the whole result set. In `hybrid` mode it filters the semantic leg only — a hit the keyword engine contributed is never dropped by it, whatever its `semanticScore` says. In `keyword` mode nothing is compared against the query vector, so the parameter has no effect there.
 
-Items that cannot be scored at all — matched on Zotero metadata but never indexed by ZotSeek — are exempt rather than dropped: there is no vector to compare, and removing them would silently discard metadata matches that hybrid search has always returned. They are recognisable by a `null` `matchedChunk`.
+A keyword hit exists because the query string is literally present in the item. Its `semanticScore` measures how close the item's *meaning* is to that string, which for a rare literal such as a conference acronym or a dataset name is close to noise: `"RCIS 2025"` at a 0.7 threshold used to return nothing at all, because the article whose note contains the string scores far below 0.7 against it. The score is therefore reported and not enforced. To apply your own policy, read `semanticScore` and `source` off each result and filter client-side — that is what those fields are for.
+
+Items that cannot be scored at all — matched on Zotero metadata but never indexed by ZotSeek — carry a `null` `semanticScore` and a `null` `matchedChunk`.
 
 ### Deep links
 

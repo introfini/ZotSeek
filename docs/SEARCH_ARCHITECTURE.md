@@ -9,6 +9,7 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
 1. [Overview](#overview)
 2. [Search Modes](#search-modes)
 3. [Hybrid Search with RRF](#hybrid-search-with-rrf)
+   - [The Similarity Threshold](#the-similarity-threshold)
 4. [Multi-Query Search](#multi-query-search)
    - [AND/OR Combination](#andor-combination)
    - [AND Combination Formulas](#and-combination-formulas)
@@ -228,6 +229,46 @@ RRF is a technique for combining ranked lists from different search systems with
 | 🔗 | Found by BOTH | High confidence - matches semantically AND by keywords |
 | 🧠 | Semantic only | Conceptually related but may use different terminology |
 | 🔤 | Keyword only | Exact match but not indexed for semantic search |
+
+### The Similarity Threshold
+
+The **Min similarity** preference (`zotseek.minSimilarityPercent`, and the `minSimilarity` option on the search APIs) is a floor on **cosine similarity to the query vector**. It is applied inside the semantic leg, before fusion: `SearchEngine.search()` drops every item whose best chunk scores below it, so nothing sub-threshold ever reaches RRF.
+
+It is deliberately **not** applied to the fused result set, which means a keyword-only hit is never removed by it.
+
+```
+    QUERY: "RCIS 2025"
+
+    SEMANTIC LEG                        KEYWORD LEG
+    ┌──────────────────────────┐        ┌──────────────────────────┐
+    │ cosine vs query vector   │        │ literal string present   │
+    │ threshold applied HERE   │        │ in title/notes/PDF text  │
+    │ (sub-threshold dropped)  │        │ no threshold applies     │
+    └────────────┬─────────────┘        └────────────┬─────────────┘
+                 │                                   │
+                 └──────────────┬────────────────────┘
+                                ▼
+                        ┌───────────────┐
+                        │  RRF FUSION   │   ← no second threshold pass
+                        └───────┬───────┘
+                                ▼
+                     back-fill keyword-only hits
+                     (score + citable chunk, for display)
+```
+
+**Why the two legs are judged differently.** A keyword hit exists because the query string is literally present in the item. The back-filled cosine attached to it measures something else entirely: how close the *meaning* of the item is to the query string. For a rare literal — a conference acronym, a grant number, a dataset name — that number is close to noise, and the paper containing the string can easily score 0.2 against it. Rejecting the hit on that basis throws away the strongest evidence in the result.
+
+Measured on a 15,000-item library with the threshold at the user's 70%: `RCIS 2025` in hybrid mode returned **0 results**, while the same query at 0.3 returned 10, including the article whose note contains the string. Ordinary semantic queries were unaffected either way.
+
+The back-fill introduced in 1.21.0 (issue #44) is still there, and keyword-only hits still arrive with a score and a citable chunk. What changed in 1.22.0 is that the score is **reported, not enforced**: it tells the reader how semantically related the hit also happens to be, and nothing is filtered on it.
+
+Consequences worth knowing:
+
+| Mode | Effect of `minSimilarity` |
+|------|---------------------------|
+| `semantic` | Filters the whole result set — every result is a similarity |
+| `hybrid` | Filters the semantic leg only; keyword matches always pass |
+| `keyword` | No effect — nothing is compared against the query vector |
 
 ---
 
