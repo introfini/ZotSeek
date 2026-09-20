@@ -10,6 +10,7 @@ A comprehensive guide to how semantic and hybrid search works in ZotSeek.
 2. [Search Modes](#search-modes)
 3. [Hybrid Search with RRF](#hybrid-search-with-rrf)
    - [The Similarity Threshold](#the-similarity-threshold)
+   - [Which Chunk Represents a Keyword Hit](#which-chunk-represents-a-keyword-hit)
 4. [Multi-Query Search](#multi-query-search)
    - [AND/OR Combination](#andor-combination)
    - [AND Combination Formulas](#and-combination-formulas)
@@ -261,6 +262,26 @@ It is deliberately **not** applied to the fused result set, which means a keywor
 Measured on a 15,000-item library with the threshold at the user's 70%: `RCIS 2025` in hybrid mode returned **0 results**, while the same query at 0.3 returned 10, including the article whose note contains the string. Ordinary semantic queries were unaffected either way.
 
 The back-fill introduced in 1.21.0 (issue #44) is still there, and keyword-only hits still arrive with a score and a citable chunk. What changed in 1.22.0 is that the score is **reported, not enforced**: it tells the reader how semantically related the hit also happens to be, and nothing is filtered on it.
+
+### Which Chunk Represents a Keyword Hit
+
+The back-fill also decides which passage the result shows, and cosine is the wrong judge of that for the same reason it is the wrong filter. Scoring the item's chunks against the query vector and taking the closest picked a passage that merely *read* like the query: for `RCIS 2025` it chose a Methods chunk at 0.456 and reported page 6, while the string lives only in a note. A result that points at a page the words are not on is worse than one that points nowhere.
+
+Candidate chunks are therefore ranked by **how many distinct query terms the chunk text contains**, descending, with cosine breaking ties:
+
+```
+    keyword-only hit, item's chunks:
+
+    chunk 12  Methods    terms: 0   cosine 0.456   ──┐
+    chunk 31  Findings   terms: 0   cosine 0.441     │  ranked below
+    chunk 44  Note       terms: 2   cosine 0.437   ──┴─▶ CHOSEN
+```
+
+- **Terms** are the same tokens the keyword relevance scorer uses (`keywordTerms()`: lowercased, split on whitespace, single characters dropped, each counted once), so a chunk repeating one word cannot outrank one carrying the whole phrase.
+- **When no chunk contains any term** — a hit matched on a tag or a creator, say — every candidate sits at zero and the ranking collapses to plain MaxSim, which is the pre-1.22.0 behaviour. There is no separate fallback path.
+- **Semantic hits are untouched.** Where the semantic leg found the item, its closest chunk *is* the reason it matched, so no term map is supplied and nothing changes.
+
+The term counts come from `VectorStoreSQLite.getChunkTextsContaining()`, which reads only the chunks of the items on the current result page (`item_pk IN (...)`) that literally contain a term. The item scope is load-bearing, not an optimisation: a 15,000-item library holds over 200,000 chunks, and a `LIKE` across all of them takes seconds, while the scoped read measures 15-42 ms for 20 items. Every term is bound as a parameter with its `%` and `_` escaped, so a query containing SQL wildcards matches them literally instead of matching everything.
 
 Consequences worth knowing:
 
