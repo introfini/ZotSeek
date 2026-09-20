@@ -72,6 +72,17 @@ ZotSeek is designed with privacy as a core principle:
 <details>
 <summary>Click to expand</summary>
 
+### Notes in Search Results
+Notes are searched alongside abstracts and PDF text. The Section column says where each
+match came from, and a note has no page to point at.
+
+![Search results including notes](docs/images/search-dialog-notes.png)
+
+### Recent Searches
+Click the empty search box to bring back a query you ran earlier.
+
+![Recent searches dropdown](docs/images/search-history.png)
+
 ### Find Similar Documents
 ![Find Similar Results](docs/images/find-similar.png)
 

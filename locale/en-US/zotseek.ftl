@@ -53,7 +53,7 @@ zotseek-pref-fullSpeed = Thorough • ~1-2 chunks per page
 zotseek-pref-fullDesc = Indexes full PDF content with page numbers. Finds specific passages.
 zotseek-pref-indexNotes =
     .label = Also index child notes
-zotseek-pref-indexNotesDesc = Indexes the text of notes attached to an item, in addition to the mode above. It applies to items indexed from now on; to add notes to items that are already indexed, use "Add Note Text to Index" in the item context menu. Turning it back off stops new note text from being indexed, but does not remove note text that is already in the index.
+zotseek-pref-indexNotesDesc = Indexes the text of notes attached to an item, in addition to the mode above. It applies to items indexed from now on; to add notes to items that are already indexed, use "Add Note Text to Existing Items" in the ZotSeek submenu of the item context menu. Turning it back off stops new note text from being indexed, but does not remove note text that is already in the index.
 zotseek-pref-mcpServer = AI Agent Access
 zotseek-pref-mcpServerLabel =
     .label = Allow AI agents to search your library (local MCP server)
@@ -294,7 +294,7 @@ zotseek-resume-scopeCollection = the "{ $name }" collection
 zotseek-resume-scopeCollections = { $count } selected collections
 zotseek-resume-scopeNotes = indexed items that have notes
 
-# "Add Note Text to Index": re-indexes items that are ALREADY indexed so their
+# "Add Note Text to Existing Items": re-indexes items that are ALREADY indexed so their
 # note text is added. Update Library Index skips them, so without this the
 # preference only ever applies to items indexed after it was switched on.
 zotseek-notesBackfill-disabled = "Also index child notes" is turned off, so there is no note text to add.
