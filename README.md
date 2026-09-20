@@ -21,10 +21,11 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - 📖 **Search from PDF Selection** - Select text while reading → right-click → find documents about that concept
 - 🔎 **Natural Language Search** - Search with queries like "machine learning in healthcare"
 - 🔀 **Multi-Query Search** - Combine up to 4 queries with AND/OR logic to find topic intersections
+- 📝 **Your Notes, Searched Too** - Optionally index the text of notes attached to an item, so what you wrote is findable alongside the paper itself; off by default, and existing items are back-filled on demand
 - 🕘 **Recent Searches** - The search window remembers your last 10 queries, so you can go back to a phrasing that worked; clear the list from the dropdown at any time
-- 🔗 **Hybrid Search** - Combines AI + keyword search for best results
+- 🔗 **Hybrid Search** - Combines AI and keyword search, with the keyword half reading PDF text and note content, not just titles and tags
 - ⚡ **Lightning Fast** - Searches complete in <100ms
-- 📑 **Section-Aware** - See which section matched (Abstract, Methods, Results)
+- 📑 **Section-Aware** - See where each match came from (Abstract, Methods, Results, or one of your notes)
 - 📄 **Matched-Passage Preview** - Hover a result to read the exact passage that matched, with query terms highlighted
 - 📍 **Passage-Level Location** - Jump to exact page & paragraph in Full Document mode
 - ✅ **Multi-Select in Results** - Select multiple search results, right-click to add to collections
@@ -187,14 +188,18 @@ The plugin combines **semantic search** (AI embeddings) with **Zotero's keyword 
 
 ### Section-Aware Results
 
-The **Source** column shows which section of the paper matched your query:
+The **Source** column shows where the match came from:
 
-| Source | Section Type |
-|--------|--------------|
+| Source | What it means |
+|--------|---------------|
 | Abstract | Title + Abstract |
 | Methods | Introduction, Background, Methods |
 | Results | Results, Discussion, Conclusions |
 | Content | Generic (sections not detected) |
+| Note | A note attached to the item, when note indexing is on |
+
+A note has no page, so a Note result leaves the Location column empty and opens the note
+itself rather than jumping into the PDF.
 
 ### Matched-Passage Preview
 
@@ -776,7 +781,7 @@ Access settings via **Zotero → Settings → ZotSeek** (or **Zotero → Prefere
 
 The settings panel allows you to configure:
 - **Indexing Mode**: Abstract only or Full Document
-- **Search Options**: Maximum results, minimum similarity threshold
+- **Search Options**: Maximum results, and a minimum similarity threshold that applies to the AI half of the search; keyword matches are always returned, since a literal match is its own evidence
 - **Exclusion**: Exclude books, exclude by tag
 - **Actions**: Clear index, re-index library
 
