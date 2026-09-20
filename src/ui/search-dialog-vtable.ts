@@ -480,6 +480,11 @@ export class ZotSeekDialogVTable {
       return;
     }
 
+    // Captured before the first await: the user keeps typing while the search
+    // runs, so reading the box afterwards would record a query that was never
+    // the one searched.
+    const mainQuery = (doc.getElementById('zotseek-query-1') as HTMLInputElement)?.value || '';
+
     this.isSearching = true;
     this.lastQuery = queryCacheKey;
     const searchBtn = doc.getElementById('zotseek-btn') as HTMLButtonElement;
@@ -518,7 +523,6 @@ export class ZotSeekDialogVTable {
       // boxes 2-4 exist for AND/OR combination and are not reusable on their
       // own. Recorded here rather than on input, so a half-typed query never
       // reaches the history.
-      const mainQuery = (doc.getElementById('zotseek-query-1') as HTMLInputElement)?.value || '';
       recordSearchQuery(mainQuery);
 
       // Filter out excluded item (e.g., the paper being read when using "Find Related Papers")
