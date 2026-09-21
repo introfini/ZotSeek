@@ -20,6 +20,7 @@ import {
   getIndexingMode
 } from '../utils/chunker';
 import { noteHtmlToText } from '../utils/note-text';
+import { identityFromItem } from './identity-resolver';
 import { TextSourceType } from './vector-store-sqlite';
 
 declare const Zotero: any;
@@ -66,6 +67,39 @@ async function collectNoteChunks(
   if (parts.length === 0) return [];
 
   return chunkNotes(title, parts, options);
+}
+
+/**
+ * Name an item well enough for a user to find it in their library.
+ *
+ * `item.id` alone is a local database id: it means nothing in the Zotero UI,
+ * differs between machines, and was exactly what issue #54 could not act on.
+ * Title and stable identity are both added when they can be read.
+ *
+ * Never throws. It is called from error handlers, where the item itself may
+ * be the thing that is broken, and a throw there would escape the catch.
+ * Module-level rather than a class method for the reason documented above
+ * collectNoteChunks: SpiderMonkey does not reliably register every class
+ * method compiled into this project's esbuild IIFE bundle.
+ */
+export function describeItem(item: any): string {
+  const parts = [`item ${item?.id ?? '?'}`];
+
+  try {
+    const title = item?.getField?.('title');
+    if (title) parts.push(`"${title}"`);
+  } catch {
+    /* unreadable title: the id and identity still say which item it is */
+  }
+
+  try {
+    const identity = identityFromItem(item);
+    if (identity) parts.push(`(${identity.libraryKey}/${identity.itemKey})`);
+  } catch {
+    /* unresolvable library: fall back to the local id alone */
+  }
+
+  return parts.join(' ');
 }
 
 export interface ExtractedText {
@@ -153,7 +187,8 @@ export class TextExtractor {
   async extractChunksFromItem(
     item: ZoteroItem,
     mode?: IndexingMode,
-    options?: ChunkOptions
+    options?: ChunkOptions,
+    onError?: (message: string) => void
   ): Promise<ExtractedChunks | null> {
     try {
       const title = item.getField('title') || 'Untitled';
@@ -175,18 +210,11 @@ export class TextExtractor {
         if (pages && pages.length > 0) {
           // Use new page-aware chunker for accurate page numbers
           this.logger.debug(`Using page-by-page chunking for item ${item.id} (${pages.length} pages)`);
-          try {
-            const result = chunkDocumentWithPagesEx(title, abstract, pages, indexingMode, chunkOptions);
-            chunks = result.chunks;
-            wasTruncated = result.wasTruncated;
-            pagesIndexed = result.pagesIndexed;
-            pagesTotal = result.pagesTotal;
-          } catch (chunkError: any) {
-            console.error(`[TextExtractor] chunkDocumentWithPagesEx failed for item ${item.id}:`,
-              chunkError?.message || chunkError?.toString() || chunkError);
-            console.error(`[TextExtractor] Stack:`, chunkError?.stack);
-            throw chunkError;
-          }
+          const result = chunkDocumentWithPagesEx(title, abstract, pages, indexingMode, chunkOptions);
+          chunks = result.chunks;
+          wasTruncated = result.wasTruncated;
+          pagesIndexed = result.pagesIndexed;
+          pagesTotal = result.pagesTotal;
         } else {
           // Fallback to legacy chunker if page extraction fails
           this.logger.debug(`Falling back to legacy chunking for item ${item.id}`);
@@ -253,9 +281,15 @@ export class TextExtractor {
       // Better error logging - Error objects don't serialize well
       const errorMessage = error?.message || error?.toString() || 'Unknown error';
       const errorStack = error?.stack || '';
-      this.logger.error(`Failed to extract chunks from item ${item.id}: ${errorMessage}`);
+      this.logger.error(`Failed to extract chunks from ${describeItem(item)}: ${errorMessage}`);
+      // Returning null on its own is indistinguishable from an item that
+      // simply has no text, which is ordinary. Tell the caller which it was.
+      onError?.(errorMessage);
       if (errorStack) {
-        console.error(`[TextExtractor] Stack trace for item ${item.id}:`, errorStack);
+        // Zotero.debug, never console: this runs in the plugin scope, which has
+        // no console, and a ReferenceError thrown here would escape the very
+        // catch that is meant to keep one bad item from ending the run (#54).
+        Zotero.debug(`[ZotSeek:TextExtractor] Stack trace for ${describeItem(item)}: ${errorStack}`);
       }
       return null;
     }
@@ -336,9 +370,18 @@ export class TextExtractor {
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const title = item.getField('title') || 'Untitled';
 
-      // Report progress
+      // Reading the item can fail too, and a throw here used to end the whole
+      // batch before extraction was even attempted. describeItem never throws.
+      let title: string;
+      try {
+        title = item.getField('title') || 'Untitled';
+      } catch {
+        title = describeItem(item);
+      }
+
+      // Deliberately outside the per-item guard below: callers cancel a run by
+      // throwing from this callback, and that throw has to reach them.
       if (onProgress) {
         onProgress({
           current: i + 1,
@@ -349,12 +392,39 @@ export class TextExtractor {
         });
       }
 
-      const extracted = await this.extractChunksFromItem(item, indexingMode, chunkOptions);
+      // One item that fails costs that item, not the run. The embedding stage
+      // has worked this way since v1.10.0; extraction did not, and a single
+      // unreadable item aborted a whole 5000-item library (#54).
+      const failures: string[] = [];
+      let extracted: ExtractedChunks | null = null;
+      try {
+        extracted = await this.extractChunksFromItem(
+          item, indexingMode, chunkOptions, (message) => failures.push(message),
+        );
+      } catch (error: any) {
+        // extractChunksFromItem catches its own errors, so arriving here means
+        // that net tore. Contain it rather than trusting it twice.
+        const message = error?.message || error?.toString() || 'Unknown error';
+        failures.push(message);
+        this.logger.error(`Extraction threw for ${describeItem(item)}: ${message}`);
+        if (error?.stack) Zotero.debug(`[ZotSeek:TextExtractor] ${error.stack}`);
+      }
+
       if (extracted) {
         results.push(extracted);
         totalChunks += extracted.chunks.length;
       } else {
         skipped++;
+      }
+
+      if (failures.length > 0 && onProgress) {
+        onProgress({
+          current: i + 1,
+          total: items.length,
+          currentTitle: describeItem(item),
+          status: 'error',
+          skipped,
+        });
       }
 
       // Yield to UI thread periodically
