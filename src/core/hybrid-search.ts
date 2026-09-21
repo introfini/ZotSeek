@@ -484,6 +484,22 @@ export class HybridSearchEngine {
       // Add collection constraint if specified
       if (opts.collectionId) {
         search.addCondition('collectionID', 'is', opts.collectionId.toString());
+        // `collectionID is X` matches only items that are IN the collection,
+        // and a child attachment or child note never is: only its parent is.
+        // Without this, every match originating in a PDF's body or in a note
+        // was discarded by Zotero before resolveKeywordMatches() could credit
+        // it to the paper it belongs to, and the parent was not returned in
+        // its place because the words are not in its metadata (#51). Measured
+        // on a real library, this turned 0 results into 10 for a string that
+        // exists only in one paper's attachment and notes. It does not widen
+        // the scope: across 435 expanded hits in three collections, every hit
+        // resolved to an item that is in the collection.
+        search.addCondition('includeParentsAndChildren', 'true');
+        // Subcollections, for the same reason indexing a collection has
+        // included them since 1.20.0: otherwise a collection can be indexed
+        // and then not be searchable. On a collection with 1 direct item and
+        // 5 subcollections this is 2 hits versus 726.
+        search.addCondition('recursive', 'true');
       }
 
       // Quick search searches title, creators, year, tags, full text and notes.
