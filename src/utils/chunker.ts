@@ -157,34 +157,56 @@ function splitChunkByCharLimit(chunk: Chunk, maxChars: number): Chunk[] {
   const result: Chunk[] = [];
   let currentText = '';
 
-  for (const sentence of sentences) {
-    // If a single sentence exceeds the limit, hard-truncate it
-    const cappedSentence = sentence.length > availableChars
-      ? sentence.substring(0, availableChars)
-      : sentence;
-
-    if (currentText.length + cappedSentence.length > availableChars && currentText.trim()) {
-      result.push({
-        ...chunk,
-        index: 0, // Re-indexed by caller
-        text: titlePrefix ? `${titlePrefix}\n\n${currentText.trim()}` : currentText.trim(),
-        tokenCount: estimateTokens(currentText),
-      });
-      currentText = cappedSentence;
-    } else {
-      currentText += cappedSentence;
-    }
-  }
-
-  // Flush remaining
-  if (currentText.trim()) {
+  const flush = () => {
+    if (!currentText.trim()) return;
     result.push({
       ...chunk,
-      index: 0,
+      index: 0, // Re-indexed by caller
       text: titlePrefix ? `${titlePrefix}\n\n${currentText.trim()}` : currentText.trim(),
       tokenCount: estimateTokens(currentText),
     });
+    currentText = '';
+  };
+
+  // Longest prefix that fits without ending in the middle of a character. A
+  // cut at a code-unit boundary can leave half of an astral character at the
+  // end of one chunk and half at the start of the next, and astral characters
+  // are ordinary in the scripts most likely to reach this path.
+  const fittingLength = (text: string): number => {
+    const code = text.charCodeAt(availableChars - 1);
+    const splitsPair = code >= 0xd800 && code <= 0xdbff;
+    const end = splitsPair ? availableChars - 1 : availableChars;
+    return end > 0 ? end : availableChars;
+  };
+
+  for (const sentence of sentences) {
+    let remaining = sentence;
+
+    // A single "sentence" longer than the limit used to be capped with
+    // substring() and the remainder thrown away, silently and without setting
+    // any truncation flag, so the item was written as fully indexed with most
+    // of its text missing. A sentence only gets this long when the text has no
+    // sentence boundaries in it at all: tables lifted out of PDFs, data
+    // appendices, source code, bad OCR, and Chinese or Japanese text, whose
+    // terminators are not the ASCII ones splitIntoSentences looks for. It is
+    // emitted as consecutive slices instead.
+    while (remaining.length > availableChars) {
+      flush();
+      const end = fittingLength(remaining);
+      currentText = remaining.slice(0, end);
+      remaining = remaining.slice(end);
+      flush();
+    }
+
+    if (currentText.length + remaining.length > availableChars && currentText.trim()) {
+      flush();
+      currentText = remaining;
+    } else {
+      currentText += remaining;
+    }
   }
+
+  flush();
 
   return result;
 }
