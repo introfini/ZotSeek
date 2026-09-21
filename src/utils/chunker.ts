@@ -78,6 +78,53 @@ const SECTION_PATTERNS = {
 };
 
 /**
+ * Split text into sentences, each ending in one or more of `.`, `!` or `?`.
+ *
+ * This replaces `text.match(/[^.!?]+[.!?]+/g) || [text]`, which backtracks
+ * quadratically on text with no terminators in it and, past roughly 50,000
+ * such characters, exhausts SpiderMonkey's regex stack and throws
+ * `InternalError: too much recursion`. That is what aborted a user's whole
+ * indexing run in #54: their item was a 99,841-character Python source file
+ * with not a single `.`, `!` or `?` in it. Source code, data dumps, CSV
+ * exports, logs and Chinese or Japanese text (whose terminators are `。！？`)
+ * all have that shape.
+ *
+ * Deliberately equivalent to the regex, including its quirk of discarding
+ * whatever follows the last terminator: fixing that changes what goes into
+ * the index and does not belong in a crash fix. `test/sentence-split.test.ts`
+ * pins the equivalence.
+ */
+export function splitIntoSentences(text: string): string[] {
+  const sentences: string[] = [];
+  let start = 0;
+  let i = 0;
+
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '.' || c === '!' || c === '?') {
+      // Consume the whole run of terminators, as `[.!?]+` does.
+      let end = i + 1;
+      while (end < text.length) {
+        const t = text[end];
+        if (t !== '.' && t !== '!' && t !== '?') break;
+        end++;
+      }
+      // `[^.!?]+` requires at least one preceding non-terminator, so a run
+      // that starts where the previous sentence ended produces no match.
+      if (i > start) sentences.push(text.slice(start, end));
+      start = end;
+      i = end;
+      continue;
+    }
+    i++;
+  }
+
+  // Anything after the last terminator matched nothing, and the regex
+  // returned null only when there was no match at all.
+  return sentences.length > 0 ? sentences : [text];
+}
+
+/**
  * Estimate token count for nomic tokenizer
  * Conservative estimate: ~1.3 tokens per word for English academic text
  */
@@ -106,7 +153,7 @@ function splitChunkByCharLimit(chunk: Chunk, maxChars: number): Chunk[] {
     return [{ ...chunk, text: chunk.text.substring(0, maxChars) }];
   }
 
-  const sentences = body.match(/[^.!?]+[.!?]+/g) || [body];
+  const sentences = splitIntoSentences(body);
   const result: Chunk[] = [];
   let currentText = '';
 
@@ -406,7 +453,7 @@ function splitTextIntoChunks(
       chunkParagraphIdx = runningParagraphIdx;
 
       // Split paragraph by sentences
-      const sentences = para.text.match(/[^.!?]+[.!?]+/g) || [para.text];
+      const sentences = splitIntoSentences(para.text);
       for (const sentence of sentences) {
         const sentTokens = estimateTokens(sentence);
         if (currentTokens + sentTokens > availableTokens && currentChunk.trim()) {
@@ -1094,7 +1141,7 @@ export function chunkDocumentWithPagesEx(
       // Instead of truncating and losing content, we split at sentence boundaries
       if (paraTokens > opts.maxTokens - titleTokens) {
         const availableTokens = opts.maxTokens - titleTokens;
-        const sentences = para.match(/[^.!?]+[.!?]+/g) || [para];
+        const sentences = splitIntoSentences(para);
         let currentText = '';
         let currentTokens = 0;
 
