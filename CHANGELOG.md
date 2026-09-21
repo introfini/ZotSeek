@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.22.2] - 2026-09-21
 
 ### Fixed
 - Indexing no longer fails on a document whose text has no sentence punctuation in it. Splitting a long passage into sentences used a pattern that, on text holding no `.`, `!` or `?`, slowed down sharply with length and, past roughly fifty thousand such characters, ran out of room and failed outright. That was the error behind the aborted indexing runs in 1.22.0: the item that triggered it was a hundred-thousand-character source code file saved from the web. Source code, data tables lifted out of PDFs, log files and poorly recognised scans all have that shape, and so does Chinese and Japanese text, whose sentences end in different characters than the ones being looked for.
