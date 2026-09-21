@@ -89,10 +89,13 @@ const SECTION_PATTERNS = {
  * exports, logs and Chinese or Japanese text (whose terminators are `。！？`)
  * all have that shape.
  *
- * Deliberately equivalent to the regex, including its quirk of discarding
- * whatever follows the last terminator: fixing that changes what goes into
- * the index and does not belong in a crash fix. `test/sentence-split.test.ts`
- * pins the equivalence.
+ * It finds the same sentences the regex did, and additionally keeps whatever
+ * follows the last terminator, which the regex discarded. That discard is
+ * worth 0.15% of an oversized paragraph on real PDFs, and the whole document
+ * when the terminators all sit near the start: 90,000 characters preceded by
+ * one `.` used to index 11 of them. `test/sentence-split.test.ts` pins both
+ * halves, that nothing is lost and that breaks only happen after a
+ * terminator.
  */
 export function splitIntoSentences(text: string): string[] {
   const sentences: string[] = [];
@@ -110,17 +113,28 @@ export function splitIntoSentences(text: string): string[] {
         end++;
       }
       // `[^.!?]+` requires at least one preceding non-terminator, so a run
-      // that starts where the previous sentence ended produces no match.
-      if (i > start) sentences.push(text.slice(start, end));
-      start = end;
+      // that starts where the previous sentence ended is not a sentence of its
+      // own. `start` stays put so those characters join the next one rather
+      // than being skipped over: text that leads with a terminator would
+      // otherwise lose it.
+      if (i > start) {
+        sentences.push(text.slice(start, end));
+        start = end;
+      }
       i = end;
       continue;
     }
     i++;
   }
 
-  // Anything after the last terminator matched nothing, and the regex
-  // returned null only when there was no match at all.
+  // Whatever follows the last terminator is a sentence with no boundary of its
+  // own. The regex dropped it: harmless on prose, where an oversized paragraph
+  // loses 0.15% of itself in a measured sample of real PDFs, and total on the
+  // documents this path exists for, where 90,000 characters with a single `.`
+  // near the start left 11 characters behind.
+  if (start < text.length) sentences.push(text.slice(start));
+
+  // Only an empty string reaches this with nothing collected.
   return sentences.length > 0 ? sentences : [text];
 }
 

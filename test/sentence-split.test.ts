@@ -17,11 +17,15 @@
  *
  * Node does not reproduce the throw (V8 grinds through the same input instead
  * of overflowing), so what is pinned here is the cost, with a margin of two
- * orders of magnitude, plus exact equivalence with the regex on every input
- * the regex survives. The equivalence is what makes replacing it safe:
- * including the fact that the regex drops whatever follows the last
- * terminator, which is preserved deliberately rather than quietly fixed
- * alongside a crash.
+ * orders of magnitude, plus the contract the splitter has to keep.
+ *
+ * That contract is deliberately NOT "whatever the regex did". The regex
+ * dropped everything after the last terminator, and while that costs 0.15% of
+ * an oversized paragraph in a measured sample of real PDFs, it costs
+ * everything on the documents this code path exists for: 90,000 characters
+ * with one `.` near the start indexed 11 characters. Losing text silently is
+ * the defect, not a behaviour worth preserving, so the splitter is pinned on
+ * losing nothing instead.
  */
 
 import { test } from 'node:test';
@@ -51,33 +55,81 @@ const CASES = [
   '句子没有 ASCII 终止符',
 ];
 
-test('splitIntoSentences agrees with the regex it replaces', () => {
+test('splitIntoSentences loses nothing', () => {
   for (const input of CASES) {
+    assert.equal(
+      splitIntoSentences(input).join(''),
+      input,
+      `text went missing splitting ${JSON.stringify(input)}`,
+    );
+  }
+});
+
+test('splitIntoSentences breaks only after a terminator', () => {
+  for (const input of CASES) {
+    const parts = splitIntoSentences(input);
+    // Every part but the last ends the sentence it carries; the last part is
+    // whatever followed the final terminator, which has no boundary of its own.
+    for (const part of parts.slice(0, -1)) {
+      assert.match(part, /[.!?]$/, `${JSON.stringify(part)} does not end a sentence`);
+    }
+  }
+});
+
+test('splitIntoSentences keeps the text after the last terminator', () => {
+  // The regex dropped this. On a document whose terminators all sit near the
+  // start, that is the whole document.
+  assert.deepEqual(splitIntoSentences('Header line. ' + 'x'.repeat(50)), [
+    'Header line.',
+    ' ' + 'x'.repeat(50),
+  ]);
+  assert.deepEqual(regexSplit('Header line. ' + 'x'.repeat(50)), ['Header line.']);
+});
+
+test('splitIntoSentences still matches the regex wherever the regex kept everything', () => {
+  for (const input of CASES.filter((c) => /[.!?]\s*$/.test(c) && c.trim())) {
     assert.deepEqual(
-      splitIntoSentences(input),
+      splitIntoSentences(input).filter((p) => /[.!?]$/.test(p)),
       regexSplit(input),
       `disagreed on ${JSON.stringify(input)}`,
     );
   }
 });
 
-test('splitIntoSentences agrees with the regex on generated input', () => {
+test('splitIntoSentences loses nothing on generated input either', () => {
   // Deterministic pseudo-random strings over an alphabet that is mostly
   // ordinary characters with terminators sprinkled in, so both the
   // many-sentences and the no-terminator shapes get generated.
   const alphabet = 'aaaabbbcc   \n.!?';
   let seed = 12345;
+  // The high bits, not the low ones: in a linear congruential generator with a
+  // power-of-two modulus the low bits cycle with a tiny period, so `next() % 16`
+  // produced almost the same character every time and this test was generating
+  // strings of 'a' with no terminator in them at all.
   const next = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff);
+  const roll = (n: number) => (next() >>> 15) % n;
 
   for (let i = 0; i < 500; i++) {
-    const length = next() % 60;
+    const length = roll(60);
     let s = '';
-    for (let j = 0; j < length; j++) s += alphabet[next() % alphabet.length];
-    assert.deepEqual(
-      splitIntoSentences(s),
-      regexSplit(s),
-      `disagreed on ${JSON.stringify(s)}`,
-    );
+    for (let j = 0; j < length; j++) s += alphabet[roll(alphabet.length)];
+
+    const parts = splitIntoSentences(s);
+    const where = JSON.stringify(s);
+
+    assert.equal(parts.join(''), s, `text went missing splitting ${where}`);
+
+    for (const part of parts.slice(0, -1)) {
+      assert.match(part, /[.!?]$/, `${JSON.stringify(part)} does not end a sentence, in ${where}`);
+    }
+
+    // Each part is one sentence: terminators appear only in the run that ends
+    // it, or in a leading run that the previous break could not carry. Only
+    // the first part can have a leading run, and only at the start of the
+    // text, where there is no previous sentence to attach it to.
+    for (const part of parts) {
+      assert.match(part, /^[.!?]*[^.!?]*[.!?]*$/, `${JSON.stringify(part)} holds more than one sentence, in ${where}`);
+    }
   }
 });
 
