@@ -1764,6 +1764,8 @@ class ZotSeekPlugin {
       let totalItemsGuarded = 0; // Re-index targets dropped by filterReindexTargets
       let totalItemsTruncated = 0; // Items where maxChunksPerPaper cut content
       const truncatedTitles: string[] = []; // For end-of-run summary log
+      let totalItemsFailed = 0; // Items whose extraction raised an error
+      const failedTitles: string[] = []; // For end-of-run summary log
 
       this.logger.info(`Processing ${itemsToIndex.length} items in ${totalBatches} batches of ${CHECKPOINT_BATCH_SIZE}`);
 
@@ -1781,6 +1783,7 @@ class ZotSeekPlugin {
         progressWindow.setHeadline(getString('indexing-batchExtracting', { current: batchNumber, total: totalBatches }));
         this.logger.info(`Batch ${batchNumber}/${totalBatches}: Extracting ${batchItems.length} items`);
 
+        const batchFailures: string[] = [];
         const extractedRaw = await textExtractor.extractChunksFromItems(
           batchItems,
           indexingMode,
@@ -1789,6 +1792,13 @@ class ZotSeekPlugin {
             if (progressWindow.isCancelled()) {
               throw new Error('Cancelled by user');
             }
+            // An item that raised an error is not the same as one with no
+            // text, and the user can only act on the first if they are told
+            // which item it was (#54). currentTitle carries the description.
+            if (progress.status === 'error') {
+              batchFailures.push(progress.currentTitle);
+              return;
+            }
             progressWindow.updateProgressWithETA(
               `Batch ${batchNumber}/${totalBatches}: ${progress.currentTitle}`,
               batchStart + progress.current,
@@ -1796,6 +1806,14 @@ class ZotSeekPlugin {
             );
           }
         );
+
+        if (batchFailures.length > 0) {
+          const itemList = batchFailures.join(', ');
+          totalItemsFailed += batchFailures.length;
+          failedTitles.push(...batchFailures);
+          this.logger.warn(`Batch ${batchNumber}: ${batchFailures.length} items could not be extracted: ${itemList}`);
+          progressWindow.addLine(getString('indexing-extractionFailed', { count: batchFailures.length, items: itemList }));
+        }
 
         const batchSkipped = batchItems.length - extractedRaw.length;
         totalItemsSkipped += batchSkipped;
@@ -1962,6 +1980,18 @@ class ZotSeekPlugin {
 
       if (totalItemsGuarded > 0) {
         progressWindow.addLine(getString('indexing-completeUnchanged', { count: totalItemsGuarded }));
+      }
+
+      if (totalItemsFailed > 0) {
+        progressWindow.addLine(
+          getString('indexing-completeFailed', { count: totalItemsFailed }),
+          'chrome://zotero/skin/cross.png'
+        );
+        // Repeat to the debug log so the list survives the auto-close
+        this.logger.warn(
+          `Indexing summary: ${totalItemsFailed} items could not be extracted. ` +
+          `Affected (first 5): ${failedTitles.slice(0, 5).join(' | ')}`
+        );
       }
 
       if (totalItemsTruncated > 0) {

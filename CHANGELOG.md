@@ -2,6 +2,13 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- One item that cannot be read no longer aborts the whole indexing run. A single unreadable item ended the run with a dialog reading "Indexing failed: console is not defined", which named neither the item nor the real error, and every retry stopped at the same place, leaving the rest of the library permanently unindexed. The safety net that was supposed to skip that item and carry on was itself the thing that failed: it tried to write the error's stack trace to a console, which does not exist where the plugin runs, and the resulting error escaped the very handler meant to contain it. Extraction now costs one item when it fails, the way generating embeddings already did, and the real error and its stack reach the debug log intact.
+
+- Indexing failures now say which item failed. The message identified the item by its internal database number, which does not appear anywhere in Zotero's interface and is not the same number on another computer. Failures now name the item by title and by the identifier ZotSeek stores, and the progress window reports how many items could not be read at the end of a run instead of counting them silently as having no content.
+
 ## [1.22.0] - 2026-09-20
 
 ### Added

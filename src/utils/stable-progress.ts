@@ -750,7 +750,11 @@ export function showQuickNotification(
         progress: 100,
       })
       .show(duration);
-  } catch (error) {
-    console.error('Failed to show notification:', error);
+  } catch (error: any) {
+    // Not console: this module is bundled into the plugin scope, which has no
+    // console, and a throw here would escape the catch it is written inside.
+    new Logger('StableProgress').error(
+      `Failed to show notification: ${error?.message || error?.toString() || 'Unknown error'}`,
+    );
   }
 }
