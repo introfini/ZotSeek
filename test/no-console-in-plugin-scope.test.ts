@@ -47,6 +47,14 @@ function resolveImport(fromFile: string, spec: string): string | null {
  * Walk the relative-import graph from an entry point. Bare specifiers are
  * node_modules and are skipped: third-party code is not ours to police, and
  * the toolkit reaches for a console through its own guarded paths.
+ *
+ * Audited once, against the built bundle, so the three `console.*` that do
+ * survive minification are not mistaken for a hole in this rule. All three
+ * are zotero-plugin-toolkit: two are `window.console.log` on a real window,
+ * and the third is the `else` branch of `if (_Zotero) Zotero.logError(e)`,
+ * which cannot be taken where `Zotero` is always defined. The toolkit's own
+ * logging feature-detects `console` and falls back to the main window's,
+ * which is why ZotSeek's logger works in a scope that has none.
  */
 function moduleGraph(entryFile: string): string[] {
   const seen = new Set<string>();
