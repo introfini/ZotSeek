@@ -11,6 +11,7 @@ zotseek-menu-indexSelected = 索引选中项
 zotseek-menu-indexCollection = 索引当前合集
 zotseek-menu-updateLibrary = 更新整个文献库索引
 zotseek-menu-backfillNotes = 为已索引项目添加笔记文本
+zotseek-menu-reindexCjk = 重新索引含中日韩文字的条目
 zotseek-menu-removeFromIndex = 从索引中移除
 zotseek-menu-findRelated = 查找相关文献
 
@@ -293,6 +294,7 @@ zotseek-resume-scopeUserLibrary = 您的个人文献库
 zotseek-resume-scopeCollection = "{ $name }" 收藏夹
 zotseek-resume-scopeCollections = 选定的 { $count } 个合集
 zotseek-resume-scopeNotes = 已索引且含笔记的条目
+zotseek-resume-scopeCjk = 已索引且含中日韩文字的条目
 
 # “将笔记文本加入索引”：重新索引已在索引中的条目，以加入其笔记文本。
 # “更新文献库索引”会跳过这些条目，因此若不使用此功能，该偏好设置只会对开启之后才索引的条目生效。
@@ -305,6 +307,16 @@ zotseek-notesBackfill-title = ZotSeek - 为已索引项目添加笔记文本
 zotseek-notesBackfill-confirmMsg = 有 { $count } 个已索引的条目，其笔记尚未进入索引。
 
     将索引这些笔记并复用条目其余内容，因此比完整重新索引快得多。但仍需重新读取每个条目的 PDF，请预留几分钟。
+
+    继续？
+# “重新索引含中日韩文字的条目”：修复 1.22.3 之前索引的条目，当时分块器会丢弃中文、日文
+# 或韩文段落（issue #60）。“更新文献库索引”会跳过这些条目，且条目本身没有变化，因此没有其他途径能触及它们。
+zotseek-cjkReindex-scanning = 正在查找已索引且含中日韩文字的条目...
+zotseek-cjkReindex-none = 没有已索引的条目在标题、摘要或已索引文本中含有中文、日文或韩文。尚未索引的条目会由“更新文献库索引”处理。
+zotseek-cjkReindex-title = ZotSeek - 重新索引含中日韩文字的条目
+zotseek-cjkReindex-confirmMsg = 有 { $count } 个已索引的条目含有中文、日文或韩文文字。
+
+    1.22.3 之前的版本会把这类文字的大部分排除在索引之外。这些条目将被重新读取并索引；已在索引中的部分会被复用。每一百个条目请预留几分钟。
 
     继续？
 zotseek-indexing-noItemsSelected = 未选择条目

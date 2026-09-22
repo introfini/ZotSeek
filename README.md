@@ -356,6 +356,18 @@ Enable **"Also index child notes"** in Settings to make the text of notes attach
 - **If the setting is off**, the action stops and asks you to turn it on first; there would be no note text to add.
 - **Running it again is safe.** Items whose notes are already indexed are left untouched rather than rewritten, and are reported as such at the end of the run.
 
+#### Repairing Chinese, Japanese and Korean Items Indexed Before 1.22.3
+
+Versions before 1.22.3 left most Chinese, Japanese and Korean text out of the index: the check that decides whether a passage is worth indexing counted words separated by spaces, and CJK prose has none, so whole paragraphs were skipped while the item was still recorded as fully indexed. Fixing the check repairs nothing on its own, because nothing about those items changed and every indexing path skips them.
+
+**"Re-index Items with CJK Text"**, in the same ZotSeek submenu, finds and re-indexes them.
+
+- **What it picks up:** items that are **already indexed** and have Chinese, Japanese or Korean text in their title, abstract or indexed text. After reading each item, those whose actual text holds no such script are left untouched, so a Chinese title on an English PDF costs nothing.
+- **What it misses:** an item whose title and abstract are not in one of those scripts and whose text was lost entirely. For those, use **Remove from Index** and then **Index Selected Items**.
+- **Scope and interruptions:** the same as "Add Note Text to Existing Items": your personal library or every library per the **Index scope** setting, with pause, cancel and resume after a crash.
+- **Cost:** each candidate is read and chunked again. Parts already in the index are reused, so only the recovered text goes to the model.
+- **Running it again is safe.** An item that is already complete reuses every one of its embeddings.
+
 ---
 
 ## Choose Your Embedding Model

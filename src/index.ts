@@ -60,6 +60,8 @@ import './dev/suites/task-47-z10-db-hooks';
 import './dev/suites/task-44-hybrid-backfill';
 import { collectCollectionItems } from './utils/collection-items';
 import { collectNoteBackfillItems, NoteBackfillDeps } from './utils/note-backfill';
+import { collectCjkReindexItems, CjkReindexDeps, extractedHasCjkText } from './utils/cjk-reindex';
+import { identityFromNotifierData } from './core/notifier-identity';
 import { isSearchInProgress } from './core/search-activity';
 
 /**
@@ -81,7 +83,10 @@ type BulkScope =
   // are resolved from zotseek.indexScope when the run starts and travel with
   // the marker, so a resumed run covers the libraries it began with even if
   // the preference changed in between.
-  | { type: 'notes-backfill'; libraryIds: number[] };
+  | { type: 'notes-backfill'; libraryIds: number[] }
+  // Re-index of items already indexed whose CJK text the pre-1.22.3 chunker
+  // dropped (#60). Same library handling as the notes backfill.
+  | { type: 'cjk-reindex'; libraryIds: number[] };
 
 interface PluginInfo {
   id: string;
@@ -151,6 +156,16 @@ function makeNoteBackfillDeps(store: IVectorStore): NoteBackfillDeps {
     identityOf: (item: any) => identityFromItem(item),
     isIndexed: (libraryKey: string, itemKey: string) => store.isIndexedByIdentity(libraryKey, itemKey),
     getNote: (noteId: number) => Zotero.Items.getAsync(noteId),
+    onError: (message: string) => Zotero.debug(`[ZotSeek] ${message}`),
+  };
+}
+
+function makeCjkReindexDeps(store: IVectorStore): CjkReindexDeps {
+  return {
+    hasExcludeTag,
+    identityOf: (item: any) => identityFromItem(item),
+    isIndexed: (libraryKey: string, itemKey: string) => store.isIndexedByIdentity(libraryKey, itemKey),
+    hasCjkChunks: (libraryKey: string, itemKey: string) => store.hasCjkChunksByIdentity(libraryKey, itemKey),
     onError: (message: string) => Zotero.debug(`[ZotSeek] ${message}`),
   };
 }
@@ -361,15 +376,31 @@ async function filterReindexTargets(
   extracted: ExtractedChunks[],
   indexingMode: string,
   logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
+  options: {
+    /**
+     * Drop items whose content hash is unchanged. Off for the CJK re-index:
+     * the text those items lost was dropped by the chunker after hashing, so
+     * their hash never changed and is exactly what has to be overridden.
+     */
+    skipUnchanged?: boolean;
+    /** Drop items whose extracted text holds no CJK; the selection only saw metadata and stored chunks. */
+    requireCjk?: boolean;
+  } = {},
 ): Promise<ExtractedChunks[]> {
   const modelId = getActiveModelId();
   const keep: ExtractedChunks[] = [];
+  const skipUnchanged = options.skipUnchanged !== false;
 
   for (const e of extracted) {
     const item = Zotero.Items.get(e.itemId);
     const identity = item ? identityFromItem(item) : null;
 
-    if (identity) {
+    if (options.requireCjk && !extractedHasCjkText(e)) {
+      logger.info(`Skipping "${e.title}": no CJK text in the extracted content`);
+      continue;
+    }
+
+    if (identity && skipUnchanged) {
       let changed = true;
       try {
         changed = await store.needsReindexByIdentity(
@@ -764,6 +795,15 @@ class ZotSeekPlugin {
           makeNoteBackfillDeps(this.vectorStore),
         );
         label = getString('resume-scopeNotes');
+      } else if (scope.type === 'cjk-reindex') {
+        await this.ensureStoreReady();
+        if (!this.vectorStore) return;
+        items = await collectCjkReindexItems(
+          this.zoteroAPI,
+          scope.libraryIds,
+          makeCjkReindexDeps(this.vectorStore),
+        );
+        label = getString('resume-scopeCjk');
       } else if (scope.type === 'all-libraries') {
         items = await this.zoteroAPI.getAllLibraryItems();
         label = getString('resume-scopeLibrary');
@@ -796,13 +836,15 @@ class ZotSeekPlugin {
     if (!this.vectorStore) return;
 
     const pending: any[] = [];
-    if (scope.type === 'notes-backfill') {
-      // Every backfill candidate is already indexed by definition, so the
+    if (scope.type === 'notes-backfill' || scope.type === 'cjk-reindex') {
+      // Every candidate of these runs is already indexed by definition, so the
       // not-indexed filter below would throw the whole list away. The scope's
       // own selection has already applied the equivalent rules. Items the
-      // interrupted run had already reached are re-listed here and dropped
-      // after extraction by the unchanged-content guard, so they cost a second
-      // extraction but are never re-embedded or re-written.
+      // interrupted run had already reached are re-listed here: a notes
+      // backfill drops them after extraction by the unchanged-content guard,
+      // and a CJK re-index (which cannot use that guard) finds every chunk
+      // text already embedded and reuses it. Either way they cost a second
+      // extraction but are never re-embedded.
       pending.push(...items);
     } else {
       for (const item of items) {
@@ -887,17 +929,20 @@ class ZotSeekPlugin {
             for (const id of ids) {
               const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
               if (isNaN(numericId)) continue;
-              // Try to resolve stable identity from the (possibly trashed) item.
-              // If the item is fully gone, fall back to the legacy id-based shim.
+              // A trashed item is still there to read the stable identity
+              // off. A permanently erased one is gone, and Zotero passes its
+              // {libraryID, key} in extraData instead; without that the
+              // legacy id-based shim below finds nothing (local ids are not
+              // stored since schema v8) and the rows were left behind.
               const item = Zotero.Items.get(numericId);
-              if (item) {
-                const identity = identityFromItem(item);
-                if (identity) {
-                  await this.vectorStore.deleteItem(identity.libraryKey, identity.itemKey);
-                  cleanedIds.push(numericId);
-                  cleaned++;
-                  continue;
-                }
+              const identity = item
+                ? identityFromItem(item)
+                : identityFromNotifierData(_extraData?.[numericId], libraryKeyFromLocalID);
+              if (identity) {
+                await this.vectorStore.deleteItem(identity.libraryKey, identity.itemKey);
+                cleanedIds.push(numericId);
+                cleaned++;
+                continue;
               }
               // Fallback for items that no longer have a resolvable identity
               await this.vectorStore.delete(numericId);
@@ -1083,6 +1128,12 @@ class ZotSeekPlugin {
     backfillNotesItem.setAttribute('label', getString('menu-backfillNotes'));
     backfillNotesItem.addEventListener('command', () => this.onBackfillNotes());
 
+    // Create "Re-index Items with CJK Text" menu item (#60)
+    const reindexCjkItem = doc.createXULElement('menuitem');
+    reindexCjkItem.id = 'zotseek-reindex-cjk';
+    reindexCjkItem.setAttribute('label', getString('menu-reindexCjk'));
+    reindexCjkItem.addEventListener('command', () => this.onReindexCjk());
+
     const submenuSeparator2 = doc.createXULElement('menuseparator');
     submenuSeparator2.id = 'zotseek-submenu-separator-2';
 
@@ -1098,6 +1149,7 @@ class ZotSeekPlugin {
     submenuPopup.appendChild(indexCollectionItem);
     submenuPopup.appendChild(indexLibraryItem);
     submenuPopup.appendChild(backfillNotesItem);
+    submenuPopup.appendChild(reindexCjkItem);
     submenuPopup.appendChild(submenuSeparator2);
     submenuPopup.appendChild(removeFromIndexItem);
 
@@ -1608,6 +1660,55 @@ class ZotSeekPlugin {
   }
 
   /**
+   * Re-index the indexed items whose Chinese, Japanese or Korean text the
+   * chunker dropped before 1.22.3 (#60). Nothing else reaches them: bulk
+   * Update Index skips indexed items by presence, and the auto-index path by
+   * content hash, which never changed because the text was lost after
+   * hashing. Candidates are picked by CJK in their metadata or stored chunks;
+   * after extraction, items whose actual text holds no CJK are dropped again.
+   */
+  private async onReindexCjk(): Promise<void> {
+    if (this.indexing) {
+      this.showAlert(getString('indexing-alreadyInProgress'));
+      return;
+    }
+
+    const Z = getZotero();
+    if (!Z) return;
+
+    const libraryIds = this.getIndexScope() === 'all'
+      ? this.zoteroAPI.getAllLibraries().map((lib) => lib.libraryID)
+      : [Z.Libraries.userLibraryID];
+
+    await this.ensureStoreReady();
+    if (!this.vectorStore) return;
+
+    showQuickNotification(getString('cjkReindex-scanning'), 'default');
+    const candidates = await collectCjkReindexItems(
+      this.zoteroAPI,
+      libraryIds,
+      makeCjkReindexDeps(this.vectorStore),
+    );
+    this.logger.info(
+      `CJK re-index: ${candidates.length} indexed item(s) with CJK text across ${libraryIds.length} library/libraries`
+    );
+
+    if (candidates.length === 0) {
+      this.showAlert(getString('cjkReindex-none'));
+      return;
+    }
+
+    const confirmed = Services.prompt.confirm(
+      Z.getMainWindow(),
+      getString('cjkReindex-title'),
+      getString('cjkReindex-confirmMsg', { count: candidates.length })
+    );
+    if (!confirmed) return;
+
+    await this.indexItems(candidates, { type: 'cjk-reindex', libraryIds });
+  }
+
+  /**
    * Remove selected items from the ZotSeek index
    */
   private async onRemoveFromIndex(): Promise<void> {
@@ -1662,13 +1763,14 @@ class ZotSeekPlugin {
     this.indexing = true;
     const Z = getZotero();
 
-    // A notes backfill is the only run that re-indexes items already in the
-    // index, so it is the only one that skips the already-indexed filter and
-    // needs the overwrite guards. Derived from the scope marker rather than
-    // from a caller-supplied flag: no other path can reach either behaviour,
-    // and the crash-resume path gets both for free because it replays the
-    // same marker.
-    const isNoteBackfill = scope?.type === 'notes-backfill';
+    // A notes backfill and a CJK re-index are the only runs that re-index
+    // items already in the index, so they alone skip the already-indexed
+    // filter and need the overwrite guards. Derived from the scope marker
+    // rather than from a caller-supplied flag: no other path can reach either
+    // behaviour, and the crash-resume path gets both for free because it
+    // replays the same marker.
+    const isCjkReindex = scope?.type === 'cjk-reindex';
+    const reindexesIndexed = scope?.type === 'notes-backfill' || isCjkReindex;
 
     // Persist intent for auto-resume after crash/sleep. Only bother for runs
     // big enough that resuming saves real time — single-item indexing doesn't
@@ -1719,9 +1821,9 @@ class ZotSeekPlugin {
         }
         const identity = identityFromItem(item);
         if (!identity) continue;
-        if (isNoteBackfill) {
+        if (reindexesIndexed) {
           // Every candidate is already indexed; that filter is exactly what
-          // makes the backfill necessary, so it must not run here.
+          // makes these runs necessary, so it must not run here.
           itemsToIndex.push(item);
           continue;
         }
@@ -1825,9 +1927,12 @@ class ZotSeekPlugin {
         // for an item that has a PDF, where writing would replace a whole
         // paper with a summary plus its notes because the file is unreachable.
         // Ordinary bulk indexing only writes items with no chunks at all, so
-        // it has nothing to overwrite and skips the check.
-        const extractedBatch = isNoteBackfill
-          ? await filterReindexTargets(this.vectorStore!, extractedRaw, indexingMode, this.logger)
+        // it has nothing to overwrite and skips the check. A CJK re-index
+        // keeps the second guard but not the first: the hash of an affected
+        // item never changed, and overriding it is the whole point.
+        const extractedBatch = reindexesIndexed
+          ? await filterReindexTargets(this.vectorStore!, extractedRaw, indexingMode, this.logger,
+              { skipUnchanged: !isCjkReindex, requireCjk: isCjkReindex })
           : extractedRaw;
         totalItemsGuarded += extractedRaw.length - extractedBatch.length;
 
@@ -1867,7 +1972,7 @@ class ZotSeekPlugin {
           // opposite case: every item already has chunks under the active
           // model and only its note chunks are new, so the lookup pays for
           // itself and the document chunks are never re-embedded.
-          { knownUnindexed: !isNoteBackfill }
+          { knownUnindexed: !reindexesIndexed }
         );
 
         if (failedChunks > 0) {

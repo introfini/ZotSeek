@@ -1805,6 +1805,30 @@ export class VectorStoreSQLite {
     }
   }
 
+  /**
+   * Whether any chunk stored for the item under the ACTIVE model holds CJK
+   * text. Candidate check for the CJK re-index (#60): a hit also proves the
+   * item is indexed, so the caller needs no isIndexedByIdentity() on top.
+   * GLOB compares code points, so the character-class ranges work on UTF-8:
+   * U+4E00-9FFF (Han), U+3040-30FF (kana), U+AC00-D7AF (Hangul).
+   */
+  async hasCjkChunksByIdentity(libraryKey: string, itemKey: string): Promise<boolean> {
+    await this.ensureInit();
+    try {
+      const result = await Zotero.DB.valueQueryAsync(
+        `SELECT 1 FROM ${DB_NAME}.items i
+         JOIN ${DB_NAME}.chunks c ON c.item_pk = i.item_pk
+         WHERE i.library_key = ? AND i.item_key = ? AND c.model_id = ?
+           AND c.chunk_text GLOB '*[一-鿿぀-ヿ가-힯]*' LIMIT 1`,
+        [libraryKey, itemKey, getActiveModelId()]
+      );
+      return result === 1;
+    } catch (e) {
+      this.logger.error(`hasCjkChunksByIdentity(${libraryKey}, ${itemKey}): ${e}`);
+      return false;
+    }
+  }
+
   async getChunkCountByIdentity(libraryKey: string, itemKey: string): Promise<number> {
     await this.ensureInit();
     try {
