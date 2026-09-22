@@ -97,21 +97,25 @@ const SECTION_PATTERNS = {
  * halves, that nothing is lost and that breaks only happen after a
  * terminator.
  */
+/**
+ * ASCII terminators plus the CJK ones (`。！？` and full-width `．`). Chinese
+ * and Japanese prose never contains the ASCII set, so without these an
+ * oversized CJK paragraph was one unsplittable sentence.
+ */
+function isSentenceTerminator(c: string): boolean {
+  return c === '.' || c === '!' || c === '?' || c === '。' || c === '！' || c === '？' || c === '．';
+}
+
 export function splitIntoSentences(text: string): string[] {
   const sentences: string[] = [];
   let start = 0;
   let i = 0;
 
   while (i < text.length) {
-    const c = text[i];
-    if (c === '.' || c === '!' || c === '?') {
+    if (isSentenceTerminator(text[i])) {
       // Consume the whole run of terminators, as `[.!?]+` does.
       let end = i + 1;
-      while (end < text.length) {
-        const t = text[end];
-        if (t !== '.' && t !== '!' && t !== '?') break;
-        end++;
-      }
+      while (end < text.length && isSentenceTerminator(text[end])) end++;
       // `[^.!?]+` requires at least one preceding non-terminator, so a run
       // that starts where the previous sentence ended is not a sentence of its
       // own. `start` stays put so those characters join the next one rather
@@ -139,13 +143,35 @@ export function splitIntoSentences(text: string): string[] {
 }
 
 /**
- * Estimate token count for nomic tokenizer
- * Conservative estimate: ~1.3 tokens per word for English academic text
+ * Characters that are a token each in every tokenizer we ship. WordPiece
+ * (nomic) splits every CJK ideograph into its own token; SentencePiece (bge-m3,
+ * the e5 family) merges some pairs, so counting one per character is exact for
+ * the first and conservative for the rest. CJK and full-width punctuation are
+ * tokens of their own as well. Hangul is over-counted (Korean has spaces and
+ * WordPiece merges syllables), which only ever makes chunks smaller.
+ *
+ * \p{Script=…} rather than code-point ranges so the CJK Extension B+ blocks,
+ * which sit outside the BMP as surrogate pairs, are counted too.
+ */
+const CJK_CHAR = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3000-\u303F\uFF00-\uFFEF]/gu;
+
+/**
+ * Estimate token count for the embedding tokenizer.
+ *
+ * ~1.3 tokens per whitespace-separated word for English academic text, plus
+ * one per CJK character. Chinese and Japanese put no spaces between words, so
+ * the word count alone put a 1,500-character paragraph at 2 tokens, under the
+ * 15-token paragraph gate, and the paragraph was dropped from the index with
+ * no truncation flag set (issue #60).
  */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  const words = text.split(/\s+/).filter(w => w.length > 0);
-  return Math.ceil(words.length * 1.3);
+  const cjk = text.match(CJK_CHAR);
+  const cjkCount = cjk ? cjk.length : 0;
+  // Replace rather than strip so a CJK run never glues two Latin words together.
+  const latin = cjkCount ? text.replace(CJK_CHAR, ' ') : text;
+  const words = latin.split(/\s+/).filter(w => w.length > 0);
+  return cjkCount + Math.ceil(words.length * 1.3);
 }
 
 /**
@@ -964,7 +990,8 @@ function extractParagraphsFromPage(pageText: string): string[] {
     // Look for sentence end closest to target
     let bestSplit = -1;
     let match;
-    const sentenceEndRegex = /[.!?]\s+/g;
+    // CJK terminators are not followed by a space, so they stand on their own.
+    const sentenceEndRegex = /[.!?]\s+|[。！？．]/g;
     while ((match = sentenceEndRegex.exec(searchText)) !== null) {
       const pos = match.index + match[0].length;
       if (pos >= CHUNK_TARGET * 0.7) {

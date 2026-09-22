@@ -2,6 +2,11 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Chinese and Japanese text is no longer dropped from the index. The token estimate that decides whether a passage is worth indexing counted words separated by spaces, and CJK prose has none, so a 1,500-character Chinese paragraph counted as two tokens, fell under the minimum for a passage and was skipped, with the item still recorded as fully indexed. How much survived depended on the PDF: a text layer that happens to carry spaces at line breaks or around punctuation kept most of the page, one that does not kept nothing but the lines with digits or Latin words in them. Measured on the sample from the report, a page kept 309 of 534 characters in one layout and 0 in the other; it now keeps all of them in both. Sentence splitting also recognises `。`, `！` and `？` now, so a long CJK passage is divided at sentence ends instead of being cut at a fixed length. Documents affected by this need re-indexing to pick up the missing text.
+
 ## [1.22.2] - 2026-09-21
 
 ### Fixed
