@@ -678,11 +678,14 @@ To capture the full content of long papers, raise *Max Chunks per Paper* in **Se
 
 ### Token Estimation
 
-Tokens are estimated at ~1.3 tokens per word for English academic text:
+Tokens are estimated at ~1.3 tokens per whitespace-separated word, plus one token per CJK character:
 
 ```
 1000 words ≈ 1300 tokens ≈ 6000 characters
+1000 Chinese characters ≈ 1000 tokens
 ```
+
+Chinese and Japanese prose has no spaces between words, so the word count alone put a 1,500-character Chinese paragraph at 2 tokens. That estimate feeds the minimum-paragraph gate (15 tokens), the `maxTokens` ceiling and the sentence-level split, so such paragraphs were dropped from the index entirely (issue #60). One token per character is exact for WordPiece tokenizers (nomic), which split every CJK character, and conservative for SentencePiece ones (bge-m3, e5), which merge some pairs. Sentence splitting recognises `。！？` alongside `.!?`.
 
 | maxTokens | Approximate Size |
 |-----------|------------------|

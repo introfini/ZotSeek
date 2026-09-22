@@ -2,6 +2,13 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [1.22.3] - 2026-09-22
+
+### Fixed
+- Chinese and Japanese text is no longer dropped from the index. The token estimate that decides whether a passage is worth indexing counted words separated by spaces, and CJK prose has none, so a 1,500-character Chinese paragraph counted as two tokens, fell under the minimum for a passage and was skipped, with the item still recorded as fully indexed. How much survived depended on the PDF: a text layer that happens to carry spaces at line breaks or around punctuation kept most of the page, one that does not kept nothing but the lines with digits or Latin words in them. Measured on the sample from the report, a page kept 309 of 534 characters in one layout and 0 in the other; it now keeps all of them in both. Sentence splitting also recognises `。`, `！` and `？` now, so a long CJK passage is divided at sentence ends instead of being cut at a fixed length. Items indexed before this version keep what they have; re-index them if you know a document was affected. A 1.22.3-beta.1 pre-release carried a menu action to find and repair such items, dropped from this release after the reporter's own measurement of a 530-item Chinese library found no item that needed it.
+
+- Permanently deleting an item now removes its entry from the index. Sending an item to the trash always did, but an item erased outright (a permanent delete without passing through the trash, or a group library item removed by sync) is gone by the time ZotSeek is told, so its identity could no longer be read off it and the lookup that ran instead found nothing. Zotero passes the identity along with the deletion, and ZotSeek now reads it from there.
+
 ## [1.22.2] - 2026-09-21
 
 ### Fixed

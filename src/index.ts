@@ -60,6 +60,7 @@ import './dev/suites/task-47-z10-db-hooks';
 import './dev/suites/task-44-hybrid-backfill';
 import { collectCollectionItems } from './utils/collection-items';
 import { collectNoteBackfillItems, NoteBackfillDeps } from './utils/note-backfill';
+import { identityFromNotifierData } from './core/notifier-identity';
 import { isSearchInProgress } from './core/search-activity';
 
 /**
@@ -887,17 +888,20 @@ class ZotSeekPlugin {
             for (const id of ids) {
               const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
               if (isNaN(numericId)) continue;
-              // Try to resolve stable identity from the (possibly trashed) item.
-              // If the item is fully gone, fall back to the legacy id-based shim.
+              // A trashed item is still there to read the stable identity
+              // off. A permanently erased one is gone, and Zotero passes its
+              // {libraryID, key} in extraData instead; without that the
+              // legacy id-based shim below finds nothing (local ids are not
+              // stored since schema v8) and the rows were left behind.
               const item = Zotero.Items.get(numericId);
-              if (item) {
-                const identity = identityFromItem(item);
-                if (identity) {
-                  await this.vectorStore.deleteItem(identity.libraryKey, identity.itemKey);
-                  cleanedIds.push(numericId);
-                  cleaned++;
-                  continue;
-                }
+              const identity = item
+                ? identityFromItem(item)
+                : identityFromNotifierData(_extraData?.[numericId], libraryKeyFromLocalID);
+              if (identity) {
+                await this.vectorStore.deleteItem(identity.libraryKey, identity.itemKey);
+                cleanedIds.push(numericId);
+                cleaned++;
+                continue;
               }
               // Fallback for items that no longer have a resolvable identity
               await this.vectorStore.delete(numericId);
@@ -1606,6 +1610,7 @@ class ZotSeekPlugin {
 
     await this.indexItems(candidates, { type: 'notes-backfill', libraryIds });
   }
+
 
   /**
    * Remove selected items from the ZotSeek index
