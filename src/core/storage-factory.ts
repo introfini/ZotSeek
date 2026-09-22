@@ -29,7 +29,6 @@ export interface IVectorStore {
   deleteItem(libraryKey: string, itemKey: string): Promise<void>;
   deleteChunksForItem(libraryKey: string, itemKey: string, modelId?: string): Promise<void>;
   isIndexedByIdentity(libraryKey: string, itemKey: string): Promise<boolean>;
-  hasCjkChunksByIdentity(libraryKey: string, itemKey: string): Promise<boolean>;
   needsReindexByIdentity(libraryKey: string, itemKey: string, contentHash: string, modelId?: string): Promise<boolean>;
   getChunkCountByIdentity(libraryKey: string, itemKey: string): Promise<number>;
   getIndexStatusByIdentity(identities: Array<{libraryKey: string; itemKey: string}>): Promise<Map<string, import('./vector-store-sqlite').ItemIndexStatus>>;

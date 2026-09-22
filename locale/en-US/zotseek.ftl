@@ -11,7 +11,6 @@ zotseek-menu-indexSelected = Index Selected Items
 zotseek-menu-indexCollection = Index Current Collection
 zotseek-menu-updateLibrary = Update Entire Library
 zotseek-menu-backfillNotes = Add Note Text to Existing Items
-zotseek-menu-reindexCjk = Re-index Items with CJK Text
 zotseek-menu-removeFromIndex = Remove from Index
 zotseek-menu-findRelated = Find Related Documents
 
@@ -294,7 +293,6 @@ zotseek-resume-scopeUserLibrary = your personal library
 zotseek-resume-scopeCollection = the "{ $name }" collection
 zotseek-resume-scopeCollections = { $count } selected collections
 zotseek-resume-scopeNotes = indexed items that have notes
-zotseek-resume-scopeCjk = indexed items with Chinese, Japanese or Korean text
 
 # "Add Note Text to Existing Items": re-indexes items that are ALREADY indexed so their
 # note text is added. Update Library Index skips them, so without this the
@@ -355,18 +353,6 @@ zotseek-indexing-embedding = Embedding { $current }/{ $total }...
 zotseek-indexing-saving = Saving...
 zotseek-indexing-chunksIndexed = ✓ { $count } chunks indexed
 zotseek-indexing-chunksIndexedWithFailed = ✓ { $count } chunks indexed ({ $failed } failed)
-
-# "Re-index Items with CJK Text": repairs items indexed before 1.22.3, whose Chinese,
-# Japanese or Korean paragraphs the chunker dropped (issue #60). Update Library Index
-# skips them, and nothing about them changed, so nothing else would touch them.
-zotseek-cjkReindex-scanning = Looking for indexed items with Chinese, Japanese or Korean text...
-zotseek-cjkReindex-none = No indexed items have Chinese, Japanese or Korean text in their title, abstract or indexed text. Items that are not indexed yet are covered by Update Library Index.
-zotseek-cjkReindex-title = ZotSeek - Re-index Items with CJK Text
-zotseek-cjkReindex-confirmMsg = { $count } indexed item(s) have Chinese, Japanese or Korean text.
-
-    Versions before 1.22.3 left most of such text out of the index. Each of these items will be read and indexed again; parts that are already in the index are reused. Allow several minutes per hundred items.
-
-    Continue?
 
 ## Export to Collection (issue #28)
 
