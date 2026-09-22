@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.22.3-beta.1] - 2026-09-22
 
 ### Added
 - "Re-index Items with CJK Text", in the ZotSeek submenu next to the other indexing commands, repairs items indexed before this version whose Chinese, Japanese or Korean text was left out (see below). Fixing the cause repairs nothing by itself: nothing about those items changed, so Update Entire Library skips them as already indexed and editing them re-checks an unchanged content hash. The action picks out indexed items with such text in their title, abstract or indexed text, reads them again, skips those whose actual text has none, and reuses whatever is already in the index, so only the recovered text goes to the model.
