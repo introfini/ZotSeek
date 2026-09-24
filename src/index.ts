@@ -28,6 +28,7 @@ import { searchDialog } from './ui/search-dialog';
 import { searchDialogWithVTable } from './ui/search-dialog-with-vtable';
 import { similarDocumentsWrapper } from './ui/similar-documents-wrapper';
 import { toolbarButton } from './ui/toolbar-button';
+import { shouldShowCollectionMenu } from './ui/collection-menu';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 import { identityFromItem, libraryKeyFromLocalID, localItemIDFromIdentity } from './core/identity-resolver';
@@ -425,6 +426,7 @@ class ZotSeekPlugin {
   private initialized = false;
   private indexing = false;
   private cleanupNotifierID: string | null = null;
+  private collectionMenuPopupHandler: ((event: Event) => void) | null = null;
 
   // Hooks for bootstrap.js
   public hooks = {
@@ -1020,6 +1022,63 @@ class ZotSeekPlugin {
     }
 
     const doc = win.document;
+
+    // Collection-pane menu (issue #61). Registered before the item menu so a
+    // missing item menu cannot take it down with it.
+    const collectionMenu = doc.getElementById('zotero-collectionmenu');
+    if (!collectionMenu) {
+      this.logger.warn('Could not find zotero-collectionmenu');
+    } else if (!doc.getElementById('zotseek-collection-submenu')) {
+      const collectionSeparator = doc.createXULElement('menuseparator');
+      collectionSeparator.id = 'zotseek-collection-separator';
+
+      const collectionSubmenu = doc.createXULElement('menu');
+      collectionSubmenu.id = 'zotseek-collection-submenu';
+      collectionSubmenu.setAttribute('label', getString('menu-submenu'));
+
+      const collectionSubmenuPopup = doc.createXULElement('menupopup');
+      collectionSubmenuPopup.id = 'zotseek-collection-submenu-popup';
+      collectionSubmenu.appendChild(collectionSubmenuPopup);
+
+      const collectionOpenSearchItem = doc.createXULElement('menuitem');
+      collectionOpenSearchItem.id = 'zotseek-collection-open-dialog';
+      collectionOpenSearchItem.setAttribute('label', getString('menu-openZotSeek'));
+      collectionOpenSearchItem.addEventListener('command', () => searchDialogWithVTable.open());
+
+      const collectionSubmenuSeparator = doc.createXULElement('menuseparator');
+      collectionSubmenuSeparator.id = 'zotseek-collection-submenu-separator';
+
+      const collectionIndexItem = doc.createXULElement('menuitem');
+      collectionIndexItem.id = 'zotseek-collection-index-collection';
+      collectionIndexItem.setAttribute('label', getString('menu-indexCollection'));
+      collectionIndexItem.addEventListener('command', () => this.onIndexCollection());
+
+      const collectionIndexLibraryItem = doc.createXULElement('menuitem');
+      collectionIndexLibraryItem.id = 'zotseek-collection-index-library';
+      collectionIndexLibraryItem.setAttribute('label', getString('menu-updateLibrary'));
+      collectionIndexLibraryItem.addEventListener('command', () => this.onIndexLibrary());
+
+      collectionSubmenuPopup.appendChild(collectionOpenSearchItem);
+      collectionSubmenuPopup.appendChild(collectionSubmenuSeparator);
+      collectionSubmenuPopup.appendChild(collectionIndexItem);
+      collectionSubmenuPopup.appendChild(collectionIndexLibraryItem);
+
+      collectionMenu.appendChild(collectionSeparator);
+      collectionMenu.appendChild(collectionSubmenu);
+
+      // Zotero only toggles the menu entries it owns, so ours would otherwise
+      // show on libraries, feeds, saved searches and the trash too. The
+      // selection is final by now: Zotero awaits buildCollectionContextMenu()
+      // before it opens the popup.
+      this.collectionMenuPopupHandler = (event: Event) => {
+        if (event.target !== collectionMenu) return;
+        const hidden = !shouldShowCollectionMenu((win as any).ZoteroPane);
+        collectionSeparator.hidden = hidden;
+        collectionSubmenu.hidden = hidden;
+      };
+      collectionMenu.addEventListener('popupshowing', this.collectionMenuPopupHandler);
+    }
+
     const itemMenu = doc.getElementById('zotero-itemmenu');
 
     if (!itemMenu) {
@@ -2444,10 +2503,17 @@ class ZotSeekPlugin {
       'zotseek-find-similar',
       'zotseek-submenu',
       'zotseek-separator',
+      'zotseek-collection-submenu',
+      'zotseek-collection-separator',
     ];
     for (const id of ids) {
       const el = doc.getElementById(id);
       if (el) el.remove();
+    }
+    if (this.collectionMenuPopupHandler) {
+      doc.getElementById('zotero-collectionmenu')
+        ?.removeEventListener('popupshowing', this.collectionMenuPopupHandler);
+      this.collectionMenuPopupHandler = null;
     }
     this.logger.debug('XUL elements removed');
   }

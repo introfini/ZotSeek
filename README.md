@@ -634,7 +634,9 @@ The interactive release script bumps the version, syncs `manifest.json` and `upd
 
 1. Right-click on a collection → **ZotSeek → "Index Current Collection"**. Subcollections
    are included. On Zotero 10 you can select several collections first and index them in
-   one pass; items filed in more than one of them are indexed once.
+   one pass; items filed in more than one of them are indexed once. The same command is
+   also in the ZotSeek submenu you get by right-clicking a paper, where it indexes the
+   collection selected on the left.
 2. Or use **"Update Entire Library"** to index all items
 3. A progress window will appear showing:
    - Current item being processed
