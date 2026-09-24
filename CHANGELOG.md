@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.22.4] - 2026-09-24
 
 ### Fixed
 - Right-clicking a collection now shows a ZotSeek menu with **Index Current Collection**, **Update Entire Library** and **Search Library...**. The documentation has always said to index a collection this way, but the command only existed in the menu you get by right-clicking a paper, where it still indexed the collection selected on the left, so it could not be reached at all from a collection with no papers in it. The new menu appears only when collections are selected, not on libraries, feeds, saved searches or the trash. The paper menu keeps its ZotSeek submenu unchanged.
