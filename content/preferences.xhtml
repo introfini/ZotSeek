@@ -224,7 +224,8 @@
   <label><html:h2>Local inference server</html:h2></label>
   <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 0 0 6px 0;">
     Use an embedding model served by LM Studio, Ollama, llama.cpp or vLLM running on this computer
-    (OpenAI-compatible API). Connections are restricted to this machine (localhost only).
+    (OpenAI-compatible API). Connections are restricted to this machine (localhost only),
+    unless you explicitly allow remote hosts below.
   </html:p>
   <hbox align="center">
     <label value="Server URL:" style="min-width: 120px;" />
@@ -251,6 +252,28 @@
     <html:p style="color: var(--zotseek-text-secondary); font-size: 10px; margin: 4px 0 0 0;">
       Filled automatically for known model families (Nomic, E5). Leave empty unless the model card says otherwise.
     </html:p>
+  </html:div>
+  <html:div id="zotseek-server-remote" style="margin-top: 10px; padding: 8px; border: 1px solid #c62828; border-radius: 4px;">
+    <html:p style="margin: 0 0 6px 0; font-size: 11px; font-weight: bold; color: #c62828;">
+      Allowed remote hosts (dangerous)
+    </html:p>
+    <html:p style="margin: 0 0 6px 0; font-size: 11px;">
+      Hosts listed here may be used as inference server in addition to this computer, e.g.
+      gpu01.example.org. Comma-separated host names, without http:// or port.
+    </html:p>
+    <html:p style="margin: 0 0 6px 0; font-size: 11px;">
+      Warning: with a remote server, the full text that ZotSeek indexes (titles, abstracts,
+      PDF text and, if enabled, your notes) and every search query leave this computer and
+      are sent to that host. Anyone who runs, controls or can observe that host (its logs, its
+      administrators, the network in between if you use http:// instead of https://) can read
+      your library. Only add hosts in your own trusted network that you are allowed to send this
+      data to. Leave empty to keep ZotSeek strictly local.
+    </html:p>
+    <hbox align="center">
+      <label value="Allowed hosts:" style="min-width: 120px;" />
+      <html:input type="text" id="zotseek-server-allowedRemoteHosts" placeholder="ollama.example.local" style="width: 260px;" />
+    </hbox>
+    <html:div id="zotseek-server-remote-status" style="margin: 4px 0 0 120px; font-size: 11px; opacity: .8; min-height: 14px;"></html:div>
   </html:div>
 </groupbox>
 
