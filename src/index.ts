@@ -33,7 +33,7 @@ import { shouldShowCollectionMenu } from './ui/collection-menu';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 import { identityFromItem, libraryKeyFromLocalID, localItemIDFromIdentity } from './core/identity-resolver';
-import { getActiveModelId } from './core/model-registry';
+import { getActiveModel, getActiveModelId } from './core/model-registry';
 import { splitReusable, ReuseCandidate, StoredEmbeddings } from './core/embedding-reuse';
 import { initServerManager, shutdownServerManager } from './server/server-manager';
 import { registerModelsResourceSubstitution, verifyModelsResourceSubstitution } from './core/model-download';
@@ -471,6 +471,7 @@ class ZotSeekPlugin {
       'zotseek.excludeTag': 'zotseek-exclude', // Tag name to exclude items from indexing
       'zotseek.indexStatusColumn.firstShown': false, // First-run flag for index-status column
       'zotseek.mcpServer.enabled': false, // Opt-in local MCP/REST endpoints for AI agents
+      'zotseek.pluginEmbedding.enabled': false, // Opt-in: other plugins may embed with the active model
       'zotseek.embeddingModel': 'nomic-embed-text-v1.5',
       'zotseek.indexScope': 'user', // 'user' (My Library) or 'all' (all libraries)
       'zotseek.serverModels': '[]', // JSON array of server-backed model entries (issue #42)
@@ -2707,7 +2708,39 @@ class ZotSeekPlugin {
     getReclaimableBytes: () => (this.vectorStore as any)?.getReclaimableBytes?.() ?? Promise.resolve(0),
     isReady: () => this.initialized && embeddingPipeline.isReady(),
     reindexForActiveModel: () => this.reindexForActiveModel(),
+    /**
+     * The active embedding model, for other plugins that embed with it: id (stable for
+     * an index), label and dimensions; null unless the user allowed it ("Let other plugins use the models").
+     */
+    embeddingModel: () => {
+      if (!pluginEmbeddingAllowed()) return null;
+      const m = getActiveModel();
+      return { id: m.id, label: m.label, dimensions: m.dimensions, runtime: m.runtime };
+    },
+    /**
+     * Embeds texts with the active model (the model's query/document prefix is added here, so callers pass plain
+     * text). One text at a time on the local worker, batched on a server model. Only when the user allowed it.
+     */
+    embed: async (texts: string[], kind: 'query' | 'doc' = 'doc'): Promise<number[][]> => {
+      if (!pluginEmbeddingAllowed()) {
+        throw new Error('ZotSeek: other plugins may not use the embedding models (Settings → ZotSeek → Integrations)');
+      }
+      if (!Array.isArray(texts) || texts.some((t) => typeof t !== 'string')) throw new Error('ZotSeek: embed expects a list of texts');
+      if (kind === 'doc' && getActiveModel().runtime === 'server') return embeddingPipeline.embedDocuments(texts);
+      const out: number[][] = [];
+      for (const text of texts) out.push((await embeddingPipeline.embed(text, kind === 'query' ? 'query' : 'doc')).embedding);
+      return out;
+    },
   };
+}
+
+/** The user allowed other plugins to embed with ZotSeek's models (Settings → ZotSeek → Integrations). */
+function pluginEmbeddingAllowed(): boolean {
+  try {
+    return getZotero()?.Prefs.get('zotseek.pluginEmbedding.enabled', true) === true;
+  } catch {
+    return false;
+  }
 }
 
 // Create plugin instance

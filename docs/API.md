@@ -2,7 +2,7 @@
 
 ZotSeek exposes a JavaScript API at `Zotero.ZotSeek.api` that other Zotero plugins can use to run local semantic searches against the user's indexed library.
 
-All operations are local — embeddings are generated via Transformers.js (ONNX Runtime, WASM) and stored in a local SQLite file. No network calls are made.
+All operations are local — embeddings are generated via Transformers.js (ONNX Runtime, WASM) and stored in a local SQLite file. No network calls are made. The only exception is the optional local inference server, which must run on this machine; see [`embed()`](#embedtexts-kind).
 
 > Looking for access from *outside* Zotero (CLI scripts, AI agents, MCP clients)? See [MCP.md](MCP.md) for the local MCP server and REST endpoints.
 
@@ -195,6 +195,43 @@ const ready = Zotero.ZotSeek.api.isReady();
 ```
 
 **Returns:** `boolean`
+
+### `embeddingModel()`
+
+The active embedding model, for plugins that want to embed their own text with the model the user already chose in ZotSeek. **Opt-in:** returns `null` unless the user ticked **"Let other plugins use ZotSeek's embedding models"** in Settings → ZotSeek → Integrations & Maintenance (preference `zotseek.pluginEmbedding.enabled`, off by default).
+
+```js
+const model = Zotero.ZotSeek.api.embeddingModel();
+if (!model) {
+  // not allowed (or ZotSeek is too old): ask the user to enable the setting
+}
+```
+
+**Returns:** `{ id: string; label: string; dimensions: number; runtime: 'onnx' | 'server' } | null`
+
+`id` is stable for an index (for example `"nomic-embed-text-v1.5"`). `runtime` is `'onnx'` for the built-in model that runs in Zotero and `'server'` for a model served by a local inference server on the same machine (LM Studio, Ollama, llama.cpp or vLLM, set up in ZotSeek).
+
+Vectors from different models are not comparable. Check `id` before every use and store it with your vectors. If the user switches the model, rebuild your index instead of mixing vectors.
+
+### `embed(texts, kind?)`
+
+Turns texts into vectors with the active model. Same opt-in as `embeddingModel()`; if the setting is off, `embed()` throws an error that names it.
+
+```js
+const [vector] = await Zotero.ZotSeek.api.embed(['a passage of a book'], 'doc');
+const [queryVector] = await Zotero.ZotSeek.api.embed(['what is asymmetric search?'], 'query');
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `texts` | `string[]` | *(required)* | Plain texts. ZotSeek adds the model's own query or document prefix, so do not add one. |
+| `kind` | `'query' \| 'doc'` | `'doc'` | `'query'` for a search question, `'doc'` for text you index. |
+
+**Returns:** `Promise<number[][]>`, one vector per text, in the order of `texts`, each with `model.dimensions` entries.
+
+**Throws** if the user has not allowed it, or if `texts` is not an array of strings.
+
+Texts are embedded one at a time on the local worker for the built-in model. With a server model, `'doc'` texts are sent in batches to the local inference server the user set up in ZotSeek. ZotSeek only talks to `127.0.0.1`, `localhost` or `[::1]`, so nothing leaves the machine. Callers get the vectors of the texts they pass, plus the model's id, label, dimensions and runtime. They do not get access to the library, the index or ZotSeek's stored vectors.
 
 ## Example: Plugin integration
 
