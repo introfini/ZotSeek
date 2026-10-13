@@ -79,6 +79,21 @@ match came from, and a note has no page to point at.
 
 ![Search results including notes](docs/images/search-dialog-notes.png)
 
+### Book Results from External Indexes (SeekBook)
+
+Books are long and lack paper sections, so ZotSeek excludes them by default. A separate plugin can keep a
+dedicated full-text index for them and ZotSeek mixes its passages into every search (dialog, MCP, REST):
+
+- Enable **Settings → ZotSeek → Exclusions → Include book results from SeekBook**. The option is only available
+  while the SeekBook plugin is installed and has indexed books; keep
+  "Exclude books" on so books are not indexed twice.
+- Fusion is by rank only (Reciprocal Rank Fusion, k = 60): the two indexes may use different embedding models,
+  so their similarity scores are never compared.
+- Book hits carry `textSource: "book"` and, in `matchedChunk`, the `attachmentKey` of the PDF the page refers to
+  (a book can have several PDFs), plus `pageEnd`, `pageLabel` and `chapter`. Links open that PDF.
+- Without the option, or without SeekBook, results are unchanged. All of it lives in
+  `src/core/external-providers.ts`; other plugins can contribute results the same way via `registerExternalProvider`.
+
 ### Recent Searches
 Click the empty search box to bring back a query you ran earlier.
 

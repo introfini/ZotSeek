@@ -468,6 +468,7 @@ class ZotSeekPlugin {
       'zotseek.maxTokens': 2000,       // Firefox 140+ handles larger chunks efficiently
       'zotseek.maxChunksPerPaper': 100,
       'zotseek.excludeBooks': true,        // Exclude books from search/indexing by default
+      'zotseek.includeSeekBook': false,    // Mix in SeekBook's book passages (only when SeekBook is installed)
       'zotseek.excludeTag': 'zotseek-exclude', // Tag name to exclude items from indexing
       'zotseek.indexStatusColumn.firstShown': false, // First-run flag for index-status column
       'zotseek.mcpServer.enabled': false, // Opt-in local MCP/REST endpoints for AI agents

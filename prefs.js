@@ -29,6 +29,7 @@ pref("extensions.zotero.zotseek.indexStatusColumn.firstShown", false);
 // Item type filtering
 // Exclude books from search results (books lack paper sections and are too long to index well)
 pref("extensions.zotero.zotseek.excludeBooks", true);
+pref("extensions.zotero.zotseek.includeSeekBook", false);
 
 // Hybrid search settings
 // Combines semantic search with Zotero's keyword search using Reciprocal Rank Fusion
