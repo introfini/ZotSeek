@@ -275,6 +275,22 @@ zotseek-indexing-clearingExisting = Clearing existing index...
 zotseek-indexing-existingCleared = ✓ Existing index cleared
 zotseek-indexing-loading = Loading...
 zotseek-indexing-alreadyInProgress = Indexing already in progress...
+zotseek-indexing-queue-title = ZotSeek - Queue Indexing
+zotseek-indexing-queue-message = Indexing is already in progress.
+
+    Add "{ $action }" to the queue? It will start automatically, in order, once the current indexing finishes. (Position in queue: { $position })
+zotseek-indexing-queue-added = Queued "{ $action }" (position { $position }). It will start after the current indexing finishes.
+zotseek-indexing-queue-alreadyQueued = "{ $action }" is already in the queue.
+zotseek-indexing-queue-cancelTitle = ZotSeek - Cancel Indexing
+zotseek-indexing-queue-cancelMessage = { $count } queued indexing job(s) are waiting.
+
+    Discard them too? Choose No to keep them; they will start once this run stops.
+zotseek-indexing-queue-job-selected = Index selected items ({ $count })
+zotseek-indexing-queue-job-collection = Index collection "{ $name }"
+zotseek-indexing-queue-job-collections = Index { $count } collections
+zotseek-indexing-queue-job-library = Update Library Index
+zotseek-indexing-queue-job-notes = Add Note Text to Existing Items
+zotseek-indexing-queue-job-rebuild = Rebuild Index
 zotseek-indexing-selectItems = Please select items to index.
 zotseek-indexing-selectCollection = Please select a collection first.
 
