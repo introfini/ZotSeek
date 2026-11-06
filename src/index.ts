@@ -64,6 +64,7 @@ import { collectCollectionItems } from './utils/collection-items';
 import { collectNoteBackfillItems, NoteBackfillDeps } from './utils/note-backfill';
 import { identityFromNotifierData } from './core/notifier-identity';
 import { isSearchInProgress } from './core/search-activity';
+import { IndexingQueue } from './core/indexing-queue';
 
 /**
  * Don't bother compacting zotseek.sqlite on idle below this much reclaimable
@@ -426,6 +427,10 @@ class ZotSeekPlugin {
   public vectorStore: IVectorStore | null = null;  // Public for preference pane access
   private initialized = false;
   private indexing = false;
+  private indexingQueue = new IndexingQueue({
+    isExternallyBusy: () => this.indexing,
+    logger: { error: (message: string) => this.logger.error(message) },
+  });
   private cleanupNotifierID: string | null = null;
   private collectionMenuPopupHandler: ((event: Event) => void) | null = null;
 
@@ -700,7 +705,7 @@ class ZotSeekPlugin {
     const Z = getZotero();
 
     if (Z?.Prefs.get('zotseek.autoCompact', true) === false) return;
-    if (this.indexing) {
+    if (this.isIndexingBusy()) {
       this.logger.debug('Idle compaction skipped: indexing in progress');
       return;
     }
@@ -742,6 +747,7 @@ class ZotSeekPlugin {
       return;
     }
     if (!raw) return;
+    if (this.isIndexingBusy()) return;
 
     let scope: BulkScope | null = null;
     try {
@@ -848,9 +854,7 @@ class ZotSeekPlugin {
    */
   private initAutoIndexManager(): void {
     // Set callback to index items (silent mode for auto-indexing)
-    autoIndexManager.setIndexCallback(async (items: any[]) => {
-      await this.indexItemsSilent(items);
-    });
+    autoIndexManager.setIndexCallback((items: any[]) => this.indexItemsSilent(items));
 
     // Set vector store reference for checking indexed status
     if (this.vectorStore) {
@@ -1260,6 +1264,14 @@ class ZotSeekPlugin {
 
     if (!confirmed) return;
 
+    await this.runOrQueueIndexing(
+      'rebuild',
+      getString('indexing-queue-job-rebuild'),
+      () => this.runRebuildIndex(),
+    );
+  }
+
+  private async runRebuildIndex(): Promise<void> {
     // First clear the index
     const progressWindow = new StableProgressWindow({
       title: getString('indexing-rebuildingTitle'),
@@ -1278,7 +1290,7 @@ class ZotSeekPlugin {
         progressWindow.close();
 
         // Now trigger re-indexing of the entire library
-        await this.onIndexLibrary();
+        await this.runIndexLibrary({ interactive: false });
       }
     } catch (error: any) {
       this.logger.error(`Failed to rebuild index: ${error}`);
@@ -1322,7 +1334,7 @@ class ZotSeekPlugin {
   public async compactDatabase(): Promise<string> {
     await this.ensureStoreReady();
     if (!this.vectorStore) throw new Error('Store not ready');
-    if (this.indexing) throw new Error('Cannot compact while indexing is in progress');
+    if (this.isIndexingBusy()) throw new Error('Cannot compact while indexing is in progress');
 
     const result = await (this.vectorStore as any).compactDatabase();
     const beforeMB = (result.beforeBytes / (1024 * 1024)).toFixed(1);
@@ -1482,11 +1494,6 @@ class ZotSeekPlugin {
    * Index selected items for semantic search
    */
   private async onIndexSelected(): Promise<void> {
-    if (this.indexing) {
-      this.showAlert(getString('indexing-alreadyInProgress'));
-      return;
-    }
-
     const Z = getZotero();
     if (!Z) return;
 
@@ -1496,8 +1503,30 @@ class ZotSeekPlugin {
       return;
     }
 
-    this.logger.info(`Indexing ${selectedItems.length} selected items`);
-    await this.indexItems(selectedItems);
+    const ids: number[] = selectedItems.map((item: any) => item.id);
+    const key = `selected:${[...ids].sort((a, b) => a - b).join(',')}`;
+    await this.runOrQueueIndexing(
+      key,
+      getString('indexing-queue-job-selected', { count: ids.length }),
+      () => this.runIndexSelected(ids),
+    );
+  }
+
+  private async runIndexSelected(ids: number[]): Promise<void> {
+    const Z = getZotero();
+    if (!Z) return;
+
+    // Re-fetch at run time: a queued job may start long after the selection
+    // was captured, and items trashed or erased in the meantime must be skipped.
+    const fetched = await Z.Items.getAsync(ids);
+    const items = fetched.filter((item: any) => item && !item.deleted);
+    if (items.length === 0) {
+      this.logger.info('Selected items no longer exist, nothing to index');
+      return;
+    }
+
+    this.logger.info(`Indexing ${items.length} selected items`);
+    await this.indexItems(items);
   }
 
   /**
@@ -1505,11 +1534,6 @@ class ZotSeekPlugin {
    * Reference: https://windingwind.github.io/doc-for-zotero-plugin-dev/main/collection-operations.html
    */
   private async onIndexCollection(): Promise<void> {
-    if (this.indexing) {
-      this.showAlert(getString('indexing-alreadyInProgress'));
-      return;
-    }
-
     const Z = getZotero();
     if (!Z) return;
 
@@ -1527,30 +1551,42 @@ class ZotSeekPlugin {
       return;
     }
 
-    const items = await collectCollectionItems(
-      this.zoteroAPI,
-      collections.map((c: any) => ({ libraryId: c.libraryID, collectionId: c.id })),
+    const targets = collections.map((c: any) => ({ libraryId: c.libraryID, collectionId: c.id }));
+    const names: string[] = collections.map((c: any) => c.name);
+    const key = `collection:${targets.map(t => `${t.libraryId}/${t.collectionId}`).sort().join(',')}`;
+    const label = collections.length === 1
+      ? getString('indexing-queue-job-collection', { name: names[0] })
+      : getString('indexing-queue-job-collections', { count: collections.length });
+    await this.runOrQueueIndexing(
+      key,
+      label,
+      ({ interactive }) => this.runIndexCollection(targets, names, interactive),
     );
+  }
+
+  private async runIndexCollection(
+    targets: { libraryId: number; collectionId: number }[],
+    names: string[],
+    interactive: boolean,
+  ): Promise<void> {
+    const items = await collectCollectionItems(this.zoteroAPI, targets);
 
     if (items.length === 0) {
-      this.showAlert(collections.length === 1
-        ? getString('indexing-emptyCollection', { name: collections[0].name })
-        : getString('indexing-emptyCollections', { count: collections.length }));
+      this.showAlert(targets.length === 1
+        ? getString('indexing-emptyCollection', { name: names[0] })
+        : getString('indexing-emptyCollections', { count: targets.length }));
       return;
     }
 
     // Keep the single-collection scope shape: it is what 1.19.0 wrote, so a
     // pending marker stays readable across the upgrade, and it gives the
     // resume prompt a collection name instead of a bare count.
-    const scope: BulkScope = collections.length === 1
-      ? { type: 'collection', libraryId: collections[0].libraryID, collectionId: collections[0].id }
-      : {
-        type: 'collections',
-        collections: collections.map((c: any) => ({ libraryId: c.libraryID, collectionId: c.id })),
-      };
+    const scope: BulkScope = targets.length === 1
+      ? { type: 'collection', libraryId: targets[0].libraryId, collectionId: targets[0].collectionId }
+      : { type: 'collections', collections: targets };
 
-    const label = collections.map((c: any) => `"${c.name}"`).join(', ');
-    this.logger.info(`Indexing ${collections.length} collection(s) ${label} (${items.length} items)`);
+    const label = names.map(name => `"${name}"`).join(', ');
+    this.logger.info(`Indexing ${targets.length} collection(s) ${label} (${items.length} items)`);
     await this.indexItems(items, scope);
   }
 
@@ -1574,11 +1610,14 @@ class ZotSeekPlugin {
    */
 
   private async onIndexLibrary(): Promise<void> {
-    if (this.indexing) {
-      this.showAlert(getString('indexing-alreadyInProgress'));
-      return;
-    }
+    await this.runOrQueueIndexing(
+      'library',
+      getString('indexing-queue-job-library'),
+      ({ interactive }) => this.runIndexLibrary({ interactive }),
+    );
+  }
 
+  private async runIndexLibrary({ interactive }: { interactive: boolean }): Promise<void> {
     const Z = getZotero();
     if (!Z) return;
 
@@ -1601,13 +1640,15 @@ class ZotSeekPlugin {
     }
     this.logger.info(`Found ${items.length} items to index`);
 
-    const confirmed = Services.prompt.confirm(
-      Z.getMainWindow(),
-      getString('indexing-updateTitle'),
-      getString('indexing-updateConfirmMsg', { scope: scopeLabel })
-    );
+    if (interactive) {
+      const confirmed = Services.prompt.confirm(
+        Z.getMainWindow(),
+        getString('indexing-updateTitle'),
+        getString('indexing-updateConfirmMsg', { scope: scopeLabel })
+      );
 
-    if (!confirmed) return;
+      if (!confirmed) return;
+    }
 
     await this.indexItems(items, bulkScope);
   }
@@ -1622,11 +1663,6 @@ class ZotSeekPlugin {
    * are already there, and it is limited to the items that can gain from it.
    */
   private async onBackfillNotes(): Promise<void> {
-    if (this.indexing) {
-      this.showAlert(getString('indexing-alreadyInProgress'));
-      return;
-    }
-
     const Z = getZotero();
     if (!Z) return;
 
@@ -1642,6 +1678,30 @@ class ZotSeekPlugin {
     const libraryIds = this.getIndexScope() === 'all'
       ? this.zoteroAPI.getAllLibraries().map((lib) => lib.libraryID)
       : [Z.Libraries.userLibraryID];
+
+    await this.runOrQueueIndexing(
+      'backfill-notes',
+      getString('indexing-queue-job-notes'),
+      ({ interactive }) => this.runBackfillNotes(libraryIds, interactive),
+    );
+  }
+
+  private async runBackfillNotes(libraryIds: number[], interactive: boolean): Promise<void> {
+    const Z = getZotero();
+    if (!Z) return;
+
+    // Re-check at run time: a queued backfill may start after note indexing was
+    // switched off. Running it then would re-extract without notes, change the
+    // content hash and replace the items' existing note chunks, deleting them.
+    if (!isNoteIndexingEnabled()) {
+      this.logger.info('Notes backfill skipped: note indexing is disabled');
+      if (interactive) {
+        this.showAlert(getString('notesBackfill-disabled'));
+      } else {
+        showQuickNotification(getString('notesBackfill-disabled'), 'default');
+      }
+      return;
+    }
 
     await this.ensureStoreReady();
     if (!this.vectorStore) return;
@@ -1661,14 +1721,65 @@ class ZotSeekPlugin {
       return;
     }
 
+    if (interactive) {
+      const confirmed = Services.prompt.confirm(
+        Z.getMainWindow(),
+        getString('notesBackfill-title'),
+        getString('notesBackfill-confirmMsg', { count: candidates.length })
+      );
+      if (!confirmed) return;
+    }
+
+    await this.indexItems(candidates, { type: 'notes-backfill', libraryIds });
+  }
+
+  /**
+   * Run an indexing action now if nothing is indexing, otherwise offer to queue
+   * it. `runJob` receives `interactive: true` for an immediate run (keep the
+   * action's own confirmations) and `interactive: false` for a queued run (the
+   * queue prompt already was the confirmation).
+   */
+  private async runOrQueueIndexing(
+    key: string,
+    label: string,
+    runJob: (opts: { interactive: boolean }) => Promise<void>,
+  ): Promise<void> {
+    const makeJob = (interactive: boolean) => ({
+      key,
+      label,
+      run: () => runJob({ interactive }),
+    });
+
+    if (!this.isIndexingBusy()) {
+      await this.indexingQueue.runOrDrain(makeJob(true));
+      return;
+    }
+
+    if (this.indexingQueue.currentKey === key) {
+      this.showAlert(getString('indexing-alreadyInProgress'));
+      return;
+    }
+    if (this.indexingQueue.has(key)) {
+      showQuickNotification(getString('indexing-queue-alreadyQueued', { action: label }), 'default');
+      return;
+    }
+
+    const Z = getZotero();
+    const position = this.indexingQueue.length + 1;
     const confirmed = Services.prompt.confirm(
-      Z.getMainWindow(),
-      getString('notesBackfill-title'),
-      getString('notesBackfill-confirmMsg', { count: candidates.length })
+      Z?.getMainWindow(),
+      getString('indexing-queue-title'),
+      getString('indexing-queue-message', { action: label, position })
     );
     if (!confirmed) return;
 
-    await this.indexItems(candidates, { type: 'notes-backfill', libraryIds });
+    if (this.indexingQueue.enqueue(makeJob(false))) {
+      showQuickNotification(getString('indexing-queue-added', { action: label, position }), 'default');
+    }
+  }
+
+  private isIndexingBusy(): boolean {
+    return this.indexing || this.indexingQueue.isRunning;
   }
 
 
@@ -1758,8 +1869,16 @@ class ZotSeekPlugin {
     const progressWindow = new StableProgressWindow({
       title: getString('indexing-title'),
       cancelCallback: () => {
-        this.indexing = false;
         this.logger.info('Indexing cancelled by user');
+        const queued = this.indexingQueue.length;
+        if (queued > 0) {
+          const discard = Services.prompt.confirm(
+            Z?.getMainWindow(),
+            getString('indexing-queue-cancelTitle'),
+            getString('indexing-queue-cancelMessage', { count: queued })
+          );
+          if (discard) this.indexingQueue.clear();
+        }
       }
     });
 
@@ -2095,19 +2214,30 @@ class ZotSeekPlugin {
       }
     } finally {
       this.indexing = false;
+      void this.indexingQueue.drain();
     }
   }
 
   /**
    * Index items silently (for auto-indexing)
-   * Shows a progress indicator while running
+   * Shows a progress indicator while running.
+   *
+   * Resolves to false when other indexing is busy and the batch was not
+   * processed, so the auto-index manager can keep the items pending and retry
+   * instead of dropping them.
    */
-  private async indexItemsSilent(items: any[]): Promise<void> {
-    if (this.indexing) {
-      this.logger.debug('Indexing already in progress, skipping auto-index');
-      return;
+  private async indexItemsSilent(items: any[]): Promise<boolean> {
+    if (this.isIndexingBusy()) {
+      this.logger.debug('Indexing already in progress, deferring auto-index');
+      return false;
     }
+    // Called synchronously after the busy check: runIndexItemsSilent sets the
+    // indexing flag before its first await, so no other run can slip in between.
+    await this.runIndexItemsSilent(items);
+    return true;
+  }
 
+  private async runIndexItemsSilent(items: any[]): Promise<void> {
     if (items.length === 0) {
       return;
     }
@@ -2320,6 +2450,7 @@ class ZotSeekPlugin {
       progressWin.startCloseTimer(4000);
     } finally {
       this.indexing = false;
+      void this.indexingQueue.drain();
     }
   }
 
@@ -2372,6 +2503,11 @@ class ZotSeekPlugin {
       this.logger.debug(`isIndexed result: ${isIndexed}`);
 
       if (!isIndexed) {
+        if (this.isIndexingBusy()) {
+          this.showAlert(getString('indexing-alreadyInProgress'));
+          return;
+        }
+
         // Use Services.prompt for Zotero 8 compatibility
         const indexNow = Services.prompt.confirm(
           Z.getMainWindow(),
@@ -2459,6 +2595,7 @@ class ZotSeekPlugin {
 
   async onShutdown(): Promise<void> {
     this.logger.info('Shutting down plugin');
+    this.indexingQueue.clear();
 
     // Unregister cleanup observer
     if (this.cleanupNotifierID) {
@@ -2527,7 +2664,7 @@ class ZotSeekPlugin {
    * confirms the background re-index prompt.
    */
   public async reindexForActiveModel(): Promise<void> {
-    if (this.indexing) {
+    if (this.isIndexingBusy()) {
       this.logger.debug('reindexForActiveModel: indexing already in progress, skipping');
       return;
     }
@@ -2694,6 +2831,7 @@ class ZotSeekPlugin {
       progressWin.startCloseTimer(4000);
     } finally {
       this.indexing = false;
+      void this.indexingQueue.drain();
     }
   }
 

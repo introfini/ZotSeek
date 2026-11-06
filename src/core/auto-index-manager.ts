@@ -17,8 +17,10 @@ import { itemTitle } from '../utils/item-metadata';
 
 declare const Zotero: any;
 
-// Callback type for when items are ready to be indexed
-type IndexCallback = (items: any[]) => Promise<void>;
+// Callback type for when items are ready to be indexed. Resolving to `false`
+// means the batch was not processed because other indexing was busy; the items
+// are then kept pending and retried later instead of being dropped.
+type IndexCallback = (items: any[]) => Promise<boolean | void>;
 
 /**
  * Whether child-note text is part of the index. Module-level (not a class
@@ -44,6 +46,12 @@ export class AutoIndexManager {
 
   // Queue of items waiting to be indexed
   private pendingItems: Set<number> = new Set();
+
+  // Subset of pendingItems queued only because a child note changed. If note
+  // indexing is switched off before the batch runs, re-indexing these would
+  // extract without notes and replace (delete) their saved note chunks, so they
+  // are dropped instead. Items also queued as new items are not in this set.
+  private noteOnlyItems: Set<number> = new Set();
 
   // Delay (seconds) for the currently scheduled batch timer, when the shortest-delay
   // rule has overridden the default. Cleared once the timer fires or is stopped.
@@ -162,6 +170,7 @@ export class AutoIndexManager {
     }
     this.waitingForPDF.clear();
     this.pendingItems.clear();
+    this.noteOnlyItems.clear();
 
     this.running = false;
     this.logger.info('Auto-index monitoring stopped');
@@ -227,7 +236,11 @@ export class AutoIndexManager {
           if (parent && !parent.deleted && this.shouldProcess(parent)) {
             const verb = event === 'trash' ? 'Note trashed on' : event === 'modify' ? 'Note edited on' : 'Note added on';
             this.logger.info(`${verb}: ${itemTitle(parent)}`);
-            this.pendingItems.add(parent.id as number);
+            const parentId = parent.id as number;
+            if (!this.pendingItems.has(parentId)) {
+              this.noteOnlyItems.add(parentId);
+            }
+            this.pendingItems.add(parentId);
             this.scheduleBatch(this.noteDelaySeconds());
           }
           continue;
@@ -378,8 +391,9 @@ export class AutoIndexManager {
   private async enqueueIfReady(item: any): Promise<void> {
     const itemId = item.id;
 
-    // Already in queue
-    if (this.pendingItems.has(itemId)) {
+    // Already in queue. An item queued only for a note edit still goes through
+    // the checks below, so a genuine new-item claim takes it out of noteOnlyItems.
+    if (this.pendingItems.has(itemId) && !this.noteOnlyItems.has(itemId)) {
       return;
     }
 
@@ -393,6 +407,7 @@ export class AutoIndexManager {
     if (await this.hasPDFAttachment(item)) {
       // Ready to index
       this.clearWaitingState(itemId);
+      this.noteOnlyItems.delete(itemId);
       this.pendingItems.add(itemId);
       this.logger.info(`Queued for auto-indexing: ${itemTitle(item)}`);
       this.scheduleBatch();
@@ -489,7 +504,9 @@ export class AutoIndexManager {
 
     // Get all pending items
     const itemIds = Array.from(this.pendingItems);
+    const noteOnlyIds = new Set(itemIds.filter(id => this.noteOnlyItems.has(id)));
     this.pendingItems.clear();
+    this.noteOnlyItems.clear();
 
     try {
       // Get Zotero items
@@ -497,12 +514,45 @@ export class AutoIndexManager {
       // !item.deleted: an item trashed during the quiet period has already had
       // its embeddings deleted by the cleanup observer, and re-indexing it here
       // would write them straight back, leaving a trashed item searchable.
-      const validItems = items.filter((item: any) =>
+      let validItems = items.filter((item: any) =>
         item && !item.deleted && !item.isNote() && !item.isAttachment());
+
+      // Note indexing may have been switched off since a note edit queued its
+      // parent (during the quiet period or while a busy batch was deferred).
+      // Re-indexing it now would extract without notes and replace the saved
+      // note chunks, deleting them. Drop note-only work; keep new-item work.
+      if (noteOnlyIds.size > 0 && !isNoteIndexingEnabled()) {
+        const before = validItems.length;
+        validItems = validItems.filter((item: any) => !noteOnlyIds.has(item.id as number));
+        const dropped = before - validItems.length;
+        if (dropped > 0) {
+          this.logger.info(`Note indexing is off, skipped ${dropped} note-only auto-index item(s)`);
+        }
+      }
 
       if (validItems.length > 0) {
         // Trigger indexing via callback
-        await this.indexCallback(validItems);
+        const processed = await this.indexCallback(validItems);
+        if (processed === false) {
+          // Another indexing run is busy. Keep the items pending and retry after
+          // the usual delay, so new items and note edits are not silently lost.
+          if (this.running) {
+            for (const item of validItems) {
+              const id = item.id as number;
+              if (this.pendingItems.has(id)) {
+                // Re-added while we were busy: it stays note-only only if both
+                // the deferred claim and the new one came from note edits.
+                if (!noteOnlyIds.has(id)) this.noteOnlyItems.delete(id);
+              } else {
+                this.pendingItems.add(id);
+                if (noteOnlyIds.has(id)) this.noteOnlyItems.add(id);
+              }
+            }
+            this.logger.debug(`Indexing busy, re-queued ${validItems.length} item(s) for auto-indexing`);
+            this.scheduleBatch();
+          }
+          return;
+        }
         this.logger.info(`Auto-indexed ${validItems.length} item(s)`);
       }
     } catch (error: any) {
