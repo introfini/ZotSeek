@@ -19,8 +19,9 @@ const PLUGIN_ID = 'zotseek@zotero.org';
 
 export class ToolbarButton {
   private logger: Logger;
-  private buttonId = 'zotseek-toolbar-button';
-  private separatorId = 'zotseek-toolbar-separator';
+  // Classes rather than ids: on Zotero 11 a window holds one button per library tab
+  private buttonClass = 'zotseek-toolbar-button';
+  private separatorClass = 'zotseek-toolbar-separator';
   private readerButtonClass = 'zotseek-reader-button';
   private menuRegistrationId: string | null = null;
   private iconCache: Record<string, string> = {};
@@ -30,61 +31,62 @@ export class ToolbarButton {
   }
 
   /**
-   * Add toolbar button to the main window
+   * Add the toolbar button to every items toolbar in the window that lacks one.
+   * Zotero 11 gives each library tab its own toolbar; only the window's first
+   * keeps the plain ids, the others carry them as classes.
    */
   public add(window: any): void {
     try {
       const doc = window.document;
 
-      // Check if button already exists
-      if (doc.getElementById(this.buttonId)) {
-        this.logger.debug('Toolbar button already exists');
-        return;
-      }
+      // Find the items toolbars (same approach as zotero-addons)
+      const toolbars = doc.querySelectorAll('#zotero-items-toolbar, .zotero-items-toolbar');
 
-      // Find the items toolbar (same approach as zotero-addons)
-      const toolbar = doc.querySelector('#zotero-items-toolbar');
-
-      if (!toolbar) {
+      if (!toolbars.length) {
         this.logger.warn('Could not find zotero-items-toolbar');
         return;
       }
 
-      // Clone an existing toolbar button to inherit proper styling (like zotero-addons does)
-      const lookupNode = toolbar.querySelector('#zotero-tb-lookup');
+      for (const toolbar of toolbars) {
+        if (toolbar.querySelector(`.${this.buttonClass}`)) continue;
 
-      if (!lookupNode) {
-        this.logger.warn('Could not find lookup button to clone');
-        // Fallback to creating button from scratch
-        const button = this.createButtonFallback(doc);
+        // Clone an existing toolbar button to inherit proper styling (like zotero-addons does)
+        const lookupNode = toolbar.querySelector('#zotero-tb-lookup, .zotero-tb-lookup');
+
+        if (!lookupNode) {
+          this.logger.warn('Could not find lookup button to clone');
+          // Fallback to creating button from scratch
+          this.insertButton(toolbar, this.createButtonFallback(doc));
+          continue;
+        }
+
+        // Clone the lookup button to get proper styling, minus what makes it the lookup button
+        const button = lookupNode.cloneNode(true) as any;
+        button.removeAttribute('id');
+        button.classList.remove('zotero-tb-lookup');
+        button.classList.add(this.buttonClass);
+
+        // Update the cloned button's attributes
+        button.setAttribute('label', 'SS');
+        button.setAttribute('tooltiptext', getString('toolbar-openZotSeek'));
+        button.setAttribute('command', '');
+        button.setAttribute('oncommand', '');
+        button.setAttribute('mousedown', '');
+        button.setAttribute('onmousedown', '');
+
+        // Set the icon (20x20 toolbar version)
+        button.style.listStyleImage = 'url("chrome://zotseek/content/icons/icon-toolbar.svg")';
+
+        // Add click handler
+        button.addEventListener('click', () => {
+          this.handleClick();
+        });
+
+        // Insert at the left of the toolbar
         this.insertButton(toolbar, button);
-        return;
+
+        this.logger.info('Toolbar button added successfully');
       }
-
-      // Clone the lookup button to get proper styling
-      const button = lookupNode.cloneNode(true) as any;
-
-      // Update the cloned button's attributes
-      button.setAttribute('id', this.buttonId);
-      button.setAttribute('label', 'SS');
-      button.setAttribute('tooltiptext', getString('toolbar-openZotSeek'));
-      button.setAttribute('command', '');
-      button.setAttribute('oncommand', '');
-      button.setAttribute('mousedown', '');
-      button.setAttribute('onmousedown', '');
-
-      // Set the icon (20x20 toolbar version)
-      button.style.listStyleImage = 'url("chrome://zotseek/content/icons/icon-toolbar.svg")';
-
-      // Add click handler
-      button.addEventListener('click', () => {
-        this.handleClick();
-      });
-
-      // Insert at the left of the toolbar
-      this.insertButton(toolbar, button);
-
-      this.logger.info('Toolbar button added successfully');
     } catch (error) {
       this.logger.error('Failed to add toolbar button:', error);
     }
@@ -96,10 +98,9 @@ export class ToolbarButton {
   private createButtonFallback(doc: any): any {
     const button = doc.createXULElement('toolbarbutton');
 
-    button.id = this.buttonId;
     button.setAttribute('label', 'SS');
     button.setAttribute('tooltiptext', getString('toolbar-openZotSeek'));
-    button.setAttribute('class', 'zotero-tb-button');
+    button.setAttribute('class', `zotero-tb-button ${this.buttonClass}`);
 
     // Set icon (20x20 toolbar version)
     button.style.listStyleImage = 'url("chrome://zotseek/content/icons/icon-toolbar.svg")';
@@ -117,11 +118,11 @@ export class ToolbarButton {
    */
   private insertButton(toolbar: any, button: any): void {
     const doc = toolbar.ownerDocument;
-    const searchBox = toolbar.querySelector('#zotero-tb-search');
-    
+    const searchBox = toolbar.querySelector('#zotero-tb-search, .zotero-tb-search');
+
     // Create a separator to visually separate from search
     const separator = doc.createXULElement('toolbarseparator');
-    separator.id = this.separatorId;
+    separator.classList.add(this.separatorClass);
     
     if (searchBox) {
       // Insert button, then separator before search box
@@ -146,19 +147,13 @@ export class ToolbarButton {
   }
 
   /**
-   * Remove the toolbar button and separator
+   * Remove the toolbar buttons and separators from every items toolbar in the window
    */
   public remove(window: any): void {
     try {
       const doc = window.document;
-      const button = doc.getElementById(this.buttonId);
-      const separator = doc.getElementById(this.separatorId);
-
-      if (button) {
-        button.remove();
-      }
-      if (separator) {
-        separator.remove();
+      for (const el of doc.querySelectorAll(`.${this.buttonClass}, .${this.separatorClass}`)) {
+        el.remove();
       }
       this.logger.info('Toolbar button removed');
     } catch (error) {
@@ -169,10 +164,10 @@ export class ToolbarButton {
   /**
    * Register menu item in Tools menu using Zotero MenuManager API
    */
-  public registerToolsMenu(window: any): void {
+  public registerToolsMenu(): void {
     try {
-      // Register the FTL localization file
-      window.MozXULElement.insertFTLIfNeeded('zotseek-menu.ftl');
+      // MenuManager adds the item to every main window; its zotseek-menu.ftl
+      // strings are linked into each window by the per-window UI set-up
 
       // Check if MenuManager is available (Zotero 8+)
       if (!Zotero.MenuManager) {
