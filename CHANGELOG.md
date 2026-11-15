@@ -2,7 +2,7 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
-## [Unreleased]
+## [1.22.7] - 2026-11-15
 
 ### Fixed
 - ZotSeek's entries in the item and collection context menus, its toolbar button and the name of its entry in the Tools menu now appear in every Zotero window. They were added once, when Zotero started, to the window open at that moment, so on macOS a main window that was closed and reopened from the Dock while Zotero kept running came back without them, and the Tools entry with no name, until Zotero was restarted. Zotero 11, currently in beta, lets you open several windows and several library tabs; each window now gets the menus and each library tab its own toolbar button (#70). The ZotSeek column is also kept up to date in every window, where it used to fill in only in the one used last and stay blank in the others until you scrolled. Indexing, search and the MCP server were not affected.
