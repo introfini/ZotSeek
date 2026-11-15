@@ -30,6 +30,7 @@ import { searchDialogWithVTable } from './ui/search-dialog-with-vtable';
 import { similarDocumentsWrapper } from './ui/similar-documents-wrapper';
 import { toolbarButton } from './ui/toolbar-button';
 import { shouldShowCollectionMenu } from './ui/collection-menu';
+import { PerWindowUI, hasLibraryView, isLibraryTabEvent } from './ui/per-window-ui';
 import { itemTreeIndexColumn } from './ui/item-tree-column';
 import { preferencesManager } from './ui/preferences';
 import { identityFromItem, libraryKeyFromLocalID, localItemIDFromIdentity } from './core/identity-resolver';
@@ -427,7 +428,23 @@ class ZotSeekPlugin {
   private initialized = false;
   private indexing = false;
   private cleanupNotifierID: string | null = null;
-  private collectionMenuPopupHandler: ((event: Event) => void) | null = null;
+  private tabNotifierID: string | null = null;
+
+  // Context menus, toolbar button and Tools-menu strings live in each main
+  // window's DOM, so every window gets its own set (issue #70). A closure
+  // rather than a method: see pitfall #6 on new ZotSeekPlugin methods.
+  private windowUI = new PerWindowUI<any>(
+    (win) => {
+      win.MozXULElement?.insertFTLIfNeeded('zotseek-menu.ftl');
+      const removeMenus = this.registerWithXUL(win);
+      toolbarButton.add(win);
+      return () => {
+        removeMenus();
+        toolbarButton.remove(win);
+      };
+    },
+    (error: any, _win, phase) => this.logger.error(`Window UI ${phase} failed: ${error?.message || error}`)
+  );
 
   // Hooks for bootstrap.js
   public hooks = {
@@ -529,10 +546,6 @@ class ZotSeekPlugin {
     // Register cleanup observer for delete/trash events (always active, not gated on autoIndex)
     this.registerCleanupObserver();
 
-    // Register context menu using Zotero 8 MenuManager API (preferred)
-    // Falls back to XUL injection for older versions
-    this.registerContextMenu();
-
     // Register preference pane
     this.registerPreferencePane();
 
@@ -554,13 +567,23 @@ class ZotSeekPlugin {
     // Local MCP/REST endpoints for AI agents (opt-in via preferences)
     initServerManager();
 
-    // Add toolbar button for semantic search
-    const win = Z.getMainWindow();
-    if (win) {
-      toolbarButton.add(win);
-      toolbarButton.registerToolsMenu(win);
-      this.logger.info('Toolbar button and Tools menu added');
-    }
+    // Context menus, toolbar button and Tools-menu strings, in every main
+    // window open now and in each one that loads later (issue #70)
+    toolbarButton.registerToolsMenu();
+    this.windowUI.start(Z.getMainWindows().filter(hasLibraryView));
+
+    // Zotero 11 reports only a window's first library view to plugins, and
+    // every library tab has its own items toolbar, so later tabs are found
+    // through tab events instead
+    this.tabNotifierID = Z.Notifier.registerObserver({
+      notify: (event: string, type: string, ids: unknown[], extraData: any) => {
+        if (!isLibraryTabEvent(event, type, ids, extraData)) return;
+        for (const win of Z.getMainWindows().filter(hasLibraryView)) {
+          toolbarButton.add(win);
+        }
+      },
+    }, ['tab'], 'zotseek-library-tabs');
+    this.logger.info('Window UI set up');
 
     // Register reader toolbar button
     await toolbarButton.registerReaderToolbar();
@@ -966,12 +989,12 @@ class ZotSeekPlugin {
 
   onMainWindowLoad(window: Window): void {
     this.logger.info('Main window loaded');
-    // Menu is registered via MenuManager in onStartup, no need to re-register here
+    this.windowUI.windowLoaded(window);
   }
 
   onMainWindowUnload(window: Window): void {
     this.logger.info('Main window unloading');
-    // MenuManager handles cleanup automatically
+    this.windowUI.windowUnloaded(window);
   }
 
   /**
@@ -996,33 +1019,33 @@ class ZotSeekPlugin {
   }
 
   /**
-   * Register context menu items
-   * Note: MenuManager API requires l10nID (localization) for labels.
-   * Using XUL injection for now as it works with plain text labels.
-   * Reference: https://www.zotero.org/support/dev/zotero_8_for_developers
+   * Add ZotSeek's entries to one main window's item and collection context
+   * menus, and return a function that removes them again.
+   * Note: MenuManager API requires l10nID (localization) for labels, so these
+   * use XUL injection with plain text labels.
    */
-  private registerContextMenu(): void {
-    const Z = getZotero();
-    if (!Z) return;
-
-    // Use XUL injection - works reliably with plain text labels
-    // MenuManager API requires l10nID localization which we haven't set up yet
-    this.registerWithXUL(Z);
-  }
-
-  /**
-   * Register menus using XUL element injection
-   */
-  private registerWithXUL(Z: any): void {
+  private registerWithXUL(win: any): () => void {
     this.logger.info('Registering menus via XUL injection');
 
-    const win = Z.getMainWindow();
-    if (!win) {
-      this.logger.warn('No main window available for XUL injection');
-      return;
-    }
-
     const doc = win.document;
+    let collectionMenuPopupHandler: ((event: Event) => void) | null = null;
+    const remove = () => {
+      const ids = [
+        'zotseek-find-similar',
+        'zotseek-submenu',
+        'zotseek-separator',
+        'zotseek-collection-submenu',
+        'zotseek-collection-separator',
+      ];
+      for (const id of ids) {
+        doc.getElementById(id)?.remove();
+      }
+      if (collectionMenuPopupHandler) {
+        doc.getElementById('zotero-collectionmenu')
+          ?.removeEventListener('popupshowing', collectionMenuPopupHandler);
+      }
+      this.logger.debug('XUL elements removed');
+    };
 
     // Collection-pane menu (issue #61). Registered before the item menu so a
     // missing item menu cannot take it down with it.
@@ -1071,26 +1094,26 @@ class ZotSeekPlugin {
       // show on libraries, feeds, saved searches and the trash too. The
       // selection is final by now: Zotero awaits buildCollectionContextMenu()
       // before it opens the popup.
-      this.collectionMenuPopupHandler = (event: Event) => {
+      collectionMenuPopupHandler = (event: Event) => {
         if (event.target !== collectionMenu) return;
-        const hidden = !shouldShowCollectionMenu((win as any).ZoteroPane);
+        const hidden = !shouldShowCollectionMenu(win.ZoteroPane);
         collectionSeparator.hidden = hidden;
         collectionSubmenu.hidden = hidden;
       };
-      collectionMenu.addEventListener('popupshowing', this.collectionMenuPopupHandler);
+      collectionMenu.addEventListener('popupshowing', collectionMenuPopupHandler);
     }
 
     const itemMenu = doc.getElementById('zotero-itemmenu');
 
     if (!itemMenu) {
       this.logger.warn('Could not find zotero-itemmenu');
-      return;
+      return remove;
     }
 
     // Check if already registered
     if (doc.getElementById('zotseek-find-similar')) {
       this.logger.debug('Context menu already registered');
-      return;
+      return remove;
     }
 
     // Create separator
@@ -1170,6 +1193,7 @@ class ZotSeekPlugin {
     itemMenu.appendChild(submenu);
 
     this.logger.info('Context menu registered successfully');
+    return remove;
   }
 
   /**
@@ -2475,13 +2499,13 @@ class ZotSeekPlugin {
     // Unregister local MCP/REST endpoints and pref observer
     shutdownServerManager();
 
-    // Remove XUL-injected menu elements and toolbar button
+    // Remove the context menus and toolbar buttons from every main window
     const Z = getZotero();
-    const win = Z?.getMainWindow();
-    if (win) {
-      this.removeXULElements(win);
-      toolbarButton.remove(win);
+    if (this.tabNotifierID) {
+      Z?.Notifier.unregisterObserver(this.tabNotifierID);
+      this.tabNotifierID = null;
     }
+    this.windowUI.stop();
 
     // Unregister Tools menu and reader toolbar
     toolbarButton.unregisterToolsMenu();
@@ -2493,30 +2517,6 @@ class ZotSeekPlugin {
     if (this.vectorStore) {
       await this.vectorStore.close();
     }
-  }
-
-  /**
-   * Remove XUL-injected menu elements (fallback cleanup)
-   */
-  private removeXULElements(window: Window): void {
-    const doc = window.document;
-    const ids = [
-      'zotseek-find-similar',
-      'zotseek-submenu',
-      'zotseek-separator',
-      'zotseek-collection-submenu',
-      'zotseek-collection-separator',
-    ];
-    for (const id of ids) {
-      const el = doc.getElementById(id);
-      if (el) el.remove();
-    }
-    if (this.collectionMenuPopupHandler) {
-      doc.getElementById('zotero-collectionmenu')
-        ?.removeEventListener('popupshowing', this.collectionMenuPopupHandler);
-      this.collectionMenuPopupHandler = null;
-    }
-    this.logger.debug('XUL elements removed');
   }
 
   /**
