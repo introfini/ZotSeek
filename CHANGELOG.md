@@ -2,6 +2,11 @@
 
 All notable changes to ZotSeek - Semantic Search for Zotero will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Disabling, removing or updating ZotSeek no longer writes `ItemTreeColumnManager: Can't remove unknown option 'zotseek-index-status'` to Zotero's error console. ZotSeek asked Zotero to remove its column under the name it had registered it with, but Zotero stores a plugin's column under a name prefixed with the plugin's ID. The column was removed all the same, by Zotero's own cleanup once the plugin had shut down.
+
 ## [1.22.6] - 2026-10-08
 
 ### Fixed

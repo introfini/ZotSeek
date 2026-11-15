@@ -89,11 +89,12 @@ export class ItemTreeIndexColumn {
       });
 
       // registerColumns returns an array of registered dataKeys (or false per
-      // failed registration). Treat any truthy entry as success.
+      // failed registration). Zotero prefixes each with the plugin ID, so the
+      // returned key, not COLUMN_DATA_KEY, is what unregisterColumns knows.
       const flat = Array.isArray(registered) ? registered : [registered];
-      const success = flat.some((v: any) => v);
-      this.registeredKey = success ? COLUMN_DATA_KEY : null;
-      if (!success) {
+      const key = flat.find((v: any) => v);
+      this.registeredKey = key ? String(key) : null;
+      if (!key) {
         this.logger.warn(`registerColumns returned ${JSON.stringify(registered)} for ${COLUMN_DATA_KEY}`);
         return;
       }
