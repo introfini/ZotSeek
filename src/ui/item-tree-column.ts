@@ -16,6 +16,7 @@
 import { Logger } from '../utils/logger';
 import { IVectorStore, ItemIndexStatus } from '../core/storage-factory';
 import { identityFromItem, StableIdentity } from '../core/identity-resolver';
+import { itemsViewsOf } from './per-window-ui';
 
 declare const Zotero: any;
 
@@ -322,25 +323,30 @@ export class ItemTreeIndexColumn {
    *
    * Uses tree.invalidate() instead of refreshAndMaintainSelection() so
    * scroll position is preserved — fixes #34.
+   *
+   * Repaints every items view in every main window, since Zotero 11 can show
+   * the column in several windows and library tabs at once (#70).
    */
   private refreshTree(): void {
     if (this.refreshTimer) return;
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      try {
-        const win = Zotero.getMainWindow();
-        const itemsView = win?.ZoteroPane?.itemsView;
-        const tree = itemsView?.tree;
-        if (tree && typeof tree.invalidate === 'function') {
-          // Clear Zotero's internal row cache so dataProvider is re-called
-          // for visible rows. Without this, invalidate() re-renders from
-          // stale cached cell text. This is the same pattern Zotero uses
-          // internally for preference-driven repaints.
-          if (itemsView._rowCache) itemsView._rowCache = {};
-          tree.invalidate();
+      for (const win of Zotero.getMainWindows?.() || []) {
+        for (const itemsView of itemsViewsOf(win)) {
+          try {
+            const tree = itemsView.tree;
+            if (tree && typeof tree.invalidate === 'function') {
+              // Clear Zotero's internal row cache so dataProvider is re-called
+              // for visible rows. Without this, invalidate() re-renders from
+              // stale cached cell text. This is the same pattern Zotero uses
+              // internally for preference-driven repaints.
+              if (itemsView._rowCache) itemsView._rowCache = {};
+              tree.invalidate();
+            }
+          } catch {
+            // Non-critical — the next user interaction will repaint anyway.
+          }
         }
-      } catch {
-        // Non-critical — the next user interaction will repaint anyway.
       }
     }, 500);
   }

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { PerWindowUI, hasLibraryView, isLibraryTabEvent } from '../src/ui/per-window-ui';
+import { PerWindowUI, hasLibraryView, isLibraryTabEvent, itemsViewsOf } from '../src/ui/per-window-ui';
 
 type Win = { name: string };
 
@@ -98,6 +98,26 @@ describe('hasLibraryView', () => {
   test('a window without ZoteroPane has none', () => {
     assert.equal(hasLibraryView({}), false);
     assert.equal(hasLibraryView(null), false);
+  });
+});
+
+describe('itemsViewsOf', () => {
+  const a = { name: 'tree a' };
+  const b = { name: 'tree b' };
+
+  test('a Zotero 10 window has the one items view of its pane', () => {
+    assert.deepEqual(itemsViewsOf({ ZoteroPane: { itemsView: a } }), [a]);
+  });
+
+  test('a Zotero 11 window has one per library tab, not only the active one', () => {
+    const pane = { itemsView: a, libraryViews: [{ itemsView: a }, { itemsView: b }] };
+    assert.deepEqual(itemsViewsOf({ ZoteroPane: pane }), [a, b]);
+  });
+
+  test('skips a library tab that is unloaded, and a window with no library tab', () => {
+    assert.deepEqual(itemsViewsOf({ ZoteroPane: { libraryViews: [{ itemsView: null }, { itemsView: b }] } }), [b]);
+    assert.deepEqual(itemsViewsOf({ ZoteroPane: { itemsView: null, libraryViews: [] } }), []);
+    assert.deepEqual(itemsViewsOf({}), []);
   });
 });
 

@@ -73,6 +73,20 @@ export function hasLibraryView(win: any): boolean {
 }
 
 /**
+ * Every loaded items view in a main window. Zotero 11 has one per library
+ * tab (`ZoteroPane.libraryViews`), and `ZoteroPane.itemsView` is only the
+ * active one; Zotero 10 has just `ZoteroPane.itemsView`.
+ */
+export function itemsViewsOf(win: any): any[] {
+  const pane = win?.ZoteroPane;
+  if (!pane) return [];
+  const views = Array.isArray(pane.libraryViews)
+    ? pane.libraryViews.map((view: any) => view?.itemsView)
+    : [pane.itemsView];
+  return views.filter(Boolean);
+}
+
+/**
  * Whether a Zotero.Notifier event means a library tab may have a new view.
  * Zotero 11 tells plugins only about a window's first library view, so the
  * toolbar of every later library tab is found through these events instead.
