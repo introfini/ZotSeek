@@ -51,6 +51,9 @@ pref("extensions.zotero.zotseek.devMode", false);
 // exposes read-only semantic search on Zotero's local HTTP server (23119).
 pref("extensions.zotero.zotseek.mcpServer.enabled", false);
 
+// Other plugins may embed with the active model. Opt-in.
+pref("extensions.zotero.zotseek.pluginEmbedding.enabled", false);
+
 // Active embedding model (short id from the model registry).
 // Change requires re-indexing the library with the new model.
 pref("extensions.zotero.zotseek.embeddingModel", "nomic-embed-text-v1.5");

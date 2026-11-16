@@ -476,6 +476,7 @@ class PreferencesManager {
       autoIndex: Z.Prefs.get('zotseek.autoIndex', true) ?? false,
       autoIndexDelay: Z.Prefs.get('zotseek.autoIndexDelay', true) ?? 10,
       mcpServer: Z.Prefs.get('zotseek.mcpServer.enabled', true) ?? false,
+      pluginEmbedding: Z.Prefs.get('zotseek.pluginEmbedding.enabled', true) ?? false,
       indexScope: Z.Prefs.get('zotseek.indexScope', true) || 'user',
       autoCompact: Z.Prefs.get('zotseek.autoCompact', true) ?? true,
       indexNotes: Z.Prefs.get('zotseek.indexNotes', true) === true,
@@ -497,6 +498,7 @@ class PreferencesManager {
     this.setCheckboxValue('zotseek-pref-excludeBooks', prefs.excludeBooks);
     this.setCheckboxValue('zotseek-pref-autoIndex', prefs.autoIndex);
     this.setCheckboxValue('zotseek-pref-mcpServer', prefs.mcpServer);
+    this.setCheckboxValue('zotseek-pref-pluginEmbedding', prefs.pluginEmbedding);
     this.setCheckboxValue('zotseek-pref-autoCompact', prefs.autoCompact);
     this.setCheckboxValue('zotseek-pref-indexNotes', prefs.indexNotes);
 
@@ -714,6 +716,14 @@ class PreferencesManager {
         // Reload auto-index manager to apply new setting
         autoIndexManager.reload();
         this.updateAutoIndexDelayVisibility(checked);
+      });
+    }
+
+    const pluginEmbeddingCheckbox = doc.getElementById('zotseek-pref-pluginEmbedding') as any;
+    if (pluginEmbeddingCheckbox) {
+      pluginEmbeddingCheckbox.addEventListener('command', () => {
+        Z.Prefs.set('zotseek.pluginEmbedding.enabled', pluginEmbeddingCheckbox.checked, true);
+        this.logger.info(`Plugin embedding allowed changed to: ${pluginEmbeddingCheckbox.checked}`);
       });
     }
 

@@ -477,6 +477,19 @@
 <html:details class="zotseek-prefs-group" id="zotseek-group-maintenance">
   <html:summary data-l10n-id="zotseek-prefs-group-maintenance">Integrations &amp; Maintenance</html:summary>
 
+<!-- Other plugins may use the embedding models (opt-in) -->
+<groupbox>
+  <label><html:h2 data-l10n-id="zotseek-pref-pluginEmbedding">Other plugins</html:h2></label>
+  <checkbox id="zotseek-pref-pluginEmbedding"
+            label="Let other plugins use ZotSeek's embedding models"
+            data-l10n-id="zotseek-pref-pluginEmbeddingLabel"
+            native="true"
+            checked="false" />
+  <html:p style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    <html:span data-l10n-id="zotseek-pref-pluginEmbeddingDesc">Other installed Zotero plugins may then turn text into vectors with the active model. They see the model's name and the vectors, not your library or index.</html:span>
+  </html:p>
+</groupbox>
+
 <!-- AI Agent Access (local MCP server) -->
 <groupbox>
   <label><html:h2 data-l10n-id="zotseek-pref-mcpServer">AI Agent Access</html:h2></label>
