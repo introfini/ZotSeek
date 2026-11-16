@@ -275,6 +275,22 @@ zotseek-indexing-clearingExisting = 正在清除现有索引...
 zotseek-indexing-existingCleared = ✓ 现有索引已清除
 zotseek-indexing-loading = 加载中...
 zotseek-indexing-alreadyInProgress = 索引已在进行中...
+zotseek-indexing-queue-title = ZotSeek - 排队索引
+zotseek-indexing-queue-message = 索引已在进行中。
+
+    是否将“{ $action }”加入队列？它将在当前索引完成后按顺序自动开始。（队列位置：{ $position }）
+zotseek-indexing-queue-added = 已将“{ $action }”加入队列（第 { $position } 位）。将在当前索引完成后开始。
+zotseek-indexing-queue-alreadyQueued = “{ $action }”已在队列中。
+zotseek-indexing-queue-cancelTitle = ZotSeek - 取消索引
+zotseek-indexing-queue-cancelMessage = 有 { $count } 个排队的索引任务正在等待。
+
+    是否一并放弃？选择“否”将保留它们，并在本次索引停止后开始。
+zotseek-indexing-queue-job-selected = 索引所选条目（{ $count }）
+zotseek-indexing-queue-job-collection = 索引合集“{ $name }”
+zotseek-indexing-queue-job-collections = 索引 { $count } 个合集
+zotseek-indexing-queue-job-library = 更新文献库索引
+zotseek-indexing-queue-job-notes = 为已有条目添加笔记文本
+zotseek-indexing-queue-job-rebuild = 重建索引
 zotseek-indexing-selectItems = 请选择要索引的条目。
 zotseek-indexing-selectCollection = 请先选择一个合集。
 
