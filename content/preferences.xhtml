@@ -398,6 +398,20 @@
     Books lack paper sections and are too long to index well.
   </html:p>
 
+  <!-- Shown only while SeekBook is installed and enabled (see setupSeekBookOption). -->
+  <vbox id="zotseek-seekbook-option" hidden="true">
+  <checkbox id="zotseek-pref-includeSeekBook"
+            label="Include book results from SeekBook"
+            data-l10n-id="zotseek-pref-includeSeekBook"
+            native="true"
+            disabled="true"
+            style="margin-top: 10px;" />
+  <html:p data-l10n-id="zotseek-pref-includeSeekBookDesc" style="color: var(--zotseek-text-secondary); font-size: 11px; margin: 4px 0 0 24px;">
+    SeekBook keeps its own full-text index of books; its passages are merged into ZotSeek's results by rank.
+  </html:p>
+  <html:p id="zotseek-seekbook-status" style="font-size: 11px; opacity: .8; margin: 2px 0 0 24px;"></html:p>
+  </vbox>
+
   <html:div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
     <html:label data-l10n-id="zotseek-pref-excludeTag" for="zotseek-pref-excludeTag" style="color: var(--zotseek-text-primary);">Exclude tag</html:label>
     <html:input type="text"

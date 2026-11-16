@@ -8,6 +8,7 @@
  * All operations are read-only adapters over the existing search engines.
  */
 import { searchEngine, SearchResult } from '../core/search-engine';
+import type { ExternalResultFields } from '../core/external-providers';
 import { HybridSearchEngine, HybridSearchResult, SearchMode } from '../core/hybrid-search';
 import { getVectorStore } from '../core/storage-factory';
 import { getActiveModelId } from '../core/model-registry';
@@ -27,6 +28,12 @@ export interface MatchedChunk {
   noteKey?: string;
   /** Key of the annotation the excerpt came from ('annotation' only). */
   annotationKey?: string;
+  /** External providers (SeekBook, textSource 'book'): the PDF the page refers to, and more location. */
+  attachmentKey?: string;
+  attachmentTitle?: string;
+  pageEnd?: number;
+  pageLabel?: string | null;
+  chapter?: string | null;
 }
 
 export interface ResultLinks {
@@ -134,16 +141,23 @@ export function componentScores(r: {
 }
 
 function chunkOf(
-  r: { chunkText?: string; pageNumber?: number; textSource?: string; noteKey?: string; annotationKey?: string }
+  r: { chunkText?: string; pageNumber?: number; textSource?: string; noteKey?: string; annotationKey?: string } & ExternalResultFields
 ): MatchedChunk | null {
   if (!r.chunkText && r.pageNumber === undefined) return null;
-  return {
+  const chunk: MatchedChunk = {
     snippet: r.chunkText || undefined,
     page: r.pageNumber,
     textSource: r.textSource || undefined,
     noteKey: r.noteKey || undefined,
     annotationKey: r.annotationKey || undefined,
   };
+  if (r.externalSource) {
+    Object.assign(chunk, {
+      attachmentKey: r.attachmentKey, attachmentTitle: r.attachmentTitle, pageEnd: r.pageEnd,
+      pageLabel: r.pageLabel ?? null, chapter: r.chapter ?? null,
+    });
+  }
+  return chunk;
 }
 
 function libraryKeyForItemId(itemId: number | undefined): string | null {
@@ -193,7 +207,9 @@ async function buildLinks(
       ? Zotero.Groups.getLibraryIDFromGroupID(Number(libraryKey!.slice('group:'.length)))
       : Zotero.Libraries.userLibraryID;
     const item = Zotero.Items.getByLibraryAndKey(libraryId, itemKey);
-    const att = item ? await item.getBestAttachment() : null;
+    // External book hits name their PDF; page numbers only hold within that file.
+    const att = annotation?.attachmentKey ? Zotero.Items.getByLibraryAndKey(libraryId, annotation.attachmentKey)
+      : item ? await item.getBestAttachment() : null;
     if (att && (typeof att.isPDFAttachment !== 'function' || att.isPDFAttachment())) {
       const pageSuffix = page ? `?page=${page}` : '';
       links.openPdf = `zotero://open-pdf/${prefix}/items/${att.key}${pageSuffix}`;

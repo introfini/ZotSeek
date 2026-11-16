@@ -27,6 +27,7 @@ import {
   chooseAnnotationEvidence,
 } from './keyword-annotations';
 import { itemDate, itemTitle } from '../utils/item-metadata';
+import { mergeExternalResults } from './external-providers';
 
 declare const Zotero: any;
 
@@ -242,11 +243,12 @@ export class HybridSearchEngine {
 
     this.logger.info(`Hybrid search: "${query.substring(0, 50)}${query.length > 50 ? '...' : ''}"`);
 
-    // Handle mode overrides
+    // Handle mode overrides. Every return goes through mergeExternalResults, which
+    // adds hits from external index providers (SeekBook) when enabled, else passes through.
     if (opts.mode === 'semantic') {
-      return this.semanticOnlySearch(query, opts);
+      return mergeExternalResults(await this.semanticOnlySearch(query, opts), query, opts);
     } else if (opts.mode === 'keyword') {
-      return this.keywordOnlySearch(query, opts);
+      return mergeExternalResults(await this.keywordOnlySearch(query, opts), query, opts);
     }
 
     // Embed the query once. The semantic leg needs it, and so does the keyword
@@ -315,7 +317,7 @@ export class HybridSearchEngine {
       this.populateBackfilledChunkText(top, backfilled),
     ]);
 
-    return top;
+    return mergeExternalResults(top, query, opts);
   }
 
   /**

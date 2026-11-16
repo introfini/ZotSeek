@@ -6,6 +6,7 @@
  */
 
 import { SearchResultsTable } from './results-table';
+import type { ExternalResultFields } from '../core/external-providers';
 import { SearchEngine, searchEngine, SearchResult } from '../core/search-engine';
 import { HybridSearchEngine, HybridSearchResult, SearchMode } from '../core/hybrid-search';
 import { ZoteroAPI } from '../utils/zotero-api';
@@ -1301,12 +1302,14 @@ export class ZotSeekDialogVTable {
         this.logger.warn(`Note ${noteKey} of item ${itemId} is gone; selecting the item instead`);
       }
 
-      // Select the item in the library
-      this.zoteroAPI.selectItem(itemId);
+      // Select the item in the library. Awaited: the selection switches to the
+      // library tab when it completes, which would otherwise land on top of the
+      // reader opened below (seen with book results, whose PDF lookup is synchronous).
+      await this.zoteroAPI.selectItem(itemId);
 
       // If we have a page number, open PDF to that page
       if (pageNumber) {
-        await this.zoteroAPI.openPDFToPage(itemId, pageNumber);
+        await this.zoteroAPI.openPDFToPage(itemId, pageNumber, annotation?.attachmentKey);
         this.logger.info(`Opened item ${itemId} to page ${pageNumber}`);
       }
 
