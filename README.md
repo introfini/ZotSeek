@@ -40,6 +40,7 @@ Find similar papers by **meaning**, not just keywords. 100% local, no data leave
 - ⏸️ **Pause & Cancel** - Pause or cancel long-running indexing operations at any time
 - 💾 **Crash-Resilient** - Checkpoint saving every 10 items, **auto-resume on next startup** if a bulk run was interrupted, worker recovery on sleep/wake, skips problematic chunks automatically
 - 🔌 **Plugin API** - Other Zotero plugins can [call ZotSeek's search programmatically](docs/API.md)
+- 🌐 **REST API** - Other plugins and scripts can also call ZotSeek over HTTP on Zotero's local server (`/zotseek/search`, `/zotseek/similar`, `/zotseek/stats`): hybrid search with passage text, page numbers and links that open the PDF at the matched page, without depending on ZotSeek's internals ([docs](docs/MCP.md#rest-api))
 - ⚙️ **Configurable** - Customize via Zotero Settings → ZotSeek (also accessible from search dialog)
 - 🌐 **Localized** - UI available in English and Chinese (zh-CN)
 
