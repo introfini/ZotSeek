@@ -11,7 +11,13 @@ import { isModelOnDisk, ensureModelDownloaded, removeModelFiles } from '../core/
 import { vectorStoreSQLite } from '../core/vector-store-sqlite';
 import { embeddingPipeline } from '../core/embedding-pipeline';
 import { ServerEmbeddingClient } from '../core/server-embedding-client';
-import { assertLoopbackUrl } from '../core/loopback-url';
+import {
+  assertLoopbackUrl,
+  ALLOWED_REMOTE_HOSTS_PREF,
+  getAllowedRemoteHosts,
+  isRemoteAllowedHost,
+  parseAllowedRemoteHosts,
+} from '../core/loopback-url';
 
 declare const Services: any;
 declare const Zotero: any;
@@ -266,7 +272,7 @@ async function testServerConnection(doc: any): Promise<void> {
     }
     if (els.modelRow) els.modelRow.style.display = 'flex';
     if (els.advanced) els.advanced.style.display = 'block';
-    setServerStatus(doc, `Connected. ${models.length} model(s) available: pick one to test it.`);
+    setServerStatus(doc, `Connected. ${models.length} model(s) available: pick one to test it.` + remoteHostNote(base));
   } catch (e: any) {
     if (docAlive(doc)) setServerStatus(doc, `Failed: ${e?.message || e}`);
   } finally {
@@ -341,6 +347,37 @@ function initServerSection(doc: any): void {
   // Add time. Prefix fields intentionally stay editable post-probe.
   els.url?.addEventListener('input', () => { invalidateServerProbe(doc); });
   els.apiKey?.addEventListener('input', () => { invalidateServerProbe(doc); });
+  initAllowedRemoteHosts(doc);
+}
+
+/** Opt-in list of non-loopback inference hosts, see loopback-url.ts. */
+function initAllowedRemoteHosts(doc: any): void {
+  const input = doc.getElementById('zotseek-server-allowedRemoteHosts') as HTMLInputElement | null;
+  const status = doc.getElementById('zotseek-server-remote-status') as HTMLElement | null;
+  if (!input) return;
+  const show = (hosts: string[]) => {
+    if (!status) return;
+    status.textContent = hosts.length
+      ? `Remote hosts allowed: ${hosts.join(', ')}. Library text sent to them leaves this computer.`
+      : 'No remote hosts allowed: ZotSeek stays strictly local.';
+  };
+  const current = getAllowedRemoteHosts();
+  input.value = current.join(', ');
+  show(current);
+  input.addEventListener('change', () => {
+    const hosts = parseAllowedRemoteHosts(input.value);
+    Zotero.Prefs.set(ALLOWED_REMOTE_HOSTS_PREF, hosts.join(','), true);
+    input.value = hosts.join(', ');
+    show(hosts);
+    invalidateServerProbe(doc);
+  });
+}
+
+/** Status suffix reminding the user that a remote host receives library text. */
+function remoteHostNote(base: URL): string {
+  if (!isRemoteAllowedHost(base.hostname)) return '';
+  const plain = base.protocol === 'http:' ? ' over unencrypted http' : '';
+  return ` Remote host ${base.hostname}: indexed text and queries are sent there${plain}.`;
 }
 
 /** Groups open by default; all others start collapsed. */

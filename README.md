@@ -64,7 +64,9 @@ ZotSeek is designed with privacy as a core principle:
 - No telemetry or usage tracking
 - Uninstalling the plugin removes all ZotSeek data
 
-**Optional local inference server:** the default is the fully in-process engine described above, which makes no network requests at all. If you choose to add a local inference server (LM Studio, Ollama, llama.cpp or vLLM), the guarantee shifts from "no network code exists" to "network code provably cannot leave the machine": every request is validated at request time against an allow-list of `127.0.0.1`, `localhost` and `[::1]`, there is no preference to override this, redirects to a non-loopback address are refused rather than followed, and cloud or remote endpoints are unsupported by design. This is opt-in and off by default.
+**Optional local inference server:** the default is the fully in-process engine described above, which makes no network requests at all. If you choose to add a local inference server (LM Studio, Ollama, llama.cpp or vLLM), the guarantee shifts from "no network code exists" to "network code provably cannot leave the machine": every request is validated at request time against an allow-list of `127.0.0.1`, `localhost` and `[::1]`, redirects to a non-loopback address are refused rather than followed, and cloud endpoints are unsupported by design. This is opt-in and off by default.
+
+**Remote hosts in your own network (explicit opt-in):** a GPU machine in your local network can index a large library many times faster than a laptop CPU. Settings → ZotSeek → Local inference server → *Allowed remote hosts (dangerous)* takes a comma-separated list of host names (empty by default) that are allowed in addition to loopback. Only list hosts you trust: once a host is listed, the indexed text (titles, abstracts, PDF text, notes if enabled) and every search query are sent to it, so the "never leaves this machine" guarantee no longer applies. The other safeguards stay: exact host match (no wildcards), per-request validation, no redirects, no credentials in the URL. See [Search Architecture](docs/SEARCH_ARCHITECTURE.md#server-backed-embeddings).
 
 ---
 
